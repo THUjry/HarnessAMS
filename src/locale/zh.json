@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "HarnessAMS",
+    "description": "HarnessAMS 顶层插件：三层界面（/harnessams API 之上的全局控制台页、项目=DSH 工作区、项目任务侧栏），附服务器健康检查、磁盘占用与数字资产"
+  }
+}

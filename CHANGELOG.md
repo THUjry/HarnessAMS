@@ -49,6 +49,19 @@ All notable changes are documented here. The format follows
 
 ### Added
 
+- **Bilingual display (zh/en)**: client copy is locale-owned — every console UI
+  string moved into a keyed zh/en dictionary in `src/client.js` (`{param}`
+  interpolation; lookup order: DSH locale service → browser language → English, so
+  a missing key renders English, never the raw key). `apply()` now injects the
+  `locale` service and registers the dictionary via `locale.register`/`locale.bind`
+  (dsh-remote-style), so the language follows the client's Language setting.
+  Plugin-manager metadata is localized through the verified 0.2.1-rc.2 contract:
+  `exports["./locale/*.json"]` + `src/locale/en.json`/`zh.json` carrying
+  `{ "meta": { "title", "description" } }`; package.json `name`/`description`
+  remain the English fallback. Server responses (API errors, check item names)
+  and the one-click diagnosis prompt stay English by design (technical /
+  model-facing text).
+
 - **Route A — remote checks through dsh-remote's `rw_exec` tool shell** (new route
   `GET /api/check-remote?machine=`): dsh-remote machines are first-class health-check
   targets in the console dropdown. Each check executes via `ctx.tools.execute` with a

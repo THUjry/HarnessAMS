@@ -8,7 +8,8 @@
     ".": "./index.js",
     "./client": "./client.js",
     "./package.json": "./package.json",
-    "./cordis.patch.yml": "./cordis.patch.yml"
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json"
   },
   "files": [
     "index.js",
@@ -16,6 +17,7 @@
     "server/",
     "cordis.patch.yml",
     "assets/",
+    "locale/",
     "scripts/"
   ],
   "dsh": {

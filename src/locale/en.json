@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "HarnessAMS",
+    "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-project task sidebar) plus server health checks, disk usage, and digital assets"
+  }
+}

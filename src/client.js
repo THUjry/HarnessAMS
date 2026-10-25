@@ -27,6 +27,229 @@ window.__ModuleLoader__.load({
     const TAB_KIND = 'harnessams'
     const API = '/harnessams/api'
 
+    // ---------- i18n ----------
+    // Client copy is locale-owned: zh/en dictionaries with stable keys and
+    // {param} interpolation, en as the fallback so a missing translation shows
+    // the English text (never the raw key) when the active locale is zh. The
+    // active language follows the DSH locale service once wired in apply();
+    // before that (or when the service is absent) it falls back to the browser
+    // language, else English. Same shape as dsh-remote's client.
+    const NS = 'dsh-harnessams'
+    const L = {
+      zh: {
+        'common.loading': '加载中…',
+        'common.save': '保存',
+        'common.cancel': '取消',
+        'common.none': '（无）',
+        'common.sectionFailed': '此区块加载失败：',
+        'console.title': 'HarnessAMS 控制台',
+        'console.infoFailed': 'info 读取失败：{msg}',
+        'console.workspace': '工作区：{path}',
+        'console.noWorkspace': '未找到 harnessams-workspace — 服务器检查需要 harnessams.json',
+        'servers.title': '服务器',
+        'servers.dshremoteOk': 'dsh-remote：{n} 台机器',
+        'servers.dshremoteMissing': 'dsh-remote 不可用',
+        'servers.nodesMissing': '未找到 nodes.yaml',
+        'servers.colMachine': 'dsh-remote 机器',
+        'servers.colHost': '主机',
+        'servers.colWorkspace': '工作区',
+        'servers.colChannel': 'rw_exec 通道',
+        'servers.currentSuffix': ' · 当前',
+        'servers.mirror': '镜像',
+        'servers.activeMachine': '活动机器',
+        'servers.noWorkspacePick': '无 — 请先选择一次工作区',
+        'servers.noNodes': 'nodes.yaml 中还没有配置节点',
+        'servers.reserved': '保留',
+        'servers.known': '已登记',
+        'servers.notInRegistry': '不在注册表中',
+        'servers.editNodes': '编辑节点',
+        'servers.saved': '已保存到 {path}（注释已重写）',
+        'servers.addNode': '+ 节点',
+        'servers.saveHint': '保存会重写 nodes.yaml；凭据绝不写入此文件。',
+        'servers.healthCheck': '健康检查：',
+        'servers.local': '本机',
+        'servers.nodeOption': '{host}（nodes.yaml）',
+        'servers.dshrmOption': '{name}（dsh-remote{suffix}）',
+        'servers.suffixMirror': '，镜像',
+        'servers.suffixCurrent': '，当前',
+        'servers.checking': '检查中…',
+        'servers.check': '检查',
+        'servers.colItem': '检查项',
+        'servers.colCommand': '命令',
+        'servers.colResult': '结果',
+        'servers.colElapsed': '耗时',
+        'servers.colChannel': '通道',
+        'servers.colStatus': '状态',
+        'servers.diagnose': '交给 agent 诊断',
+        'servers.promptCopied': '提示词已复制 — 请粘贴到 DSH 会话中。',
+        'servers.copyPrompt': '请将下面的提示词复制到 DSH 会话：',
+        'assets.title': '数字资产',
+        'assets.plotlyOk': 'plotly.min.js 已就绪 — {size}',
+        'assets.plotlyMissing': '缺少 plotly 资产',
+        'assets.openAsset': '打开资产',
+        'assets.sharedCopy': '离线报告渲染共用这一份副本（MIT，见 THIRD_PARTY_NOTICES.md）。',
+        'assets.sweepReports': '扫描报告：',
+        'disk.title': '磁盘占用（本地工作区）',
+        'disk.refresh': '刷新占用',
+        'disk.colDir': '目录',
+        'disk.colSize': '大小',
+        'disk.colFiles': '文件数',
+        'disk.empty': '（工作区为空或未配置）',
+        'tasks.noSession': '无活动会话',
+        'tasks.loadingProject': '正在加载项目…',
+        'tasks.noProject': '此会话没有对应项目。',
+        'tasks.noTasks': '还没有任务 — 点“+”创建第一个。',
+        'tasks.projectLabel': '项目：',
+        'tasks.viewOverview': '概览',
+        'tasks.viewDashboard': '仪表盘',
+        'tasks.viewSim': '仿真设置',
+        'tasks.deleteAria': '删除 {name}',
+        'tasks.newTask': '新建任务',
+        'tasks.addTask': '+ 任务',
+        'tasks.deleteConfirm': '删除任务“{name}”？',
+        'tasks.descPlaceholder': '任务描述…',
+        'tasks.nameLabel': '名称',
+        'tasks.descOptional': '描述（可选）',
+        'tasks.create': '创建',
+        'tasks.dashPlaceholder': '占位 — 本任务的扫描报告与图表将在后续里程碑落地。',
+        'tasks.simTitle': '仿真设置',
+        'tasks.simPlaceholder': '占位 — 本任务的 SmartAnaSim 配置将在后续里程碑落地。',
+        'tasks.pinOn': '已固定：切换会话/工作区时任务侧栏会自动重开 — 点击取消跟随',
+        'tasks.pinOff': '未固定：切换会话时侧栏收起 — 点击让它跟随切换',
+        'tasks.headerPinOn': 'HarnessAMS 任务 — 已固定：随会话/工作区切换重开',
+        'tasks.headerPinOff': 'HarnessAMS 任务 — 打开侧栏（固定以跟随会话切换）',
+        'tasks.headerTasks': '任务',
+        'tasks.guideDesc': '项目任务',
+      },
+      en: {
+        'common.loading': 'Loading…',
+        'common.save': 'Save',
+        'common.cancel': 'Cancel',
+        'common.none': '(none)',
+        'common.sectionFailed': 'This section failed: ',
+        'console.title': 'HarnessAMS Console',
+        'console.infoFailed': 'info failed: {msg}',
+        'console.workspace': 'Workspace: {path}',
+        'console.noWorkspace': 'harnessams-workspace not found — server checks need harnessams.json',
+        'servers.title': 'Servers',
+        'servers.dshremoteOk': 'dsh-remote: {n} machine(s)',
+        'servers.dshremoteMissing': 'dsh-remote not available',
+        'servers.nodesMissing': 'nodes.yaml not found',
+        'servers.colMachine': 'dsh-remote machine',
+        'servers.colHost': 'host',
+        'servers.colWorkspace': 'workspace',
+        'servers.colChannel': 'rw_exec channel',
+        'servers.currentSuffix': ' · current',
+        'servers.mirror': 'mirror',
+        'servers.activeMachine': 'active machine',
+        'servers.noWorkspacePick': 'none — pick a workspace once',
+        'servers.noNodes': 'nodes.yaml has no configured nodes yet',
+        'servers.reserved': 'reserved',
+        'servers.known': 'known',
+        'servers.notInRegistry': 'not in registry',
+        'servers.editNodes': 'Edit nodes',
+        'servers.saved': 'saved to {path} (comments rewritten)',
+        'servers.addNode': '+ node',
+        'servers.saveHint': 'Saving rewrites nodes.yaml; credentials never go in this file.',
+        'servers.healthCheck': 'Health check:',
+        'servers.local': 'local',
+        'servers.nodeOption': '{host} (nodes.yaml)',
+        'servers.dshrmOption': '{name} (dsh-remote{suffix})',
+        'servers.suffixMirror': ', mirror',
+        'servers.suffixCurrent': ', current',
+        'servers.checking': 'Checking…',
+        'servers.check': 'Check',
+        'servers.colItem': 'Item',
+        'servers.colCommand': 'Command',
+        'servers.colResult': 'Result',
+        'servers.colElapsed': 'Elapsed',
+        'servers.colChannel': 'Channel',
+        'servers.colStatus': 'Status',
+        'servers.diagnose': 'Diagnose with agent',
+        'servers.promptCopied': 'Prompt copied — paste it into a DSH session.',
+        'servers.copyPrompt': 'Copy the prompt below into a DSH session:',
+        'assets.title': 'Digital assets',
+        'assets.plotlyOk': 'plotly.min.js served — {size}',
+        'assets.plotlyMissing': 'plotly asset missing',
+        'assets.openAsset': 'open asset',
+        'assets.sharedCopy': 'Offline report rendering shares this single copy (MIT, see THIRD_PARTY_NOTICES.md).',
+        'assets.sweepReports': 'Sweep reports:',
+        'disk.title': 'Disk usage (local workspace)',
+        'disk.refresh': 'Refresh usage',
+        'disk.colDir': 'Directory',
+        'disk.colSize': 'Size',
+        'disk.colFiles': 'Files',
+        'disk.empty': '(workspace empty or not configured)',
+        'tasks.noSession': 'no active session',
+        'tasks.loadingProject': 'Loading project…',
+        'tasks.noProject': 'No project for this session.',
+        'tasks.noTasks': 'No tasks yet — create the first one with “+”.',
+        'tasks.projectLabel': 'Project: ',
+        'tasks.viewOverview': 'Overview',
+        'tasks.viewDashboard': 'Dashboard',
+        'tasks.viewSim': 'Sim settings',
+        'tasks.deleteAria': 'Delete {name}',
+        'tasks.newTask': 'New task',
+        'tasks.addTask': '+ task',
+        'tasks.deleteConfirm': 'Delete task “{name}”?',
+        'tasks.descPlaceholder': 'Task description…',
+        'tasks.nameLabel': 'Name',
+        'tasks.descOptional': 'Description (optional)',
+        'tasks.create': 'Create',
+        'tasks.dashPlaceholder': 'Placeholder — sweep reports and plots for this task land here in later milestones.',
+        'tasks.simTitle': 'Simulation settings',
+        'tasks.simPlaceholder': 'Placeholder — SmartAnaSim configuration for this task lands here in later milestones.',
+        'tasks.pinOn': 'Pinned: the task tab reopens when you switch sessions/workspaces — click to stop following',
+        'tasks.pinOff': 'Not pinned: the sidebar collapses on session switch — click to make it follow switches',
+        'tasks.headerPinOn': 'HarnessAMS tasks — pinned: reopens on session/workspace switch',
+        'tasks.headerPinOff': 'HarnessAMS tasks — open the tab (pin it to follow session switches)',
+        'tasks.headerTasks': 'Tasks',
+        'tasks.guideDesc': 'Project tasks',
+      },
+    }
+
+    let ACTIVE_LANG = 'en'
+    try {
+      const nav = (typeof navigator !== 'undefined' && navigator.languages) ? navigator.languages : (typeof navigator !== 'undefined' ? [navigator.language] : [])
+      for (const tag of nav) {
+        const primary = String(tag || '').toLowerCase().split('-')[0]
+        if (primary === 'zh') { ACTIVE_LANG = 'zh'; break }
+        if (primary === 'en') { ACTIVE_LANG = 'en'; break }
+      }
+    } catch { /* keep en */ }
+
+    function makeTr() {
+      const dict = L[ACTIVE_LANG] || L.en
+      return (key, params) => {
+        let text = dict[key]
+        if (text === undefined && ACTIVE_LANG !== 'en') text = L.en[key]
+        if (text === undefined) text = key
+        if (params) text = String(text).replace(/\{(\w+)\}/g, (m, p) => (p in params ? String(params[p]) : m))
+        return text
+      }
+    }
+    let tr = makeTr()
+    // Called from apply() once the real locale service is reachable; registers
+    // both dictionaries and rebinds tr so the client's Language setting wins.
+    function wireLocale(ctx) {
+      try {
+        const locale = ctx && ctx.get && ctx.get('locale')
+        if (!locale || typeof locale.register !== 'function') return
+        const dispose = locale.register(NS, { zh: L.zh, en: L.en })
+        const bound = locale.bind(NS)
+        tr = (key, params) => {
+          let text = bound(key, params)
+          if (text === key) {
+            const d = L[ACTIVE_LANG] || L.en
+            text = d[key] !== undefined ? d[key] : L.en[key]
+            if (params) text = String(text).replace(/\{(\w+)\}/g, (m, p) => (p in params ? String(params[p]) : m))
+          }
+          return text
+        }
+        if (ctx.effect) ctx.effect(() => dispose, 'dsh-harnessams.locale')
+      } catch (e) { /* keep local dict fallback */ }
+    }
+
     // ---------- shared helpers ----------
 
     async function fetchJson(url, opts) {
@@ -42,7 +265,7 @@ window.__ModuleLoader__.load({
       render() {
         if (this.state.err) {
           return h('div', { className: 'hams-err' },
-            'This section failed: ', String(this.state.err?.message ?? this.state.err))
+            tr('common.sectionFailed'), String(this.state.err?.message ?? this.state.err))
         }
         return this.props.children
       }
@@ -144,13 +367,13 @@ window.__ModuleLoader__.load({
         fetchJson(API + '/info').then(setInfo).catch((e) => setInfoErr(String(e.message ?? e)))
       }, [])
       return h('div', { className: 'hams-page' },
-        h('h1', { className: 'hams-h1' }, 'HarnessAMS Console'),
+        h('h1', { className: 'hams-h1' }, tr('console.title')),
         h('div', { className: 'hams-meta' },
-          infoErr ? h('span', { className: 'hams-bad' }, 'info failed: ' + infoErr)
+          infoErr ? h('span', { className: 'hams-bad' }, tr('console.infoFailed', { msg: infoErr }))
             : info ? (info.workspace
-              ? 'Workspace: ' + info.workspace.root + (info.tiers?.project === 'workspaceRegistry mapped' ? '' : ' — ' + info.tiers?.project)
-              : 'harnessams-workspace not found — server checks need harnessams.json')
-            : 'Loading…'),
+              ? tr('console.workspace', { path: info.workspace.root }) + (info.tiers?.project === 'workspaceRegistry mapped' ? '' : ' — ' + info.tiers?.project)
+              : tr('console.noWorkspace'))
+            : tr('common.loading')),
         h(Boundary, null, h(ServersSection, null)),
         h(Boundary, null, h(AssetsSection, null)),
         h(Boundary, null, h(DiskSection, null)),
@@ -188,7 +411,7 @@ window.__ModuleLoader__.load({
       const save = async () => {
         try {
           const r = await fetchJson(API + '/nodes', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ nodes: draft }) })
-          setNodes(r.nodes); setEditing(false); setSaveMsg('saved to ' + r.path + ' (comments rewritten)')
+          setNodes(r.nodes); setEditing(false); setSaveMsg(tr('servers.saved', { path: r.path }))
         } catch (e) { setErr(String(e.message ?? e)) }
       }
       const runCheck = async () => {
@@ -210,51 +433,51 @@ window.__ModuleLoader__.load({
         const t = 'HarnessAMS health-check failure [' + item + '] — please diagnose: read the ' +
           '/harnessams/api/check results, reproduce the failing command via rw_* tools ' +
           '(dsh-remote) or a BatchMode ssh direct connection, and report the conclusion.'
-        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(t).then(() => alert('Prompt copied — paste it into a DSH session.'), () => prompt('Copy the prompt below into a DSH session:', t))
-        else prompt('Copy the prompt below into a DSH session:', t)
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(t).then(() => alert(tr('servers.promptCopied')), () => prompt(tr('servers.copyPrompt'), t))
+        else prompt(tr('servers.copyPrompt'), t)
       }
 
       const known = useMemo(() => new Set((machines?.machines ?? []).map((m) => m.name.toLowerCase())), [machines])
 
       return h('section', { className: 'hams-section' },
-        h('h2', null, 'Servers'),
+        h('h2', null, tr('servers.title')),
         h('div', { className: 'hams-row' },
           machines && (machines.installed
-            ? h('span', { className: 'hams-badge hams-badge-good', title: machines.source }, 'dsh-remote: ' + (machines.machines?.length ?? 0) + ' machine(s)')
-            : h('span', { className: 'hams-badge hams-badge-bad', title: machines.reason ?? '' }, 'dsh-remote not available')),
+            ? h('span', { className: 'hams-badge hams-badge-good', title: machines.source }, tr('servers.dshremoteOk', { n: machines.machines?.length ?? 0 }))
+            : h('span', { className: 'hams-badge hams-badge-bad', title: machines.reason ?? '' }, tr('servers.dshremoteMissing'))),
           machines && !machines.installed && h('span', { className: 'hams-dim' }, machines.fallback ?? ''),
-          h('span', { className: 'hams-dim' }, nodesPath ? nodesPath : 'nodes.yaml not found'),
+          h('span', { className: 'hams-dim' }, nodesPath ? nodesPath : tr('servers.nodesMissing')),
         ),
         err && h('div', { className: 'hams-err' }, err),
         machines?.installed && (machines.machines?.length ?? 0) > 0 && h('table', { className: 'hams-table' },
-          h('thead', null, h('tr', null, ['dsh-remote machine', 'host', 'workspace', 'rw_exec channel'].map((c) => h('th', null, c)))),
+          h('thead', null, h('tr', null, [tr('servers.colMachine'), tr('servers.colHost'), tr('servers.colWorkspace'), tr('servers.colChannel')].map((c) => h('th', null, c)))),
           h('tbody', null, machines.machines.map((m) => h('tr', { key: m.id },
-            h('td', null, esc(m.name || m.host) + (m.current ? ' · current' : '')),
+            h('td', null, esc(m.name || m.host) + (m.current ? tr('servers.currentSuffix') : '')),
             h('td', null, esc((m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22))),
             h('td', null, esc(m.workspace ?? '')),
-            h('td', null, m.mirror ? h('span', { className: 'hams-good' }, 'mirror')
-              : m.current ? h('span', { className: 'hams-good' }, 'active machine')
-              : h('span', { className: 'hams-warn' }, 'none — pick a workspace once')))))),
+            h('td', null, m.mirror ? h('span', { className: 'hams-good' }, tr('servers.mirror'))
+              : m.current ? h('span', { className: 'hams-good' }, tr('servers.activeMachine'))
+              : h('span', { className: 'hams-warn' }, tr('servers.noWorkspacePick')))))),
         !editing
           ? h('div', null,
               h('table', { className: 'hams-table' },
                 h('thead', null, h('tr', null, ['HOST', 'HOSTNAME', 'PORT', 'WORKSPACE', 'reserved', 'dsh-remote'].map((c) => h('th', null, c)))),
                 h('tbody', null,
-                  (nodes ?? []).length === 0 && h('tr', null, h('td', { colSpan: 6 }, h('span', { className: 'hams-dim' }, 'nodes.yaml has no configured nodes yet'))),
+                  (nodes ?? []).length === 0 && h('tr', null, h('td', { colSpan: 6 }, h('span', { className: 'hams-dim' }, tr('servers.noNodes')))),
                   (nodes ?? []).map((n) => h('tr', null,
                     h('td', null, h('b', null, esc(n.HOST))),
                     h('td', null, esc(n.HOSTNAME ?? '')),
                     h('td', null, esc(n.PORT ?? '')),
                     h('td', null, esc(n.WORKSPACE ?? '')),
-                    h('td', null, n.reserved === 'true' ? 'reserved' : ''),
+                    h('td', null, n.reserved === 'true' ? tr('servers.reserved') : ''),
                     h('td', null, machines?.installed
                       ? (known.has(String(n.HOST).toLowerCase())
-                        ? h('span', { className: 'hams-good' }, 'known')
-                        : h('span', { className: 'hams-warn' }, 'not in registry'))
+                        ? h('span', { className: 'hams-good' }, tr('servers.known'))
+                        : h('span', { className: 'hams-warn' }, tr('servers.notInRegistry')))
                       : '—'),
                   )))),
               h('div', { className: 'hams-row' },
-                h('button', { className: 'hams-btn', onClick: startEdit, disabled: !nodes }, 'Edit nodes'),
+                h('button', { className: 'hams-btn', onClick: startEdit, disabled: !nodes }, tr('servers.editNodes')),
                 saveMsg && h('span', { className: 'hams-dim' }, saveMsg)))
           : h('div', null,
               h('table', { className: 'hams-table' },
@@ -267,22 +490,22 @@ window.__ModuleLoader__.load({
                       : h('input', { className: 'hams-input', value: esc(n[k] ?? ''), onChange: (e) => setField(i, k, e.target.value) }))),
                   h('td', null, h('button', { className: 'hams-btn hams-btn-sm', onClick: () => delRow(i) }, '✕')))))),
               h('div', { className: 'hams-row' },
-                h('button', { className: 'hams-btn', onClick: save }, 'Save'),
-                h('button', { className: 'hams-btn', onClick: () => { setEditing(false); setErr(null) } }, 'Cancel'),
-                h('button', { className: 'hams-btn', onClick: addRow }, '+ node'),
-                h('span', { className: 'hams-dim' }, 'Saving rewrites nodes.yaml; credentials never go in this file.'))),
+                h('button', { className: 'hams-btn', onClick: save }, tr('common.save')),
+                h('button', { className: 'hams-btn', onClick: () => { setEditing(false); setErr(null) } }, tr('common.cancel')),
+                h('button', { className: 'hams-btn', onClick: addRow }, tr('servers.addNode')),
+                h('span', { className: 'hams-dim' }, tr('servers.saveHint'))))),
         h('div', { className: 'hams-row', style: { marginTop: '10px' } },
-          h('label', { className: 'hams-dim' }, 'Health check:'),
+          h('label', { className: 'hams-dim' }, tr('servers.healthCheck')),
           h('select', { className: 'hams-select', value: checkNode, onChange: (e) => setCheckNode(e.target.value) },
-            h('option', { value: 'local' }, 'local'),
-            (nodes ?? []).map((n) => h('option', { key: n.HOST, value: n.HOST }, n.HOST + ' (nodes.yaml)')),
+            h('option', { value: 'local' }, tr('servers.local')),
+            (nodes ?? []).map((n) => h('option', { key: n.HOST, value: n.HOST }, tr('servers.nodeOption', { host: n.HOST }))),
             (machines?.machines ?? []).map((m) => h('option', { key: m.id, value: 'dshrm:' + m.id },
-              (m.name || m.host) + ' (dsh-remote' + (m.mirror ? ', mirror' : m.current ? ', current' : '') + ')'))),
-          h('button', { className: 'hams-btn', onClick: runCheck, disabled: check?.status === 'running' }, check?.status === 'running' ? 'Checking…' : 'Check'),
+              tr('servers.dshrmOption', { name: m.name || m.host, suffix: m.mirror ? tr('servers.suffixMirror') : m.current ? tr('servers.suffixCurrent') : '' })))),
+          h('button', { className: 'hams-btn', onClick: runCheck, disabled: check?.status === 'running' }, check?.status === 'running' ? tr('servers.checking') : tr('servers.check')),
           check?.status && check.status !== 'done' && check.status !== 'running' && h('span', { className: 'hams-bad' }, check.status)),
         check?.results && h('div', null,
           h('table', { className: 'hams-table' },
-            h('thead', null, h('tr', null, ['Item', 'Command', 'Result', 'Elapsed', 'Channel', 'Status', ''].map((c) => h('th', null, c)))),
+            h('thead', null, h('tr', null, [tr('servers.colItem'), tr('servers.colCommand'), tr('servers.colResult'), tr('servers.colElapsed'), tr('servers.colChannel'), tr('servers.colStatus'), ''].map((c) => h('th', null, c)))),
             h('tbody', null, check.results.map((x, i) => h('tr', { key: i, className: x.ok ? '' : 'hams-rowbad' },
               h('td', null, esc(x.item)),
               h('td', null, h('code', null, esc(x.cmd ?? '-'))),
@@ -290,7 +513,7 @@ window.__ModuleLoader__.load({
               h('td', null, x.ms + ' ms'),
               h('td', { className: 'hams-dim' }, esc(x.channel ?? '')),
               h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'),
-              h('td', null, x.ok ? null : h('button', { className: 'hams-btn hams-btn-sm', onClick: () => diagnose(x.item) }, 'Diagnose with agent')))))))
+              h('td', null, x.ok ? null : h('button', { className: 'hams-btn hams-btn-sm', onClick: () => diagnose(x.item) }, tr('servers.diagnose'))))))))
       )
     }
 
@@ -305,18 +528,18 @@ window.__ModuleLoader__.load({
       const reports = []
       for (const d of dirs?.demos ?? []) for (const f of d.reports ?? []) reports.push(d.name + '/Analysis/' + f)
       return h('section', { className: 'hams-section' },
-        h('h2', null, 'Digital assets'),
+        h('h2', null, tr('assets.title')),
         err && h('div', { className: 'hams-err' }, err),
         h('div', { className: 'hams-row' },
           assets?.plotly?.available
-            ? h('span', { className: 'hams-badge hams-badge-good' }, 'plotly.min.js served — ' + fmtBytes(assets.plotly.bytes))
-            : h('span', { className: 'hams-badge hams-badge-bad' }, 'plotly asset missing'),
-          assets?.plotly?.available && h('a', { className: 'hams-link', href: assets.plotly.url, target: '_blank' }, 'open asset'),
+            ? h('span', { className: 'hams-badge hams-badge-good' }, tr('assets.plotlyOk', { size: fmtBytes(assets.plotly.bytes) }))
+            : h('span', { className: 'hams-badge hams-badge-bad' }, tr('assets.plotlyMissing')),
+          assets?.plotly?.available && h('a', { className: 'hams-link', href: assets.plotly.url, target: '_blank' }, tr('assets.openAsset')),
         ),
-        h('div', { className: 'hams-dim' }, 'Offline report rendering shares this single copy (MIT, see THIRD_PARTY_NOTICES.md).'),
+        h('div', { className: 'hams-dim' }, tr('assets.sharedCopy')),
         h('div', { style: { marginTop: '8px' } },
-          h('div', { className: 'hams-dim' }, 'Sweep reports:'),
-          reports.length === 0 && h('div', { className: 'hams-dim' }, '(none)'),
+          h('div', { className: 'hams-dim' }, tr('assets.sweepReports')),
+          reports.length === 0 && h('div', { className: 'hams-dim' }, tr('common.none')),
           reports.map((r) => h('div', { key: r },
             h('a', { className: 'hams-link', href: '/harnessams/reports/' + r.split('/').map(encodeURIComponent).join('/'), target: '_blank' }, r))),
         ),
@@ -329,14 +552,14 @@ window.__ModuleLoader__.load({
       const refresh = () => { setData(null); fetchJson(API + '/disk').then(setData).catch((e) => setErr(String(e.message ?? e))) }
       useEffect(refresh, [])
       return h('section', { className: 'hams-section' },
-        h('h2', null, 'Disk usage (local workspace)'),
-        h('button', { className: 'hams-btn', onClick: refresh }, 'Refresh usage'),
+        h('h2', null, tr('disk.title')),
+        h('button', { className: 'hams-btn', onClick: refresh }, tr('disk.refresh')),
         err && h('div', { className: 'hams-err' }, err),
         data && h('table', { className: 'hams-table' },
-          h('thead', null, h('tr', null, ['Directory', 'Size', 'Files'].map((c) => h('th', null, c)))),
+          h('thead', null, h('tr', null, [tr('disk.colDir'), tr('disk.colSize'), tr('disk.colFiles')].map((c) => h('th', null, c)))),
           h('tbody', null, data.entries.map((e) => h('tr', { key: e.name },
             h('td', null, e.name), h('td', null, fmtBytes(e.bytes)), h('td', null, String(e.files)))))),
-        data && data.entries.length === 0 && h('div', { className: 'hams-dim' }, '(workspace empty or not configured)'),
+        data && data.entries.length === 0 && h('div', { className: 'hams-dim' }, tr('disk.empty')),
       )
     }
 
@@ -345,9 +568,9 @@ window.__ModuleLoader__.load({
     // Lowest navigation level inside a task: overview / dashboard / sim settings
     // (dashboard and sim settings are placeholders until their milestones land).
     const TASK_VIEWS = [
-      { id: 'overview', label: 'Overview' },
-      { id: 'dashboard', label: 'Dashboard' },
-      { id: 'sim', label: 'Sim settings' },
+      { id: 'overview', labelKey: 'tasks.viewOverview' },
+      { id: 'dashboard', labelKey: 'tasks.viewDashboard' },
+      { id: 'sim', labelKey: 'tasks.viewSim' },
     ]
 
     function TaskSidebarBody(props) {
@@ -366,7 +589,7 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         let alive = true
         setError(null)
-        if (!sessionId) { setProject(null); setReason('no active session'); return }
+        if (!sessionId) { setProject(null); setReason(tr('tasks.noSession')); return }
         setProject(undefined)
         fetchJson(API + '/project?sessionId=' + encodeURIComponent(sessionId))
           .then((r) => {
@@ -416,7 +639,7 @@ window.__ModuleLoader__.load({
       const removeTask = (id) => {
         const t = tasks.find((x) => x.id === id)
         if (!t) return
-        if (!window.confirm('Delete task "' + t.name + '"?')) return
+        if (!window.confirm(tr('tasks.deleteConfirm', { name: t.name }))) return
         const next = tasks.filter((x) => x.id !== id)
         if (selectedId === id) setSelectedId(next[0]?.id ?? null)
         persist(next)
@@ -438,20 +661,20 @@ window.__ModuleLoader__.load({
               onClick: () => { setSelectedId(t.id); setDescDraft(null) },
             },
             h('span', { className: 'hams-tabname' }, t.name),
-            h('span', { className: 'hams-x', role: 'button', 'aria-label': 'Delete ' + t.name,
+            h('span', { className: 'hams-x', role: 'button', 'aria-label': tr('tasks.deleteAria', { name: t.name }),
               onClick: (e) => { e.stopPropagation(); removeTask(t.id) } }, '×'))),
-          project && h('button', { className: 'hams-addbtn', title: 'New task', onClick: () => setDialogOpen(true) },
-            tasks.length ? '+' : '+ task'),
+          project && h('button', { className: 'hams-addbtn', title: tr('tasks.newTask'), onClick: () => setDialogOpen(true) },
+            tasks.length ? '+' : tr('tasks.addTask')),
           h(PinToggle, null),
         ),
         h('div', { className: 'hams-body' },
           error && h('div', { className: 'hams-err' }, error),
-          project === undefined && h('div', { className: 'hams-dim' }, 'Loading project…'),
-          project === null && h('div', { className: 'hams-dim' }, 'No project for this session.', h('br'), null, esc(reason ?? '')),
+          project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
+          project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
           project && tasks.length === 0 && !error && h('div', { className: 'hams-dim' },
-            'No tasks yet — create the first one with “+”.'),
+            tr('tasks.noTasks')),
           project && h('div', { className: 'hams-dim' },
-            'Project: ', h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
+            tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
           selected && h('div', { style: { marginTop: '10px' } },
             // lowest level: per-task sub navigation (overview / dashboard / sim settings)
             h('div', { className: 'hams-subtabs', role: 'tablist' },
@@ -461,7 +684,7 @@ window.__ModuleLoader__.load({
                 role: 'tab',
                 'aria-selected': view === v.id,
                 onClick: () => setView(v.id),
-              }, v.label))),
+              }, tr(v.labelKey)))),
             view === 'overview' && h('div', null,
               h('div', { className: 'hams-row' },
                 h('b', null, selected.name),
@@ -470,18 +693,18 @@ window.__ModuleLoader__.load({
                 h('textarea', {
                   className: 'hams-textarea',
                   value: descDraft ?? selected.description ?? '',
-                  placeholder: 'Task description…',
+                  placeholder: tr('tasks.descPlaceholder'),
                   onChange: (e) => setDescDraft(e.target.value),
                 }),
                 descDraft !== null && h('div', { className: 'hams-row' },
-                  h('button', { className: 'hams-btn hams-btn-sm', onClick: saveDescription }, 'Save'),
-                  h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDescDraft(null) }, 'Cancel')))),
+                  h('button', { className: 'hams-btn hams-btn-sm', onClick: saveDescription }, tr('common.save')),
+                  h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDescDraft(null) }, tr('common.cancel'))))),
             view === 'dashboard' && h('div', { className: 'hams-dash' },
-              h('b', null, 'Dashboard'), h('br'),
-              'Placeholder — sweep reports and plots for this task land here in later milestones.'),
+              h('b', null, tr('tasks.viewDashboard')), h('br'),
+              tr('tasks.dashPlaceholder')),
             view === 'sim' && h('div', { className: 'hams-dash' },
-              h('b', null, 'Simulation settings'), h('br'),
-              'Placeholder — SmartAnaSim configuration for this task lands here in later milestones.')),
+              h('b', null, tr('tasks.simTitle')), h('br'),
+              tr('tasks.simPlaceholder'))),
         ),
         dialogOpen && h(NewTaskDialog, {
           onCancel: () => setDialogOpen(false),
@@ -497,8 +720,8 @@ window.__ModuleLoader__.load({
         style: { marginLeft: 'auto' },
         'aria-pressed': pinned,
         title: pinned
-          ? 'Pinned: the task tab reopens when you switch sessions/workspaces — click to stop following'
-          : 'Not pinned: the sidebar collapses on session switch — click to make it follow switches',
+          ? tr('tasks.pinOn')
+          : tr('tasks.pinOff'),
         onClick: () => setPinnedValue(!pinStore.pinned),
       }, pinned ? '📌' : '📍')
     }
@@ -509,17 +732,17 @@ window.__ModuleLoader__.load({
       const valid = name.trim().length > 0
       return h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) onCancel() } },
         h('div', { className: 'hams-dialog' },
-          h('h3', null, 'New task'),
+          h('h3', null, tr('tasks.newTask')),
           h('div', { className: 'hams-field' },
-            h('label', null, 'Name'),
+            h('label', null, tr('tasks.nameLabel')),
             h('input', { className: 'hams-input', autoFocus: true, value: name,
               onChange: (e) => setName(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter' && valid) onCreate(name.trim(), description) } })),
           h('div', { className: 'hams-field' },
-            h('label', null, 'Description (optional)'),
+            h('label', null, tr('tasks.descOptional')),
             h('textarea', { className: 'hams-textarea', value: description, onChange: (e) => setDescription(e.target.value) })),
           h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
-            h('button', { className: 'hams-btn', onClick: onCancel }, 'Cancel'),
-            h('button', { className: 'hams-btn', disabled: !valid, onClick: () => onCreate(name.trim(), description) }, 'Create'))))
+            h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')),
+            h('button', { className: 'hams-btn', disabled: !valid, onClick: () => onCreate(name.trim(), description) }, tr('tasks.create')))))
     }
 
     // Sticky task sidebar: DSH resets the right sidebar to its start page whenever the
@@ -561,16 +784,17 @@ window.__ModuleLoader__.load({
         className: 'hams-btn hams-btn-sm hams-headerbtn' + (pinned ? ' hams-pin-on' : ''),
         'aria-pressed': pinned,
         title: pinned
-          ? 'HarnessAMS tasks — pinned: reopens on session/workspace switch'
-          : 'HarnessAMS tasks — open the tab (pin it to follow session switches)',
+          ? tr('tasks.headerPinOn')
+          : tr('tasks.headerPinOff'),
         onClick: () => { if (!pinStore.pinned) setPinnedValue(true); if (openSidebarTab) openSidebarTab() },
-      }, 'Tasks', pinned ? ' 📌' : '')
+      }, tr('tasks.headerTasks'), pinned ? ' 📌' : '')
     }
 
     // ---------- assembly ----------
 
     function apply(ctx) {
       ensureCss()
+      wireLocale(ctx)
       const slots = ctx.get('slots')
       // tier 1: global page — keyed "main" panel plus its left-sidebar entry (official
       // providers sit at order 0 Plugins / 10 Automation tasks; 20 lands right after).
@@ -589,7 +813,7 @@ window.__ModuleLoader__.load({
           kind: TAB_KIND,
           priority: 'extension',
           title: () => 'HarnessAMS',
-          guide: [{ order: 20, title: () => 'HarnessAMS', description: () => 'Project tasks', icon: PanelIcon }],
+          guide: [{ order: 20, title: () => 'HarnessAMS', description: () => tr('tasks.guideDesc'), icon: PanelIcon }],
         }), 'harnessams sidebar tab')
       })
       // One-click reopen: DSH resets the right sidebar to its start page on session
@@ -606,7 +830,7 @@ window.__ModuleLoader__.load({
     }
 
     exports.name = name
-    exports.inject = ['slots']
+    exports.inject = ['slots', 'locale']
     exports.apply = apply
     return module.exports
   }
