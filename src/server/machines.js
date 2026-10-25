@@ -2,7 +2,7 @@
 // dsh-remote machine registry next to nodes.yaml and marks which node HOSTs are known
 // there. Two read-only channels, tried in order — neither exposes credentials:
 //   1. the tool shell: ctx.tools.get('rw_machines') + ctx.tools.execute (the documented
-//      programmatic path; see DSHstudy DSHremoteSSH.md §5.6),
+//      programmatic path),
 //   2. same-origin HTTP GET /dsh-remote/machines (present when the plugin's web routes
 //      are mounted; the route surface has no exec, so this stays read-only).
 // When both fail the console falls back to the direct-ssh check channel.
