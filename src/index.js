@@ -1,22 +1,26 @@
 // HarnessAMS top-level plugin host half: the /harnessams/* API surface backing the
 // three-tier client UI (see client.js for the UI itself):
-//   tier 1 (global console page) — server checks, nodes.yaml management, dsh-remote
-//            alignment, digital assets, disk usage;
+//   tier 1 (global console page) — remote projects (dsh-remote machines, mirrors,
+//            one-click remote-project creation), digital assets, disk usage;
 //   tier 2 (project = DSH workspace) — session-to-workspace mapping + per-project task
-//            store at <workspace>/.harnessams/tasks.json;
-//   tier 3 (task sidebar)          — the task store API consumed per active session.
+//            store at <workspace>/.harnessams/tasks.json; a workspace inside a
+//            dsh-remote mirror is a REMOTE PROJECT (remote.js);
+//   tier 3 (task sidebar)          — the task store API plus the Overview health-check
+//            buttons, consumed per active session.
 // Routes are not token-gated by the DSH web server (verified 2026-10-25): only local
 // management reads/writes live here — no credentials, no remote-execution passthrough.
-// Remote checks have two channels: dsh-remote machines go through the rw_exec tool shell
-// with a mirror-cwd agent context (route A, see checks.js); nodes.yaml hosts fall back to
-// system OpenSSH wrapped in `bash -c` with BatchMode=yes.
+// Remote connectivity is delegated entirely to dsh-remote: checks run through the
+// rw_exec tool shell with the remote project's own session as the agent context (no
+// session borrowing across projects, no global-machine switching). Remote file
+// browsing/editing is NOT proxied here — dsh-remote's own tools and web surface do it.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { findWorkspaceConfig, readNodes, validateNodes, writeNodes } from './server/workspace.js'
-import { runLocalChecks, runNodeChecks, runMachineChecksViaToolShell } from './server/checks.js'
+import { findWorkspaceConfig } from './server/workspace.js'
+import { runLocalChecks, runRemoteCheckButton, REMOTE_CHECK_BUTTONS } from './server/checks.js'
 import { localDiskUsage, workspaceDirs } from './server/disk.js'
 import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty } from './server/project.js'
-import { remoteMachinesStatus, fetchMachines, findMirrorForMachine, sessionInMirror } from './server/machines.js'
+import { remoteMachinesStatus, fetchMachines } from './server/machines.js'
+import { remoteProjectFor, machineForProject, agentForSession, projectSessions, createRemoteProject } from './server/remote.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 
 export const name = 'dsh-harnessams'
@@ -47,6 +51,8 @@ async function readBodyJson(req, limit = 1 << 20) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
+const normPath = (p) => String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+
 async function handle(req, res, ctx) {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   const route = url.pathname.replace(/^\/harnessams/, '') || '/'
@@ -61,19 +67,8 @@ async function handle(req, res, ctx) {
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    // Write surface is narrow by design: nodes (config management) and tasks (project
-    // data), both local file writes only.
-    if (req.method === 'PUT' && route === '/api/nodes') {
-      if (!ws) { json(503, { error: 'workspace config not found (harnessams.json)' }); return }
-      let body
-      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
-      const v = validateNodes(body?.nodes)
-      if (v.error) { json(400, { error: v.error }); return }
-      const nodesPath = path.join(path.dirname(ws.configPath), 'nodes.yaml')
-      try { writeNodes(nodesPath, v.nodes) } catch (e) { json(500, { error: `write failed: ${e.message}` }); return }
-      json(200, { ok: true, path: nodesPath, nodes: readNodes(path.dirname(ws.configPath)).nodes })
-      return
-    }
+    // Write surface is narrow by design: tasks (project data, local file write) and
+    // remote-project creation (workspaceRegistry + same-origin dsh-remote route).
     if (req.method === 'PUT' && route === '/api/tasks') {
       const sessionId = url.searchParams.get('sessionId')
       const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
@@ -86,7 +81,21 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, project, tasks: w.tasks })
       return
     }
-    json(405, { error: 'GET only (PUT for /api/nodes and /api/tasks)' })
+    if (req.method === 'POST' && route === '/api/remote-project') {
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const machineId = body?.machineId
+      if (!machineId) { json(400, { error: 'missing machineId' }); return }
+      const list = await fetchMachines(ctx.tools, req)
+      if (!list.ok) { json(503, { error: `dsh-remote machines unavailable: ${list.reason}` }); return }
+      const m = list.machines.find((x) => x.id === machineId || x.name === machineId)
+      if (!m) { json(404, { error: `no such dsh-remote machine: ${machineId}` }); return }
+      const r = await createRemoteProject(ctx, m, req)
+      if (r.error) { json(409, { error: r.error }); return }
+      json(200, { ok: true, ...r })
+      return
+    }
+    json(405, { error: 'GET only (PUT /api/tasks, POST /api/remote-project)' })
     return
   }
 
@@ -101,61 +110,71 @@ async function handle(req, res, ctx) {
     })
     return
   }
-  if (route === '/api/check-local') {
-    if (!ws) { json(503, { error: 'harnessams-workspace/harnessams.json not found' }); return }
-    json(200, { ok: true, node: 'local', results: await runLocalChecks(ws) })
-    return
-  }
-  if (route === '/api/check') {
-    const host = url.searchParams.get('node')
-    if (!host) { json(400, { error: 'missing node parameter' }); return }
-    if (host === 'local') { json(200, { ok: true, node: 'local', results: await runLocalChecks(ws) }); return }
-    const nodes = ws ? readNodes(path.dirname(ws.configPath)).nodes : []
-    const node = nodes.find((n) => String(n.HOST) === host)
-    if (!node) { json(404, { error: `no such node in nodes.yaml: ${host} (or nodes.yaml has no real nodes configured)` }); return }
-    json(200, { ok: true, node: host, results: await runNodeChecks(node, ws) })
-    return
-  }
-  if (route === '/api/check-remote') {
-    // Route A (2026-10-25): checks for a dsh-remote machine run through the rw_exec tool
-    // shell with a mirror-cwd agent context — no credentials handled here, no HTTP to the
-    // /dsh-remote surface, and the global active machine is never switched.
-    const machineId = url.searchParams.get('machine')
-    if (!machineId) { json(400, { error: 'missing machine parameter' }); return }
-    const list = await fetchMachines(ctx.tools, req)
-    if (!list.ok) { json(503, { error: `dsh-remote machines unavailable: ${list.reason}` }); return }
-    const m = list.machines.find((x) => x.id === machineId || x.name === machineId)
-    if (!m) { json(404, { error: `no such dsh-remote machine: ${machineId}` }); return }
-    const mirror = findMirrorForMachine(m)
-    if (!mirror && !m.current) {
-      json(409, { error: `"${m.name}" has no local mirror and is not the current machine — open its remote workspace once (rw_pick_workspace) so rw_exec can bind to it, or make it current` })
+
+  // ---- tier 3 Overview: health-check surface (per project) ----
+  if (route === '/api/checks') {
+    const sessionId = url.searchParams.get('sessionId')
+    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+    const rp = remoteProjectFor(project.path)
+    if (!rp) {
+      json(200, { ok: true, type: 'local', project, buttons: [{ id: 'local', item: 'Local environment' }] })
       return
     }
-    // Route A needs a REAL live session whose cwd is inside the mirror (the tool
-    // pipeline validates the session object); fall back to the no-context call only
-    // when the target already IS the active machine.
-    const borrowed = mirror ? sessionInMirror(ctx, mirror.mirrorDir) : null
-    if (mirror && !borrowed && !m.current) {
-      json(409, { error: `no live session is open in "${m.name}"'s workspace mirror (${mirror.mirrorDir}) — open a session there (the AutoAnalog workspace) or make the machine current, then re-run the check` })
+    const list = await fetchMachines(ctx.tools, req)
+    const machine = list.ok ? machineForProject(list.machines, rp) : null
+    json(200, {
+      ok: true, type: 'remote', project,
+      remote: {
+        host: rp.host, port: rp.port, username: rp.username,
+        remotePath: rp.remotePath, mirrorDir: rp.mirrorDir,
+        liveSessions: projectSessions(ctx, project.path).length,
+        machine: machine
+          ? { id: machine.id, name: machine.name, current: !!machine.current, workspace: machine.workspace ?? null,
+              ...(machine.lastConnectedAt ? { lastConnectedAt: machine.lastConnectedAt } : {}),
+              ...(machine.latencyMs != null ? { latencyMs: machine.latencyMs } : {}) }
+          : null,
+        machinesReason: list.ok ? null : list.reason,
+      },
+      buttons: REMOTE_CHECK_BUTTONS.map((b) => ({ id: b.id, item: b.item })),
+    })
+    return
+  }
+  if (route === '/api/checks/run') {
+    const sessionId = url.searchParams.get('sessionId')
+    const check = url.searchParams.get('check')
+    if (!sessionId || !check) { json(400, { error: 'missing sessionId or check parameter' }); return }
+    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+    if (check === 'local') {
+      if (!ws) { json(503, { error: 'harnessams-workspace/harnessams.json not found' }); return }
+      json(200, { ok: true, type: 'local', results: await runLocalChecks(ws) })
+      return
+    }
+    if (!REMOTE_CHECK_BUTTONS.some((b) => b.id === check)) {
+      json(400, { error: `unknown check: ${check} (buttons: ${REMOTE_CHECK_BUTTONS.map((b) => b.id).join(', ')}, local)` })
+      return
+    }
+    const rp = remoteProjectFor(project.path)
+    if (!rp) { json(400, { error: 'this project is not a remote project (its workspace lies outside any dsh-remote mirror)' }); return }
+    const agent = agentForSession(ctx, sessionId)
+    if (!agent) { json(409, { error: 'no live session for the check agent — reopen this project (remote project) and retry from its task sidebar' }); return }
+    const cwd = normPath(agent.agent.session.header.cwd)
+    const mirror = normPath(rp.mirrorDir)
+    if (!cwd || (cwd !== mirror && !cwd.startsWith(mirror + '/'))) {
+      json(409, { error: `the session's cwd (${agent.agent.session.header.cwd}) is outside this project's mirror — open a session inside the remote project workspace` })
       return
     }
     try {
-      const r = await runMachineChecksViaToolShell(ctx.tools, m, { mirror, agent: borrowed?.agent })
-      json(200, { ok: true, node: m.name, channel: borrowed ? r.channel : 'dsh-remote (active machine)',
-                  mirror: mirror ? mirror.mirrorDir : null, borrowed_session: borrowed ? true : false, results: r.results })
+      const r = await runRemoteCheckButton(ctx.tools, check, { ...agent, remotePath: rp.remotePath, ws })
+      json(200, { ok: true, type: 'remote', channel: r.channel, results: r.results })
     } catch (e) { json(502, { error: String(e?.message ?? e) }) }
     return
   }
-  if (route === '/api/nodes') {
-    const data = ws ? readNodes(path.dirname(ws.configPath)) : { path: null, nodes: [] }
-    json(200, { ok: true, path: data.path, nodes: data.nodes,
-                hint: 'HOST is also the ~/.ssh/config alias; credentials stay with the system OpenSSH; the programmatic path is BatchMode; PUT /api/nodes writes this file (comments are lost)' })
-    return
-  }
+
+  // ---- tier 1: remote projects / assets / disk ----
   if (route === '/api/machines') {
-    if (!ws) { json(503, { error: 'workspace config not found' }); return }
-    const nodes = readNodes(path.dirname(ws.configPath)).nodes
-    json(200, { ok: true, ...(await remoteMachinesStatus(ctx.tools, req, nodes)) })
+    json(200, { ok: true, ...(await remoteMachinesStatus(ctx.tools, req, ctx.workspaceRegistry)) })
     return
   }
   if (route === '/api/assets') {
@@ -171,10 +190,7 @@ async function handle(req, res, ctx) {
     if (!ws) { json(503, { error: 'workspace config not found' }); return }
     const root = ws.config.workspace_root
     const demos = await workspaceDirs(ws)
-    const nodes = readNodes(path.dirname(ws.configPath))
-    json(200, { ok: true, workspace_root: root, config_path: ws.configPath, demos, nodes_path: nodes.path,
-                nodes: nodes.nodes.map((n) => ({ host: n.HOST, workspace: n.WORKSPACE ?? null, reserved: n.reserved === 'true' })),
-                remote_workspace: ws.config.remote_workspace ?? null })
+    json(200, { ok: true, workspace_root: root, config_path: ws.configPath, demos })
     return
   }
   // ---- tier 2: project mapping + task store ----

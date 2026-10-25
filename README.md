@@ -8,7 +8,7 @@
 
 | Plugin | npm package | row id | Responsibility | Stage | Status |
 |---|---|---|---|---|---|
-| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (server management, digital assets, disk usage), project = DSH workspace, per-project task sidebar | stage 1 | implemented (this repo, `src/`) |
+| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (remote projects, digital assets, disk usage), project = DSH workspace, per-project task sidebar with health checks | stage 1 | implemented (this repo, `src/`) |
 | HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local ngspice channel, code-driven netlist assembly (hard PDK isolation), HTML reports | stage 1 | implemented (separate repo) |
 | HarnessAMS-SmartPostLayout | (repo in stage 2) | `harnessams-smart-post-layout` | One-click post-layout simulation | stage 2 | not started |
 | HarnessAMS-aligner | (repo in stage 3) | `harnessams-aligner` | Multi-level alignment | stage 3 | not started |
@@ -18,7 +18,7 @@
 ```
 src/                     dsh-harnessams — console plugin package:
                          index.js (host-half routes, plain JS, no build chain),
-                         server/ (host-half modules: workspace/checks/disk/project/machines/assets),
+                         server/ (host-half modules: workspace/checks/disk/project/machines/remote/assets),
                          client.js (browser half — single-file classic script on window.__ModuleLoader__),
                          assets/ (plotly.min.js + THIRD_PARTY_NOTICES), scripts/ (shipped developer utilities)
 install_suite/           dsh-harnessams-suite — aggregate bundle (pure patch package)
@@ -33,30 +33,48 @@ CHANGELOG.md / SECURITY.md / PUBLISH.md
 The plugin surfaces itself inside the DSH Web client (no separate page URL):
 
 1. **Global console page** — the "HarnessAMS" entry in the left sidebar (next to
-   Plugins / Automation tasks) opens a full page with **Servers** (nodes.yaml CRUD —
-   saving rewrites the file, per-node health checks with one-click agent-diagnosis
-   prompts, and dsh-remote alignment showing its machine registry and which node HOSTs
-   are known there), **Digital assets** (plotly asset status + the workspace report
-   library), and **Disk usage** for the local workspace.
+   Plugins / Automation tasks) opens a full page with **Remote projects**, **Digital
+   assets** (plotly asset status + the workspace report library), and **Disk usage**
+   for the local workspace.
 
-   dsh-remote machines are first-class check targets: the health-check dropdown lists
-   them next to nodes.yaml hosts, and their checks run through the `rw_exec` tool
-   shell (`ctx.tools.execute`) with a *borrowed live session* whose cwd sits inside
-   the machine's local workspace mirror — the command lands on that machine using
-   dsh-remote's stored credentials (password / keychain / agent included) without
-   switching the global active machine. Machines without a mirror fall back to the
-   no-context call (correct for the active machine only); nodes.yaml hosts keep the
-   direct BatchMode OpenSSH channel.
+   Remote connectivity is delegated entirely to the dsh-remote plugin — HarnessAMS
+   keeps no server registry and no ssh channel of its own. This page reads
+   dsh-remote's machine registry (read-only, via the `rw_machines` tool shell with a
+   same-origin HTTP fallback) and shows, per machine, its remote workspace, local
+   mirror, and remote project. A **remote project** is simply a DSH workspace opened
+   inside a machine's local mirror
+   (`~/.dsh/remote-workspaces/<host>-<user>-<port>/<ws>`) — one per machine is the
+   recommended setup, and the page creates it in one click (ensure the mirror via
+   dsh-remote, then register the mirror directory as a DSH workspace). Sessions of a
+   remote project are what bind dsh-remote's `rw_*` tools to that machine; a local
+   project that needs to run a remote simulation borrows one of them. Machine
+   management (add/remove/credentials) and **remote file browsing/editing stay in
+   dsh-remote itself** — HarnessAMS deliberately does not duplicate them.
 2. **Project = DSH workspace** — a project is nothing more than a DSH workspace (a
    local folder). Per-project task data lives at `<workspace>/.harnessams/tasks.json`;
    sessions are deliberately not modeled (every session of a workspace shares the task
-   list).
+   list). A workspace inside a dsh-remote mirror is that machine's remote project.
 3. **Task sidebar** — the right-sidebar "HarnessAMS" tab manages the active project's
    tasks: a tab strip (one card per task, "+" to create, × to delete), an in-task
-   sub-navigation (**Overview** with the editable description, **Dashboard** and
-   **Sim settings** as placeholders until their milestones land), and a conversation
-   header button that opens the tab and — while pinned 📌 — re-opens it on every
-   session switch, so the sidebar follows workspace switches instead of collapsing.
+   sub-navigation (**Overview** with the health-check panel and the editable
+   description, **Dashboard** and **Sim settings** as placeholders until their
+   milestones land), and a conversation header button that opens the tab and — while
+   pinned 📌 — re-opens it on every session switch, so the sidebar follows workspace
+   switches instead of collapsing.
+
+   The **Overview health checks** are per project, one button per function, executed
+   through dsh-remote's `rw_exec` tool shell with the sidebar's own session as the
+   agent context — its cwd already sits inside the remote project's mirror, which is
+   what binds the machine (no cross-project session borrowing, no global
+   active-machine switching). Remote projects get a status header (machine, remote
+   area path, local mirror, live project sessions, last-connection facts) and four
+   buttons: **Load** (`/proc/loadavg` + core count), **LSF jobs** (`bjobs -a` queue
+   overview), **Batch dirs** (work dirs carrying a `sweep_progress.json`, with their
+   status/progress), and **Script sync** (md5 drift between the configured local
+   `sim_scripts_dir` and the remote workspace root — report only, nothing is
+   uploaded). Local projects get one button running the local environment report
+   (python / ngspice / sky130 PDK / disk / write probe). Failing rows offer a
+   one-click agent-diagnosis prompt.
 
 ## What the npm packages ship (besides the JS)
 
@@ -80,7 +98,6 @@ LocalDesignExample/
   sky130/                fossi sky130_fd_pr minimal model closure (combined_models + cells) + LICENSE
   tools/                 verbatim copies of the SmartAnaSim pipeline scripts (keep in sync with the plugin version)
   harnessams.json        workspace config with paths relative to this file (works from any clone location)
-  nodes.yaml             all-commented remote-node template
   check_environment.py   self-check: runs the bundled ngspice on a minimal sky130 netlist and audits the assets
   demo1/, demo2/         demo project placeholders (content lands with the demo milestones)
 ```

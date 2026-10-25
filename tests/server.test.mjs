@@ -1,53 +1,24 @@
-// Unit tests for the host-half server modules (tier 2 mapping, task store,
-// nodes.yaml roundtrip, asset status). Run: bare `node --test` from the repo root.
+// Unit tests for the host-half server modules (tier 2 mapping, task store, asset
+// status, dsh-remote machine channel, remote-project model, check buttons).
+// Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, readFile, rm, mkdir } from 'node:fs/promises'
+import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { parseNodesYaml, validateNodes, writeNodes, readNodes } from '../src/server/workspace.js'
+import crypto from 'node:crypto'
+import { execFileSync } from 'node:child_process'
+
+// The generated one-liners must be valid shell — a misplaced quote shipped once and
+// only failed live (bash: -c: syntax error), so every built command is syntax-checked.
+function assertValidShell(cmd) {
+  execFileSync('bash', ['-n', '-c', cmd], { stdio: 'pipe' })
+}
 import { sessionProject, readTasks, writeTasks, tasksPath } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { resultText, parseRwMachinesText, fetchMachines, findMirrorForMachine, sessionInMirror } from '../src/server/machines.js'
-import { parseRwExecText, runMachineChecksViaToolShell } from '../src/server/checks.js'
-
-test('nodes: parse -> validate -> write -> re-read roundtrip', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'hams-nodes-'))
-  try {
-    const yaml = [
-      '# comment that will be lost on rewrite',
-      'nodes:',
-      '  - HOST: login',
-      '    HOSTNAME: 192.0.2.9',
-      '    PORT: 22',
-      '    WORKSPACE: /home/user/sim',
-      '    reserved: false',
-    ].join('\n')
-    const file = path.join(dir, 'nodes.yaml')
-    await writeFile(file, yaml, 'utf8')
-    const parsed = parseNodesYaml(await readFile(file, 'utf8'))
-    assert.equal(parsed.length, 1)
-    assert.equal(parsed[0].HOST, 'login')
-
-    const v = validateNodes([{ HOST: 'login', HOSTNAME: '192.0.2.9', PORT: 22, WORKSPACE: '/home/user/sim', reserved: 'false' }])
-    assert.ok(!v.error, v.error)
-    writeNodes(file, v.nodes)
-    const again = readNodes(dir).nodes
-    assert.equal(again.length, 1)
-    assert.equal(again[0].HOST, 'login')
-    assert.equal(again[0].PORT, '22') // numbers normalize to strings
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
-test('nodes: validation rejects bad input', () => {
-  assert.ok(validateNodes([]).nodes)
-  assert.ok(validateNodes([{ HOST: '' }]).error)
-  assert.ok(validateNodes([{ HOST: 'a' }, { HOST: 'a' }]).error) // duplicate
-  assert.ok(validateNodes([{ HOST: 'a; rm -rf' }]).error) // charset
-  assert.ok(validateNodes([{ HOST: 'a', PORT: 'abc' }]).error)
-  assert.ok(validateNodes([{ HOST: 'a', reserved: 'maybe' }]).error)
-  assert.ok(validateNodes('nope').error)
-})
+import { parseRwExecText, runRemoteCheckButton, REMOTE_CHECK_BUTTONS } from '../src/server/checks.js'
+import { remoteProjectFor, machineForProject, agentForSession, projectSessions, createRemoteProject } from '../src/server/remote.js'
 
 test('project: sessionProject maps over the workspace registry', () => {
   const registry = {
@@ -101,7 +72,7 @@ test('assets: plotly status reflects the shipped file', async () => {
   assert.ok(st.plotly.bytes > 4_000_000)
 })
 
-// ---- dsh-remote channel (route A: rw_machines listing + rw_exec checks) ----
+// ---- dsh-remote machine channel ----
 
 const RW_MACHINES_TEXT = [
   '- m-1  "node1"  [native]  op@192.0.2.11:22  [CURRENT]',
@@ -155,13 +126,15 @@ test('machines: a thrown tool shell falls through to HTTP with forwarded credent
   const calls = []
   const fetchImpl = async (url, opts) => {
     calls.push({ url, headers: opts.headers })
-    return { ok: true, json: async () => ({ machines: [{ id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', workspace: '/w' }], currentId: 'm-1' }) }
+    return { ok: true, json: async () => ({ machines: [{ id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', workspace: '/w', lastConnectedAt: '2026-10-26T08:00:00Z', latencyMs: 41 }], currentId: 'm-1' }) }
   }
   const req = { headers: { host: '127.0.0.1:3187', cookie: 'session=abc', authorization: 'Bearer t' } }
   const r = await fetchMachines(tools, req, fetchImpl)
   assert.ok(r.ok, r.reason)
   assert.equal(r.source, 'HTTP /dsh-remote/machines')
   assert.equal(r.machines[0].current, true)
+  assert.equal(r.machines[0].lastConnectedAt, '2026-10-26T08:00:00Z') // registry extras pass through
+  assert.equal(r.machines[0].latencyMs, 41)
   assert.equal(calls[0].headers.cookie, 'session=abc')
   assert.equal(calls[0].headers.authorization, 'Bearer t')
   assert.match(calls[0].url, /\/dsh-remote\/machines$/)
@@ -212,6 +185,107 @@ test('machines: sessionInMirror borrows a live session rooted in the mirror', ()
   assert.equal(sessionInMirror(null, null, svc), null)
 })
 
+// ---- remote-project model (remote.js) ----
+
+test('remote: remoteProjectFor walks up to the nearest mirror meta', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'hams-rp-'))
+  try {
+    const meta = { host: '192.0.2.11', port: 22, username: 'op', remotePath: '/home/op/sim/AutoAnalog' }
+    const mirror = path.join(root, '192.0.2.11-op-22', 'AutoAnalog')
+    await mkdir(path.join(mirror, 'sub', 'deep'), { recursive: true })
+    await writeFile(path.join(mirror, '.dsh-remote-meta.json'), JSON.stringify(meta), 'utf8')
+
+    const hit = remoteProjectFor(path.join(mirror, 'sub', 'deep'), root)
+    assert.ok(hit, 'remote project not detected')
+    assert.equal(hit.host, '192.0.2.11')
+    assert.equal(hit.port, 22)
+    assert.equal(hit.remotePath, '/home/op/sim/AutoAnalog')
+    assert.equal(path.resolve(hit.mirrorDir), path.resolve(mirror))
+
+    assert.equal(remoteProjectFor(path.join(root, 'plain-ws'), root), null) // no meta anywhere above
+    assert.equal(remoteProjectFor(root, root), null) // the root itself is not inside
+    assert.equal(remoteProjectFor('D:/proj/unrelated', root), null) // outside the mirror root
+    assert.equal(remoteProjectFor(null, root), null)
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+test('remote: machineForProject matches host+port+user', () => {
+  const list = [
+    { id: 'm-1', host: '192.0.2.11', port: 22, username: 'op' },
+    { id: 'm-2', host: '10.0.0.8', port: 2222, username: 'root' },
+  ]
+  const rp = { host: '192.0.2.11', port: 22, username: 'op' }
+  assert.equal(machineForProject(list, rp).id, 'm-1')
+  assert.equal(machineForProject(list, { ...rp, port: 2222 }), null)
+  assert.equal(machineForProject(list, { ...rp, username: 'root' }), null)
+  assert.equal(machineForProject([], rp), null)
+  assert.equal(machineForProject(list, null), null)
+})
+
+test('remote: agentForSession returns a live-store session agent', () => {
+  const sess = { header: { cwd: 'X:/mirror/ws' } }
+  const ctx = { get: (n) => (n === 'sessions' ? { get: (id) => (id === 's1' ? sess : undefined) } : null) }
+  assert.equal(agentForSession(ctx, 's1').agent.session, sess)
+  assert.equal(agentForSession(ctx, 's404'), null)
+  assert.equal(agentForSession(null, 's1'), null)
+  const badCtx = { get: () => ({ get: () => ({ header: {} }) }) } // cwd not a string
+  assert.equal(agentForSession(badCtx, 's1'), null)
+})
+
+test('remote: projectSessions counts live sessions rooted in the workspace', () => {
+  const svc = { list: () => [
+    { header: { cwd: 'D:/ws/sub' } },
+    { header: { cwd: 'D:/ws' } },
+    { header: { cwd: 'D:/other' } },
+  ] }
+  const ctx = { get: (n) => (n === 'sessions' ? svc : null) }
+  assert.equal(projectSessions(ctx, 'D:/ws').length, 2)
+  assert.equal(projectSessions(null, 'D:/ws').length, 0) // no service -> empty, not throw
+  assert.equal(projectSessions(ctx, '').length, 0)
+})
+
+test('remote: createRemoteProject registers the mirror as a workspace', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'hams-crproj-'))
+  try {
+    const meta = { host: '192.0.2.11', port: 22, username: 'op', remotePath: '/home/op/sim/AutoAnalog' }
+    const mirror = path.join(root, '192.0.2.11-op-22', 'AutoAnalog')
+    await mkdir(mirror, { recursive: true })
+    await writeFile(path.join(mirror, '.dsh-remote-meta.json'), JSON.stringify(meta), 'utf8')
+
+    const calls = []
+    const registry = {
+      list: () => [],
+      create: async (p, title) => { calls.push({ p, title }); return { id: 'w9', path: p, title } },
+    }
+    const r = await createRemoteProject({ workspaceRegistry: registry },
+      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op' }, { headers: {} }, fetch, root)
+    assert.ok(r.created, JSON.stringify(r))
+    assert.equal(r.workspace.id, 'w9')
+    assert.equal(calls[0].title, 'node1 (remote)')
+    assert.match(calls[0].p.replace(/\\/g, '/'), /AutoAnalog$/)
+
+    // an already-registered workspace (or one inside the mirror) is not recreated
+    const registry2 = {
+      list: () => [{ id: 'w1', path: path.join(mirror, 'sub'), title: 'existing' }],
+      create: async () => { throw new Error('must not be called') },
+    }
+    const r2 = await createRemoteProject({ workspaceRegistry: registry2 },
+      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op' }, { headers: {} }, fetch, root)
+    assert.equal(r2.created, false)
+    assert.equal(r2.workspace.id, 'w1')
+
+    // no mirror + HTTP failure -> actionable error, no throw
+    const r3 = await createRemoteProject({ workspaceRegistry: registry },
+      { id: 'm-2', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root' },
+      { headers: { host: '127.0.0.1:3188', cookie: 's=1' } },
+      async () => ({ ok: false, status: 500 }), root)
+    assert.match(r3.error, /mirror creation failed/)
+    assert.equal(calls.length, 1) // no second create
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
+// ---- check buttons (checks.js) ----
+
 test('checks: parseRwExecText splits stdout/stderr and reads exit markers', () => {
   const clean = parseRwExecText('0.12 0.34 0.45 3/812 12345\n8\n')
   assert.equal(clean.exitCode, 0)
@@ -229,56 +303,111 @@ test('checks: parseRwExecText splits stdout/stderr and reads exit markers', () =
   assert.equal(slow.stdout, 'partial')
 })
 
-test('checks: runMachineChecksViaToolShell injects the mirror cwd and parses results', async () => {
+test('checks: the button surface is the four Overview buttons', () => {
+  assert.deepEqual(REMOTE_CHECK_BUTTONS.map((b) => b.id), ['load', 'jobs', 'batches', 'scripts'])
+})
+
+test('checks: runRemoteCheckButton load runs with the project session agent', async () => {
   const inputs = []
   const tools = {
     get: (name) => (name === 'rw_exec' ? { name } : undefined),
     execute: async (input) => {
       inputs.push(input)
-      if (input.arguments.command.startsWith('echo ok')) {
-        assert.equal(input.agent.session.header.cwd, 'MIRROR/DIR') // route A: binding context
-        return { isError: false, value: { text: 'ok' }, content: [] }
-      }
-      if (input.arguments.command.startsWith('which ngspice')) {
-        return { isError: false, value: { text: '/usr/bin/ngspice\n[exit code: 0]' }, content: [] }
-      }
-      if (input.arguments.command.startsWith('ls -ld')) {
-        return { isError: false, value: { text: 'drwxr-xr-x 8 op users 4096 Oct 25 10:00 /home/op/sim/AutoAnalog' }, content: [] }
-      }
-      return { isError: false, value: { text: '1.2 3.4 5/900 777\n-- stderr --\nnothing\n[exit code: 0]' }, content: [] }
+      return { isError: false, value: { text: '0.42 0.51 0.55 3/900 12345\n48\n[exit code: 0]' }, content: [] }
     },
   }
-  const machine = { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', workspace: '/home/op/sim/AutoAnalog' }
-  const r = await runMachineChecksViaToolShell(tools, machine,
-    { mirror: { mirrorDir: 'MIRROR/DIR', remotePath: '/home/op/sim/AutoAnalog' }, agent: { session: { header: { cwd: 'MIRROR/DIR' } } } })
-  assert.equal(r.channel, 'dsh-remote (mirror)')
-  assert.equal(r.results.length, 7)
-  assert.ok(r.results.every((x) => x.ok), JSON.stringify(r.results.map((x) => [x.item, x.ok, x.detail])))
-  assert.ok(r.results.every((x) => x.channel === 'dsh-remote (mirror)'))
-  assert.match(r.results[0].cmd, /rw_exec node1: /)
-  // workspace interpolation uses the mirror's remotePath
-  assert.match(r.results.find((x) => x.item === 'Workspace reachable').cmd, /\/home\/op\/sim\/AutoAnalog/)
-  assert.ok(inputs.every((i) => i.signal instanceof AbortSignal && i.callId))
-  assert.ok(inputs.every((i) => i.name === 'rw_exec'))
+  const agent = { session: { header: { cwd: 'MIRROR/DIR' } } }
+  const r = await runRemoteCheckButton(tools, 'load', { agent, remotePath: '/home/op/sim' })
+  assert.equal(r.channel, 'dsh-remote (project session)')
+  assert.equal(r.results.length, 1)
+  assert.ok(r.results[0].ok, r.results[0].detail)
+  assert.match(r.results[0].cmd, /cat \/proc\/loadavg && nproc/)
+  assert.equal(inputs[0].agent.session.header.cwd, 'MIRROR/DIR') // binding context
+  assert.ok(inputs[0].signal instanceof AbortSignal && inputs[0].callId)
+  assert.equal(inputs[0].name, 'rw_exec')
 })
 
-test('checks: rw_exec failures surface exit codes and errors per item', async () => {
+test('checks: runRemoteCheckButton jobs surfaces a missing bjobs and an empty queue', async () => {
+  const tools = {
+    get: () => ({}),
+    execute: async () => ({ isError: false, value: { text: 'bash: bjobs: command not found\n[exit code: 127]' }, content: [] }),
+  }
+  const r = await runRemoteCheckButton(tools, 'jobs', {})
+  assert.equal(r.channel, 'dsh-remote (active machine)') // no agent -> active machine
+  assert.equal(r.results[0].ok, false)
+  assert.match(r.results[0].result, /command not found/)
+  assert.match(r.results[0].detail, /exit code 127/)
+
+  // LSF bjobs exits 255 with "No job found" on an empty queue — healthy, not a failure
+  const tools2 = {
+    get: () => ({}),
+    execute: async () => ({ isError: false, value: { text: 'No job found\n[exit code: 255]' }, content: [] }),
+  }
+  const r2 = await runRemoteCheckButton(tools2, 'jobs', {})
+  assert.equal(r2.results[0].ok, true)
+  assert.match(r2.results[0].result, /No job found/)
+  assert.equal(r2.results[0].detail, undefined)
+})
+
+test('checks: runRemoteCheckButton batches lists progress files in the workspace scope', async () => {
+  const inputs = []
   const tools = {
     get: () => ({}),
     execute: async (input) => {
-      if (input.arguments.command.startsWith('echo ok')) return { isError: false, value: { text: 'ok' }, content: [] }
-      if (input.arguments.command.startsWith('which ngspice')) {
-        return { isError: true, value: undefined, content: [{ type: 'text', text: 'rw_exec: no ngspice' }] }
-      }
-      return { isError: false, value: { text: 'du: permission denied\n[exit code: 1]' }, content: [] }
+      inputs.push(input)
+      return { isError: false, value: { text: '/home/op/sim/b1  [completed] 32/32\n/home/op/sim/b2  [running] 4/16\n[exit code: 0]' }, content: [] }
     },
   }
-  const r = await runMachineChecksViaToolShell(tools, { name: 'node1', host: 'h', port: 22 }, {})
-  assert.equal(r.channel, 'dsh-remote (active machine)')
-  const byItem = Object.fromEntries(r.results.map((x) => [x.item, x]))
-  assert.equal(byItem['Connectivity'].ok, true)
-  assert.equal(byItem['ngspice present'].ok, false)
-  assert.match(byItem['ngspice present'].detail, /no ngspice/)
-  assert.equal(byItem['Disk usage detail'].ok, false)
-  assert.match(byItem['Disk usage detail'].detail, /exit code 1/)
+  const r = await runRemoteCheckButton(tools, 'batches', { remotePath: '/home/op/sim/AutoAnalog' })
+  assert.ok(r.results[0].ok, r.results[0].detail)
+  assert.match(r.results[0].result, /b1  \[completed\] 32\/32/)
+  assert.match(r.results[0].cmd, /find "\/home\/op\/sim\/AutoAnalog" -maxdepth 4 -name sweep_progress\.json/)
+  assertValidShell(inputs[0].arguments.command)
+
+  // empty result is still a pass — it reports "none found"
+  const tools2 = { get: () => ({}), execute: async () => ({ isError: false, value: { text: '[exit code: 0]' }, content: [] }) }
+  const r2 = await runRemoteCheckButton(tools2, 'batches', { remotePath: '/w' })
+  assert.ok(r2.results[0].ok)
+  assert.match(r2.results[0].result, /no sweep_progress\.json found/)
+})
+
+test('checks: runRemoteCheckButton scripts compares local md5 against the remote workspace', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'hams-scripts-'))
+  try {
+    await writeFile(path.join(dir, 'a.py'), 'AAA', 'utf8')
+    await writeFile(path.join(dir, 'b.py'), 'BBB', 'utf8')
+    const md5 = (s) => crypto.createHash('md5').update(s).digest('hex')
+    const inputs = []
+    const tools = {
+      get: () => ({}),
+      execute: async (input) => {
+        inputs.push(input)
+        return { isError: false, value: { text:
+          md5('AAA') + '  a.py\n' + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  b.py\n__REMOTE_PY__\nzz.py\n[exit code: 0]',
+        }, content: [] }
+      },
+    }
+    const r = await runRemoteCheckButton(tools, 'scripts',
+      { remotePath: '/home/op/sim', ws: { config: { sim_scripts_dir: dir } } })
+    const e = r.results[0]
+    assert.ok(e.ok, e.detail)
+    assert.match(e.result, /1 in sync, 1 differ, 0 only local, 1 only remote/)
+    assert.match(e.warn, /drift/)
+    assert.match(e.detail, /b\.py — differs/)
+    assert.match(e.detail, /zz\.py — only-remote/)
+    // command scopes to the remote workspace and quotes both local files
+    assert.match(inputs[0].arguments.command, /cd "\/home\/op\/sim" && md5sum "a\.py" "b\.py"/)
+    assertValidShell(inputs[0].arguments.command)
+
+    // an unconfigured scripts dir fails with guidance, not a crash
+    const r2 = await runRemoteCheckButton(tools, 'scripts', { remotePath: '/w', ws: {} })
+    assert.equal(r2.results[0].ok, false)
+    assert.match(r2.results[0].detail, /sim_scripts_dir/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('checks: unknown button and missing rw_exec are hard errors', async () => {
+  const tools = { get: () => ({}), execute: async () => ({ isError: false, value: { text: 'x' }, content: [] }) }
+  await assert.rejects(() => runRemoteCheckButton(tools, 'nope', {}), /unknown check button/)
+  await assert.rejects(() => runRemoteCheckButton({ get: () => undefined }, 'load', {}), /rw_exec tool not registered/)
 })

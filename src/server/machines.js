@@ -1,6 +1,6 @@
-// dsh-remote alignment (2026-10-25 SSH decision): the console's server area shows the
-// dsh-remote machine registry next to nodes.yaml and marks which node HOSTs are known
-// there. Two read-only channels, tried independently — neither exposes credentials:
+// dsh-remote machine registry access (the single remote channel since the 2026-10-26
+// rework removed nodes.yaml and the BatchMode ssh fallback). Two read-only channels,
+// tried independently — neither exposes credentials:
 //   1. the tool shell: ctx.tools.get('rw_machines') + ctx.tools.execute (the documented
 //      programmatic path). execute() REQUIRES a
 //      callId + AbortSignal (verified against @deepseek-ai/dsh-tools 0.2.1-rc.2: without
@@ -11,9 +11,10 @@
 //      browser session credentials — verified 2026-10-25), so the incoming request's
 //      cookie/authorization headers are forwarded; credential-less probes get a 401
 //      and fall through.
-// Mirror discovery (findMirrorForMachine) feeds the route-A check channel: rw_exec has
-// no machine parameter and binds from the caller's session cwd, so checks.js passes a
-// minimal agent context whose cwd is the machine's local mirror directory.
+// Mirror discovery (findMirrorForMachine) feeds the remote-project model (remote.js):
+// rw_exec has no machine parameter and binds from the caller's session cwd, so a
+// workspace opened inside a machine's local mirror directory IS that machine's
+// remote project.
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'
@@ -55,7 +56,9 @@ export function parseRwMachinesText(text) {
   return machines
 }
 
-// Normalize an HTTP-channel machine record ({machines:[...], currentId} shape).
+// Normalize an HTTP-channel machine record ({machines:[...], currentId} shape). The
+// HTTP body carries the full registry records, so the status extras (lastConnectedAt,
+// latencyMs) pass through when present; the tool-shell text listing cannot carry them.
 function fromHttpList(data) {
   if (!data || !Array.isArray(data.machines)) return null
   return data.machines.map((m) => ({
@@ -66,6 +69,8 @@ function fromHttpList(data) {
     username: m.username ? String(m.username) : '',
     current: data.currentId != null && m.id === data.currentId,
     workspace: m.workspace ? String(m.workspace) : undefined,
+    ...(m.lastConnectedAt ? { lastConnectedAt: String(m.lastConnectedAt) } : {}),
+    ...(Number.isFinite(m.latencyMs) ? { latencyMs: Number(m.latencyMs) } : {}),
   }))
 }
 
@@ -146,8 +151,11 @@ export function findMirrorForMachine(machine, root = remoteWorkspacesRoot()) {
   return null
 }
 
-// Borrow a live session whose cwd sits inside the mirror, for the rw_exec agent context
-// (route A). The host `sessions` service is fetched lazily like dsh-remote itself does
+// Borrow a live session whose cwd sits inside the mirror, for the rw_* agent context.
+// NOT used by the Overview checks anymore (they run with the remote project's own
+// session — see remote.js agentForSession); retained for the future remote-simulation
+// path, where a LOCAL project borrows a remote project's session to run a sweep. The
+// host `sessions` service is fetched lazily like dsh-remote itself does
 // (ctx.get('sessions')) so compositions without it degrade instead of failing injection.
 // Returns {agent: {session}} or null when no live session is open in that workspace.
 export function sessionInMirror(ctx, mirrorDir, list) {
@@ -165,24 +173,33 @@ export function sessionInMirror(ctx, mirrorDir, list) {
   return null
 }
 
-// Aggregate for the console: presence, machine list (either channel, plus mirror state),
-// and alignment with the nodes.yaml HOSTs. Never throws — the console renders a degraded
-// note on failure.
-export async function remoteMachinesStatus(tools, req, nodes, fetchImpl = fetch) {
+// Aggregate for the tier-1 Remote Projects section: machine list (either channel) with
+// each machine's mirror state and the DSH workspace registered inside it, if any (that
+// workspace IS the machine's remote project). Never throws — the console renders a
+// degraded note on failure.
+export async function remoteMachinesStatus(tools, req, registry, fetchImpl = fetch) {
   const channel = await fetchMachines(tools, req, fetchImpl)
-  const hosts = (nodes ?? []).map((n) => String(n.HOST))
   if (!channel.ok) {
-    return { installed: false, source: null, machines: [],
-             reason: channel.reason,
-             fallback: 'remote checks use the direct-ssh fallback channel (BatchMode, system OpenSSH)',
-             alignment: hosts.map((h) => ({ host: h, known: false })) }
+    return { installed: false, source: null, machines: [], reason: channel.reason }
   }
-  const known = new Set(channel.machines.map((m) => String(m.host ?? m.name).toLowerCase()))
-  const byName = new Set(channel.machines.map((m) => String(m.name).toLowerCase()))
+  const norm = (p) => String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  let workspaces = []
+  try { workspaces = typeof registry?.list === 'function' ? registry.list() : [] } catch { workspaces = [] }
   return {
     installed: true,
     source: channel.source,
-    machines: channel.machines.map((m) => ({ ...m, mirror: findMirrorForMachine(m) })),
-    alignment: hosts.map((h) => ({ host: h, known: known.has(h.toLowerCase()) || byName.has(h.toLowerCase()) })),
+    machines: channel.machines.map((m) => {
+      const mirror = findMirrorForMachine(m)
+      let remoteProject = null
+      if (mirror) {
+        const md = norm(mirror.mirrorDir)
+        const w = workspaces.find((x) => {
+          const p = norm(x?.path)
+          return p === md || p.startsWith(md + '/')
+        })
+        if (w) remoteProject = { id: w.id, path: w.path, title: w.title }
+      }
+      return { ...m, mirror, remoteProject }
+    }),
   }
 }

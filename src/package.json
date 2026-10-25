@@ -1,7 +1,7 @@
 {
   "name": "dsh-harnessams",
   "version": "0.1.0",
-  "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-project task sidebar) plus server health checks, disk usage, and digital assets",
+  "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-project task sidebar) plus remote projects over dsh-remote, per-project health checks, disk usage, and digital assets",
   "type": "module",
   "main": "index.js",
   "exports": {

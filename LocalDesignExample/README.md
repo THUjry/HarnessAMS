@@ -25,7 +25,6 @@ sky130 netlist end-to-end, and (3) reads the workspace config. All green = ready
   discovers it by walking up)
 - `tools/` — verbatim copies of the SmartAnaSim pipeline scripts (see `tools/README.md`)
 - `harnessams.json` — workspace config; all paths relative to this file
-- `nodes.yaml` — all-commented remote-node template
 - `demo1/`, `demo2/` — demo project placeholders (content lands with the demo milestones)
 - `check_environment.py` — the self-check
 - `THIRD_PARTY_NOTICES.md` — bundled components and their licenses

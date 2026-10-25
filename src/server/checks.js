@@ -1,11 +1,15 @@
-// Server health checks: local-mode items run directly; remote nodes go through the
-// fallback channel — system OpenSSH wrapped in `bash -c`, BatchMode + keys, credentials
-// left to the system (never persisted by us). The dsh-remote tool shell is the intended
-// main channel once machines are bound; see machines.js for its presence probe.
+// Health checks. Local items run directly on this machine. Remote items are the
+// Overview button set, each an independent one-click check executed through
+// dsh-remote's rw_exec tool shell — there is no ssh channel of our own anymore
+// (2026-10-26 rework; the former BatchMode fallback died with the nodes.yaml registry).
+// The agent context is the calling session of a REMOTE PROJECT (a DSH workspace inside
+// a dsh-remote mirror) — its cwd binds rw_exec to that machine, so checks never borrow
+// sessions across projects and never switch the global active machine.
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
+import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { resultText } from './machines.js'
@@ -65,61 +69,22 @@ export async function runLocalChecks(ws) {
   return results
 }
 
-const REMOTE_CHECKS = [
-  { id: 'connect', item: 'Connectivity', cmd: 'echo ok', judge: (out) => out.includes('ok') },
-  { id: 'load', item: 'Load', cmd: 'cat /proc/loadavg && nproc', judge: () => true },
-  { id: 'mem', item: 'Memory', cmd: 'free -m | head -2', judge: () => true },
-  { id: 'disk', item: 'Disk', cmd: 'df -h ${WORKSPACE:-$HOME} | tail -1', judge: () => true },
-  { id: 'ws', item: 'Workspace reachable', cmd: 'ls -ld ${WORKSPACE:-$HOME}', judge: (out) => out.trim().startsWith('d') },
-  { id: 'ngspice', item: 'ngspice present', cmd: 'which ngspice && ngspice -v 2>&1 | head -1', judge: (out) => out.trim().length > 0 },
-  // `timeout 15` keeps the du inside rw_exec's 20 s command cap (and the ssh fallback's
-  // 15 s budget) on NFS-scale workspaces: killed du still emits the entries it priced,
-  // so the report shows partial data instead of an empty timeout.
-  { id: 'du', item: 'Disk usage detail', cmd: 'timeout 15 du -sh ${WORKSPACE:-$HOME}/* 2>/dev/null | sort -rh | head -20', judge: () => true },
+// ---- remote check buttons (Overview, one button per function) ----
+// The button surface exposed to the client; commands are built in runRemoteCheckButton.
+export const REMOTE_CHECK_BUTTONS = [
+  { id: 'load', item: 'Load' },
+  { id: 'jobs', item: 'LSF jobs' },
+  { id: 'batches', item: 'Batch dirs' },
+  { id: 'scripts', item: 'Script sync' },
 ]
 
-async function sshRun(node, remoteCmd, timeoutMs = 15000) {
-  // Fallback channel: always wrapped in `bash -c` (PATH resolves to the MSYS2 ssh,
-  // avoiding System32 9.5p2); BatchMode forbids interactive passwords; keys are left to the system
-  // OpenSSH (credentials never persisted).
-  const target = node.HOSTNAME ? `${node.HOST}@${node.HOSTNAME}${node.PORT && node.PORT !== 22 ? ' -p ' + node.PORT : ''}`
-    : String(node.HOST)
-  const cli = ['ssh', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=5',
-               '-o', 'StrictHostKeyChecking=accept-new', target, remoteCmd]
-  const t0 = Date.now()
-  try {
-    const { stdout, stderr } = await execFileAsync('bash', ['-c', cli.map(q => `'${String(q).replace(/'/g, `'\\''`)}'`).join(' ')],
-      { timeout: timeoutMs, windowsHide: true, encoding: 'utf8' })
-    return { ok: true, stdout, stderr, ms: Date.now() - t0 }
-  } catch (e) {
-    return { ok: false, stdout: e.stdout ?? '', stderr: e.stderr ?? '', error: String(e.message ?? e), ms: Date.now() - t0 }
-  }
-}
-
-export async function runNodeChecks(node, ws) {
-  const workspace = node.WORKSPACE || ws?.config?.remote_workspace || '$HOME'
-  const results = []
-  for (const c of REMOTE_CHECKS) {
-    const cmd = c.cmd.replaceAll('${WORKSPACE:-$HOME}', workspace)
-    const r = await sshRun(node, cmd)
-    const out = (r.stdout || '') + (r.stderr || '')
-    results.push({ item: c.item, cmd: `ssh ${node.HOST} ${cmd}`, ok: r.ok && c.judge(out),
-                   result: (r.ok ? (r.stdout || '').trim().split(/\r?\n/).slice(0, 3).join(' | ') : '').slice(0, 200),
-                   detail: r.ok ? undefined : (r.stderr || r.error || '').slice(0, 200), ms: r.ms })
-  }
-  return results
-}
-
-// ---- route A: the same REMOTE_CHECKS through dsh-remote's rw_exec tool shell ----
-// rw_exec has no machine parameter — it binds from the calling session's cwd (a local
-// mirror resolves to that mirror's machine), or, with no caller context at all, the
-// global active machine. So the caller borrows a REAL live session whose cwd sits inside
-// the machine's mirror directory and passes it as the agent context (dsh-remote 0.8.51
-// bindingFor reads exec.agent.session.header.cwd): the check targets that machine
-// without touching the global currentId. A fabricated bare {header:{cwd}} object does
+// rw_exec has no machine parameter — it binds from the calling session's cwd (a cwd
+// inside a local mirror resolves to that mirror's machine). The caller passes the
+// remote project's OWN live session as the agent context (dsh-remote 0.8.51 bindingFor
+// reads exec.agent.session.header.cwd). A fabricated bare {header:{cwd}} object does
 // NOT work — the tool pipeline validates the session against the live session store
 // (`session "undefined" is not live in this store`), which is why a real session object
-// is required. Coupling points to re-verify when dsh-remote updates: that cwd shape,
+// is required. Coupling points to re-verify when dsh-remote updates: that cwd shape
 // and the rw_exec result text format parsed below. Per-command budget: the tool caps
 // itself at dsh-remote's commandTimeoutMs (default 20 s) and reports it in-band; our
 // AbortSignal sits above that so the tool's own timeout marker surfaces first.
@@ -139,47 +104,134 @@ export function parseRwExecText(text) {
   return { stdout: stdout.trimEnd(), stderr, exitCode, timedOut }
 }
 
-export async function runMachineChecksViaToolShell(tools, machine, opts = {}) {
+// One rw_exec call → one result entry. opts.raw keeps the full stdout on the entry
+// (stdoutRaw) for callers that parse the output themselves.
+async function execViaToolShell(tools, agent, item, cmd, channel, { maxLines = 3, maxChars = 200, judge, raw = false } = {}) {
+  const t0 = Date.now()
+  const entry = { item, cmd, channel, ms: 0, ok: false }
+  try {
+    const r = await tools.execute({
+      callId: 'harnessams-check-' + Math.random().toString(36).slice(2, 8),
+      name: 'rw_exec',
+      arguments: { command: cmd },
+      signal: AbortSignal.timeout(40000),
+      ...(agent ? { agent } : {}),
+    })
+    const text = resultText(r)
+    if (r?.isError) {
+      entry.detail = text.slice(0, 400) || 'rw_exec returned an error'
+      return entry
+    }
+    const p = parseRwExecText(text)
+    entry.ok = p.exitCode === 0 && !p.timedOut && (!judge || judge(p.stdout))
+    if (raw) entry.stdoutRaw = p.stdout.slice(0, 8000)
+    entry.result = (p.stdout || '').trim().split(/\r?\n/).slice(0, maxLines).join(' | ').slice(0, maxChars)
+    if (!entry.ok) entry.detail = (p.timedOut ? 'timed out; ' : '') + (p.stderr || `exit code ${p.exitCode}`).slice(0, 300)
+  } catch (e) {
+    entry.detail = String(e?.message ?? e).slice(0, 300)
+  }
+  entry.ms = Date.now() - t0
+  return entry
+}
+
+// Double-quote a shell word (remote paths/files): escape the characters bash treats
+// specially inside double quotes.
+function shq(s) {
+  return '"' + String(s ?? '').replace(/([$"\\`])/g, '\\$1') + '"'
+}
+
+// Run one Overview button. opts: { agent, remotePath, machine, ws }. Returns
+// { channel, results: [entry...] } — results is an array so every button renders in
+// the same results table.
+export async function runRemoteCheckButton(tools, id, opts = {}) {
   if (!tools?.get?.('rw_exec')) throw new Error('rw_exec tool not registered (dsh-remote not installed?)')
-  const channel = opts.agent ? 'dsh-remote (mirror)' : 'dsh-remote (active machine)'
-  // The binding context — see the block comment above. The pipeline validates the
-  // session object against the live session store (a fabricated bare {header} object
-  // is rejected with `session "undefined" is not live in this store`), so the caller
-  // passes a REAL live session whose cwd sits inside the machine's mirror; rw_exec then
-  // binds that mirror's machine. Without a mirror we send no context at all, which
-  // rw_exec resolves to the active machine (only correct for the current machine).
   if (opts.agent !== undefined && typeof opts.agent?.session?.header?.cwd !== 'string') {
-    throw new Error('runMachineChecksViaToolShell: opts.agent must wrap a session with header.cwd')
+    throw new Error('runRemoteCheckButton: opts.agent must wrap a session with header.cwd')
   }
   const agent = opts.agent ?? undefined
-  const workspace = opts.mirror?.remotePath || machine.workspace || '$HOME'
-  const results = []
-  for (const c of REMOTE_CHECKS) {
-    const cmd = c.cmd.replaceAll('${WORKSPACE:-$HOME}', workspace)
-    const t0 = Date.now()
-    let entry = { item: c.item, cmd: `rw_exec ${machine.name || machine.host}: ${cmd}`, channel, ms: 0, ok: false }
-    try {
-      const r = await tools.execute({
-        callId: 'harnessams-check-' + Math.random().toString(36).slice(2, 8),
-        name: 'rw_exec',
-        arguments: { command: cmd },
-        signal: AbortSignal.timeout(30000),
-        ...(agent ? { agent } : {}),
-      })
-      const text = resultText(r)
-      if (r?.isError) {
-        entry.detail = text.slice(0, 200) || 'rw_exec returned an error'
-      } else {
-        const p = parseRwExecText(text)
-        entry.ok = p.exitCode === 0 && !p.timedOut && c.judge(p.stdout)
-        entry.result = (p.stdout || '').trim().split(/\r?\n/).slice(0, 3).join(' | ').slice(0, 200)
-        if (!entry.ok) entry.detail = (p.timedOut ? 'timed out; ' : '') + (p.stderr || `exit code ${p.exitCode}`).slice(0, 200)
-      }
-    } catch (e) {
-      entry.detail = String(e?.message ?? e).slice(0, 200)
-    }
-    entry.ms = Date.now() - t0
-    results.push(entry)
+  const channel = agent ? 'dsh-remote (project session)' : 'dsh-remote (active machine)'
+  const wsPath = opts.remotePath || opts.machine?.workspace || '$HOME'
+  const wsq = shq(wsPath)
+
+  if (id === 'load') {
+    const e = await execViaToolShell(tools, agent, 'Load', 'cat /proc/loadavg && nproc', channel,
+      { maxLines: 2, maxChars: 120, judge: (o) => o.trim().length > 0 })
+    return { channel, results: [e] }
   }
-  return { channel, results }
+
+  if (id === 'jobs') {
+    const e = await execViaToolShell(tools, agent, 'LSF jobs', 'timeout 10 bjobs -a 2>&1', channel,
+      { maxLines: 12, maxChars: 900, judge: (o) => o.trim().length > 0 })
+    // LSF's bjobs exits 255 with "No job found" when the queue is simply empty —
+    // a healthy state, not a check failure (verified live 2026-10-26).
+    if (!e.ok && /No (unfinished )?job found/i.test(e.result ?? '')) { e.ok = true; e.detail = undefined }
+    return { channel, results: [e] }
+  }
+
+  if (id === 'batches') {
+    // Sweep progress files are the pipeline's own convention: every work dir with a
+    // sweep_progress.json is one batch, and the file's top level carries a summary
+    // (status / total_points / completed). `timeout 15` + head keep the walk bounded
+    // on NFS-scale workspaces (the du lesson from 2026-10-25).
+    const cmd = 'timeout 15 find ' + wsq + ' -maxdepth 4 -name sweep_progress.json 2>/dev/null'
+      + ' | sort | head -50 | while IFS= read -r f; do d=$(dirname "$f");'
+      + ` st=$(grep -o '"status": *"[a-z]*"' "$f" 2>/dev/null | head -1 | sed 's/.*"\\([a-z]*\\)"$/\\1/');`
+      + ` tot=$(grep -o '"total_points": *[0-9]*' "$f" 2>/dev/null | head -1 | grep -o '[0-9]*$');`
+      + ` com=$(grep -o '"completed": *[0-9]*' "$f" 2>/dev/null | head -1 | grep -o '[0-9]*$');`
+      + ` printf '%s  [%s] %s/%s\\n' "$d" "\${st:-?}" "\${com:-?}" "\${tot:-?}";`
+      + ' done'
+    const e = await execViaToolShell(tools, agent, 'Batch dirs', cmd, channel,
+      { maxLines: 15, maxChars: 1200, judge: () => true })
+    if (e.ok && !e.result) e.result = 'no sweep_progress.json found (depth <= 4)'
+    return { channel, results: [e] }
+  }
+
+  if (id === 'scripts') {
+    // Drift check between the configured local pipeline-scripts directory and the
+    // remote workspace root, by md5 — report only, nothing is uploaded.
+    const dir = opts.ws?.config?.sim_scripts_dir
+    const hashes = new Map()
+    if (dir && fs.existsSync(dir)) {
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (!ent.isFile()) continue
+        try {
+          hashes.set(ent.name, crypto.createHash('md5').update(fs.readFileSync(path.join(dir, ent.name))).digest('hex'))
+        } catch { /* unreadable file — skip */ }
+        if (hashes.size >= 50) break
+      }
+    }
+    if (!hashes.size) {
+      return { channel, results: [{ item: 'Script sync', cmd: '(local sim_scripts_dir)', channel, ms: 0, ok: false,
+        detail: 'sim_scripts_dir not configured or has no files (harnessams.json)' }] }
+    }
+    const names = [...hashes.keys()]
+    const cmd = 'cd ' + wsq + ' && md5sum ' + names.map(shq).join(' ') + ' 2>/dev/null'
+      + '; echo __REMOTE_PY__; ls -1 *.py 2>/dev/null | head -50'
+    const e = await execViaToolShell(tools, agent, 'Script sync', cmd, channel, { raw: true })
+    if (!e.ok) { delete e.stdoutRaw; return { channel, results: [e] } }
+    const rawOut = e.stdoutRaw ?? ''
+    delete e.stdoutRaw
+    const markerAt = rawOut.indexOf('__REMOTE_PY__')
+    const md5Part = markerAt >= 0 ? rawOut.slice(0, markerAt) : rawOut
+    const remotePy = (markerAt >= 0 ? rawOut.slice(markerAt + '__REMOTE_PY__'.length) : '')
+      .split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+    const remote = new Map()
+    for (const line of md5Part.split(/\r?\n/)) {
+      const m = line.match(/^([0-9a-f]{32})\s+(\S+)$/)
+      if (m) remote.set(m[2], m[1])
+    }
+    const rows = []
+    for (const [name, h] of hashes) {
+      const r = remote.get(name)
+      rows.push({ file: name, state: r === undefined ? 'only-local' : r === h ? 'in-sync' : 'differs' })
+    }
+    for (const p of remotePy) if (!hashes.has(p)) rows.push({ file: p, state: 'only-remote' })
+    const n = (s) => rows.filter((r) => r.state === s).length
+    e.result = `${n('in-sync')} in sync, ${n('differs')} differ, ${n('only-local')} only local, ${n('only-remote')} only remote`
+    e.detail = rows.filter((r) => r.state !== 'in-sync').map((r) => `${r.file} — ${r.state}`).slice(0, 30).join('\n') || undefined
+    if (n('differs') || n('only-local')) e.warn = 'local/remote script drift detected'
+    return { channel, results: [e] }
+  }
+
+  throw new Error(`unknown check button: ${id}`)
 }
