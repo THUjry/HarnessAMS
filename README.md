@@ -38,6 +38,15 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    prompts, and dsh-remote alignment showing its machine registry and which node HOSTs
    are known there), **Digital assets** (plotly asset status + the workspace report
    library), and **Disk usage** for the local workspace.
+
+   dsh-remote machines are first-class check targets: the health-check dropdown lists
+   them next to nodes.yaml hosts, and their checks run through the `rw_exec` tool
+   shell (`ctx.tools.execute`) with a *borrowed live session* whose cwd sits inside
+   the machine's local workspace mirror — the command lands on that machine using
+   dsh-remote's stored credentials (password / keychain / agent included) without
+   switching the global active machine. Machines without a mirror fall back to the
+   no-context call (correct for the active machine only); nodes.yaml hosts keep the
+   direct BatchMode OpenSSH channel.
 2. **Project = DSH workspace** — a project is nothing more than a DSH workspace (a
    local folder). Per-project task data lives at `<workspace>/.harnessams/tasks.json`;
    sessions are deliberately not modeled (every session of a workspace shares the task

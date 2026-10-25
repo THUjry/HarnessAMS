@@ -35,8 +35,35 @@ All notable changes are documented here. The format follows
   `GET /harnessams/assets/plotly.min.js` (whitelisted, immutable cache) — the
   single shared plotly copy is now servable in-app, not only shipped for offline
   reports.
+- Fixed the dsh-remote alignment probe (it always reported "not available" on
+  2026-10-25 builds): `tools.execute` requires a `callId` and an `AbortSignal`
+  (the pipeline crashes reading `signal.aborted` otherwise — verified against
+  dsh-tools 0.2.1-rc.2), `rw_machines` answers with a text listing rather than
+  JSON (parsed accordingly), the two channels now fail independently instead of
+  the first exception hiding the second, and the HTTP fallback forwards the
+  browser's cookie/authorization headers because the `/dsh-remote/*` surface
+  sits behind the DSH web auth gate.
+- The remote `du` check is wrapped in `timeout 15` so NFS-scale workspaces price
+  partial entries before rw_exec's 20 s command cap (and the ssh channel's
+  budget) instead of returning an empty timeout.
 
 ### Added
+
+- **Route A — remote checks through dsh-remote's `rw_exec` tool shell** (new route
+  `GET /api/check-remote?machine=`): dsh-remote machines are first-class health-check
+  targets in the console dropdown. Each check executes via `ctx.tools.execute` with a
+  *borrowed live session* (from the host `sessions` service) whose cwd lies inside the
+  machine's local workspace mirror — dsh-remote's binding resolution then targets that
+  machine using its stored credentials (password / keychain / agent included) without
+  touching the global active machine. A fabricated `{session:{header:{cwd}}}` object
+  does not survive the tool pipeline (the session is validated against the live store),
+  which is why a real session is borrowed; machines without a mirror accept the
+  no-context call only when they already are the active machine (409 with guidance
+  otherwise). The machine table shows each machine's rw_exec channel state
+  (mirror / active machine / none) and check rows carry a Channel column. Coupling
+  points locked for the dsh-remote 0.8.51 pin: the `agent.session.header.cwd` binding
+  shape, the `rw_machines` text format, and the `rw_exec` result text (stdout +
+  `-- stderr --` + `[exit code: N]` / timeout markers).
 
 - `src/client.js`: the browser half — a single-file classic script registered on
   `window.__ModuleLoader__` (no build chain; React via the loader's synchronous

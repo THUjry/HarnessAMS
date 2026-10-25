@@ -8,6 +8,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { resultText } from './machines.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -71,7 +72,10 @@ const REMOTE_CHECKS = [
   { id: 'disk', item: 'Disk', cmd: 'df -h ${WORKSPACE:-$HOME} | tail -1', judge: () => true },
   { id: 'ws', item: 'Workspace reachable', cmd: 'ls -ld ${WORKSPACE:-$HOME}', judge: (out) => out.trim().startsWith('d') },
   { id: 'ngspice', item: 'ngspice present', cmd: 'which ngspice && ngspice -v 2>&1 | head -1', judge: (out) => out.trim().length > 0 },
-  { id: 'du', item: 'Disk usage detail', cmd: 'du -sh ${WORKSPACE:-$HOME}/* 2>/dev/null | sort -rh | head -20', judge: () => true },
+  // `timeout 15` keeps the du inside rw_exec's 20 s command cap (and the ssh fallback's
+  // 15 s budget) on NFS-scale workspaces: killed du still emits the entries it priced,
+  // so the report shows partial data instead of an empty timeout.
+  { id: 'du', item: 'Disk usage detail', cmd: 'timeout 15 du -sh ${WORKSPACE:-$HOME}/* 2>/dev/null | sort -rh | head -20', judge: () => true },
 ]
 
 async function sshRun(node, remoteCmd, timeoutMs = 15000) {
@@ -104,4 +108,78 @@ export async function runNodeChecks(node, ws) {
                    detail: r.ok ? undefined : (r.stderr || r.error || '').slice(0, 200), ms: r.ms })
   }
   return results
+}
+
+// ---- route A: the same REMOTE_CHECKS through dsh-remote's rw_exec tool shell ----
+// rw_exec has no machine parameter — it binds from the calling session's cwd (a local
+// mirror resolves to that mirror's machine), or, with no caller context at all, the
+// global active machine. So the caller borrows a REAL live session whose cwd sits inside
+// the machine's mirror directory and passes it as the agent context (dsh-remote 0.8.51
+// bindingFor reads exec.agent.session.header.cwd): the check targets that machine
+// without touching the global currentId. A fabricated bare {header:{cwd}} object does
+// NOT work — the tool pipeline validates the session against the live session store
+// (`session "undefined" is not live in this store`), which is why a real session object
+// is required. Coupling points to re-verify when dsh-remote updates: that cwd shape,
+// and the rw_exec result text format parsed below. Per-command budget: the tool caps
+// itself at dsh-remote's commandTimeoutMs (default 20 s) and reports it in-band; our
+// AbortSignal sits above that so the tool's own timeout marker surfaces first.
+export function parseRwExecText(text) {
+  let raw = String(text ?? '')
+  // rw_exec appends the trailing markers to the END of the joined text — after the
+  // stderr section — so strip them before splitting stdout from stderr.
+  const timedOut = /\[command timed out after \d+ms\]/.test(raw)
+  raw = raw.replace(/\[command timed out after \d+ms\]\s*$/, '').replace(/\[cancelled[^\]]*\]\s*$/, '')
+  let exitCode = 0
+  const m = raw.match(/\[exit code: (-?\d+)\]\s*$/)
+  if (m) { exitCode = Number(m[1]); raw = raw.slice(0, m.index) }
+  else if (/\[exit code:/.test(raw)) exitCode = 1 // marker present but malformed — treat as failure
+  let stdout = raw, stderr = ''
+  const errAt = stdout.indexOf('-- stderr --')
+  if (errAt >= 0) { stderr = stdout.slice(errAt + '-- stderr --'.length).trim(); stdout = stdout.slice(0, errAt) }
+  return { stdout: stdout.trimEnd(), stderr, exitCode, timedOut }
+}
+
+export async function runMachineChecksViaToolShell(tools, machine, opts = {}) {
+  if (!tools?.get?.('rw_exec')) throw new Error('rw_exec tool not registered (dsh-remote not installed?)')
+  const channel = opts.agent ? 'dsh-remote (mirror)' : 'dsh-remote (active machine)'
+  // The binding context — see the block comment above. The pipeline validates the
+  // session object against the live session store (a fabricated bare {header} object
+  // is rejected with `session "undefined" is not live in this store`), so the caller
+  // passes a REAL live session whose cwd sits inside the machine's mirror; rw_exec then
+  // binds that mirror's machine. Without a mirror we send no context at all, which
+  // rw_exec resolves to the active machine (only correct for the current machine).
+  if (opts.agent !== undefined && typeof opts.agent?.session?.header?.cwd !== 'string') {
+    throw new Error('runMachineChecksViaToolShell: opts.agent must wrap a session with header.cwd')
+  }
+  const agent = opts.agent ?? undefined
+  const workspace = opts.mirror?.remotePath || machine.workspace || '$HOME'
+  const results = []
+  for (const c of REMOTE_CHECKS) {
+    const cmd = c.cmd.replaceAll('${WORKSPACE:-$HOME}', workspace)
+    const t0 = Date.now()
+    let entry = { item: c.item, cmd: `rw_exec ${machine.name || machine.host}: ${cmd}`, channel, ms: 0, ok: false }
+    try {
+      const r = await tools.execute({
+        callId: 'harnessams-check-' + Math.random().toString(36).slice(2, 8),
+        name: 'rw_exec',
+        arguments: { command: cmd },
+        signal: AbortSignal.timeout(30000),
+        ...(agent ? { agent } : {}),
+      })
+      const text = resultText(r)
+      if (r?.isError) {
+        entry.detail = text.slice(0, 200) || 'rw_exec returned an error'
+      } else {
+        const p = parseRwExecText(text)
+        entry.ok = p.exitCode === 0 && !p.timedOut && c.judge(p.stdout)
+        entry.result = (p.stdout || '').trim().split(/\r?\n/).slice(0, 3).join(' | ').slice(0, 200)
+        if (!entry.ok) entry.detail = (p.timedOut ? 'timed out; ' : '') + (p.stderr || `exit code ${p.exitCode}`).slice(0, 200)
+      }
+    } catch (e) {
+      entry.detail = String(e?.message ?? e).slice(0, 200)
+    }
+    entry.ms = Date.now() - t0
+    results.push(entry)
+  }
+  return { channel, results }
 }

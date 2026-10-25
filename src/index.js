@@ -7,14 +7,16 @@
 //   tier 3 (task sidebar)          — the task store API consumed per active session.
 // Routes are not token-gated by the DSH web server (verified 2026-10-25): only local
 // management reads/writes live here — no credentials, no remote-execution passthrough.
-// Remote node checks go through system OpenSSH wrapped in `bash -c` with BatchMode=yes.
+// Remote checks have two channels: dsh-remote machines go through the rw_exec tool shell
+// with a mirror-cwd agent context (route A, see checks.js); nodes.yaml hosts fall back to
+// system OpenSSH wrapped in `bash -c` with BatchMode=yes.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { findWorkspaceConfig, readNodes, validateNodes, writeNodes } from './server/workspace.js'
-import { runLocalChecks, runNodeChecks } from './server/checks.js'
+import { runLocalChecks, runNodeChecks, runMachineChecksViaToolShell } from './server/checks.js'
 import { localDiskUsage, workspaceDirs } from './server/disk.js'
 import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty } from './server/project.js'
-import { remoteMachinesStatus } from './server/machines.js'
+import { remoteMachinesStatus, fetchMachines, findMirrorForMachine, sessionInMirror } from './server/machines.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 
 export const name = 'dsh-harnessams'
@@ -112,6 +114,36 @@ async function handle(req, res, ctx) {
     const node = nodes.find((n) => String(n.HOST) === host)
     if (!node) { json(404, { error: `no such node in nodes.yaml: ${host} (or nodes.yaml has no real nodes configured)` }); return }
     json(200, { ok: true, node: host, results: await runNodeChecks(node, ws) })
+    return
+  }
+  if (route === '/api/check-remote') {
+    // Route A (2026-10-25): checks for a dsh-remote machine run through the rw_exec tool
+    // shell with a mirror-cwd agent context — no credentials handled here, no HTTP to the
+    // /dsh-remote surface, and the global active machine is never switched.
+    const machineId = url.searchParams.get('machine')
+    if (!machineId) { json(400, { error: 'missing machine parameter' }); return }
+    const list = await fetchMachines(ctx.tools, req)
+    if (!list.ok) { json(503, { error: `dsh-remote machines unavailable: ${list.reason}` }); return }
+    const m = list.machines.find((x) => x.id === machineId || x.name === machineId)
+    if (!m) { json(404, { error: `no such dsh-remote machine: ${machineId}` }); return }
+    const mirror = findMirrorForMachine(m)
+    if (!mirror && !m.current) {
+      json(409, { error: `"${m.name}" has no local mirror and is not the current machine — open its remote workspace once (rw_pick_workspace) so rw_exec can bind to it, or make it current` })
+      return
+    }
+    // Route A needs a REAL live session whose cwd is inside the mirror (the tool
+    // pipeline validates the session object); fall back to the no-context call only
+    // when the target already IS the active machine.
+    const borrowed = mirror ? sessionInMirror(ctx, mirror.mirrorDir) : null
+    if (mirror && !borrowed && !m.current) {
+      json(409, { error: `no live session is open in "${m.name}"'s workspace mirror (${mirror.mirrorDir}) — open a session there (the AutoAnalog workspace) or make the machine current, then re-run the check` })
+      return
+    }
+    try {
+      const r = await runMachineChecksViaToolShell(ctx.tools, m, { mirror, agent: borrowed?.agent })
+      json(200, { ok: true, node: m.name, channel: borrowed ? r.channel : 'dsh-remote (active machine)',
+                  mirror: mirror ? mirror.mirrorDir : null, borrowed_session: borrowed ? true : false, results: r.results })
+    } catch (e) { json(502, { error: String(e?.message ?? e) }) }
     return
   }
   if (route === '/api/nodes') {

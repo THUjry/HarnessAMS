@@ -194,8 +194,16 @@ window.__ModuleLoader__.load({
       const runCheck = async () => {
         setCheck({ status: 'running', results: null })
         try {
-          const r = await fetchJson(API + '/check?node=' + encodeURIComponent(checkNode))
-          setCheck({ status: 'done', node: checkNode, results: r.results })
+          let r
+          if (checkNode.startsWith('dshrm:')) {
+            const id = checkNode.slice('dshrm:'.length)
+            const m = (machines?.machines ?? []).find((x) => x.id === id)
+            r = await fetchJson(API + '/check-remote?machine=' + encodeURIComponent(id))
+            setCheck({ status: 'done', node: (m ? (m.name || m.host) : id) + ' (dsh-remote)', results: r.results })
+          } else {
+            r = await fetchJson(API + '/check?node=' + encodeURIComponent(checkNode))
+            setCheck({ status: 'done', node: checkNode, results: r.results })
+          }
         } catch (e) { setCheck({ status: 'failed: ' + e.message, results: null }) }
       }
       const diagnose = (item) => {
@@ -218,6 +226,15 @@ window.__ModuleLoader__.load({
           h('span', { className: 'hams-dim' }, nodesPath ? nodesPath : 'nodes.yaml not found'),
         ),
         err && h('div', { className: 'hams-err' }, err),
+        machines?.installed && (machines.machines?.length ?? 0) > 0 && h('table', { className: 'hams-table' },
+          h('thead', null, h('tr', null, ['dsh-remote machine', 'host', 'workspace', 'rw_exec channel'].map((c) => h('th', null, c)))),
+          h('tbody', null, machines.machines.map((m) => h('tr', { key: m.id },
+            h('td', null, esc(m.name || m.host) + (m.current ? ' · current' : '')),
+            h('td', null, esc((m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22))),
+            h('td', null, esc(m.workspace ?? '')),
+            h('td', null, m.mirror ? h('span', { className: 'hams-good' }, 'mirror')
+              : m.current ? h('span', { className: 'hams-good' }, 'active machine')
+              : h('span', { className: 'hams-warn' }, 'none — pick a workspace once')))))),
         !editing
           ? h('div', null,
               h('table', { className: 'hams-table' },
@@ -258,17 +275,20 @@ window.__ModuleLoader__.load({
           h('label', { className: 'hams-dim' }, 'Health check:'),
           h('select', { className: 'hams-select', value: checkNode, onChange: (e) => setCheckNode(e.target.value) },
             h('option', { value: 'local' }, 'local'),
-            (nodes ?? []).map((n) => h('option', { key: n.HOST, value: n.HOST }, n.HOST))),
+            (nodes ?? []).map((n) => h('option', { key: n.HOST, value: n.HOST }, n.HOST + ' (nodes.yaml)')),
+            (machines?.machines ?? []).map((m) => h('option', { key: m.id, value: 'dshrm:' + m.id },
+              (m.name || m.host) + ' (dsh-remote' + (m.mirror ? ', mirror' : m.current ? ', current' : '') + ')'))),
           h('button', { className: 'hams-btn', onClick: runCheck, disabled: check?.status === 'running' }, check?.status === 'running' ? 'Checking…' : 'Check'),
           check?.status && check.status !== 'done' && check.status !== 'running' && h('span', { className: 'hams-bad' }, check.status)),
         check?.results && h('div', null,
           h('table', { className: 'hams-table' },
-            h('thead', null, h('tr', null, ['Item', 'Command', 'Result', 'Elapsed', 'Status', ''].map((c) => h('th', null, c)))),
+            h('thead', null, h('tr', null, ['Item', 'Command', 'Result', 'Elapsed', 'Channel', 'Status', ''].map((c) => h('th', null, c)))),
             h('tbody', null, check.results.map((x, i) => h('tr', { key: i, className: x.ok ? '' : 'hams-rowbad' },
               h('td', null, esc(x.item)),
               h('td', null, h('code', null, esc(x.cmd ?? '-'))),
               h('td', null, esc(x.result || x.detail || '-') + (x.warn ? ' ' : ''), x.warn ? h('span', { className: 'hams-warn' }, '⚠ ' + esc(x.warn)) : null),
               h('td', null, x.ms + ' ms'),
+              h('td', { className: 'hams-dim' }, esc(x.channel ?? '')),
               h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'),
               h('td', null, x.ok ? null : h('button', { className: 'hams-btn hams-btn-sm', onClick: () => diagnose(x.item) }, 'Diagnose with agent')))))))
       )
