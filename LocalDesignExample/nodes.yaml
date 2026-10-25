@@ -1,0 +1,9 @@
+# Remote node list template (all commented out; nothing is configured by default).
+# Usage: uncomment and fill in real nodes; HOST is best given as a ~/.ssh/config alias.
+# Credentials are never stored here - the system OpenSSH (keys/agent) handles them.
+# nodes:
+#   - HOST: login
+#     HOSTNAME: 192.0.2.9
+#     PORT: 22
+#     WORKSPACE: /home/user/simulation
+#     reserved: false

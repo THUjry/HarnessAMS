@@ -1,0 +1,33 @@
+{
+  "name": "dsh-harnessams",
+  "version": "0.1.0",
+  "description": "HarnessAMS top-level plugin: console and orchestration (server health checks, disk usage/capacity, workspace directory management)",
+  "type": "module",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json",
+    "./cordis.patch.yml": "./cordis.patch.yml"
+  },
+  "files": [
+    "index.js",
+    "cordis.patch.yml",
+    "assets/",
+    "scripts/"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "dsh": "0.2.1-rc.2"
+  },
+  "license": "MIT",
+  "peerDependencies": {
+    "@deepseek-ai/dsh-host-webserver": ">=0.0.1-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/dsh-host-webserver": "0.0.1-rc.1"
+  }
+}

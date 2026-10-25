@@ -1,0 +1,6 @@
+# Vendored third-party assets: keep byte-exact, no line-ending conversion
+LocalDesignExample/ngspice-47-portable/*.exe binary
+LocalDesignExample/ngspice-47-portable/*.dll binary
+LocalDesignExample/ngspice-47-portable/COPYING -text
+LocalDesignExample/sky130/** -text
+src/assets/plotly.min.js -text

@@ -1,0 +1,6 @@
+# HarnessAMS top-level plugin bundle patch
+# Constraints: a patch replaces whole config rows (no deep merge);
+# row ids are stable and unique (changing an id is a breaking change); name references the package name.
+- insert:
+  - id: harnessams-top
+    name: dsh-harnessams

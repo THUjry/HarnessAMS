@@ -1,0 +1,22 @@
+{
+  "name": "dsh-harnessams-suite",
+  "version": "0.1.0",
+  "description": "HarnessAMS aggregate bundle: install all first-party HarnessAMS plugins in one step (pure patch package, no third-party plugins)",
+  "type": "module",
+  "files": [
+    "cordis.patch.yml"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {
+    "dsh-harnessams": "0.1.0",
+    "dsh-harnessams-smart-ana-sim": "0.1.0"
+  },
+  "engines": {
+    "dsh": "0.2.1-rc.2"
+  },
+  "license": "MIT"
+}

@@ -1,0 +1,8 @@
+# Aggregate bundle: explicitly restates every member row (npm dependencies do not auto-apply
+# config layers).
+# Membership changes are a startup boundary: the profile must be restarted after install/update.
+- insert:
+  - id: harnessams-top
+    name: dsh-harnessams
+  - id: harnessams-smart-ana-sim
+    name: dsh-harnessams-smart-ana-sim
