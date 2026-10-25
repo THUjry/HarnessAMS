@@ -36,6 +36,10 @@
     "dsh": "0.2.1-rc.2"
   },
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/THUjry/HarnessAMS.git"
+  },
   "peerDependencies": {
     "@deepseek-ai/dsh-host-webserver": ">=0.0.1-rc.1",
     "@deepseek-ai/dsh-client-ui-renderer": ">=0.1.2-rc.1 <0.3.0",
