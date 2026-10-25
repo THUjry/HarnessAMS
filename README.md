@@ -8,7 +8,7 @@
 
 | Plugin | npm package | row id | Responsibility | Stage | Status |
 |---|---|---|---|---|---|
-| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Console and orchestration: server health checks, disk usage/capacity, workspace directory management | stage 1 | implemented (this repo, `src/`) |
+| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (server management, digital assets, disk usage), project = DSH workspace, per-project task sidebar | stage 1 | implemented (this repo, `src/`) |
 | HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local ngspice channel, code-driven netlist assembly (hard PDK isolation), HTML reports | stage 1 | implemented (separate repo) |
 | HarnessAMS-SmartPostLayout | (repo in stage 2) | `harnessams-smart-post-layout` | One-click post-layout simulation | stage 2 | not started |
 | HarnessAMS-aligner | (repo in stage 3) | `harnessams-aligner` | Multi-level alignment | stage 3 | not started |
@@ -17,20 +17,43 @@
 
 ```
 src/                     dsh-harnessams — console plugin package:
-                         index.js (plain JS, no build chain), assets/ (plotly.min.js +
-                         THIRD_PARTY_NOTICES), scripts/ (shipped developer utilities)
+                         index.js (host-half routes, plain JS, no build chain),
+                         server/ (host-half modules: workspace/checks/disk/project/machines/assets),
+                         client.js (browser half — single-file classic script on window.__ModuleLoader__),
+                         assets/ (plotly.min.js + THIRD_PARTY_NOTICES), scripts/ (shipped developer utilities)
 install_suite/           dsh-harnessams-suite — aggregate bundle (pure patch package)
-tests/                   starter unit tests (bare node --test, from the repo root)
+tests/                   unit tests (bare node --test, from the repo root)
 docs/                    plugin index, compatibility matrix
 LocalDesignExample/      bundled local simulation environment (see below)
 CHANGELOG.md / SECURITY.md / PUBLISH.md
 ```
 
+## The three-tier UI (DSH Web)
+
+The plugin surfaces itself inside the DSH Web client (no separate page URL):
+
+1. **Global console page** — the "HarnessAMS" entry in the left sidebar (next to
+   Plugins / Automation tasks) opens a full page with **Servers** (nodes.yaml CRUD —
+   saving rewrites the file, per-node health checks with one-click agent-diagnosis
+   prompts, and dsh-remote alignment showing its machine registry and which node HOSTs
+   are known there), **Digital assets** (plotly asset status + the workspace report
+   library), and **Disk usage** for the local workspace.
+2. **Project = DSH workspace** — a project is nothing more than a DSH workspace (a
+   local folder). Per-project task data lives at `<workspace>/.harnessams/tasks.json`;
+   sessions are deliberately not modeled (every session of a workspace shares the task
+   list).
+3. **Task sidebar** — the right-sidebar "HarnessAMS" tab manages the active project's
+   tasks: a tab strip (one card per task, "+" to create, × to delete), an in-task
+   sub-navigation (**Overview** with the editable description, **Dashboard** and
+   **Sim settings** as placeholders until their milestones land), and a conversation
+   header button that opens the tab and — while pinned 📌 — re-opens it on every
+   session switch, so the sidebar follows workspace switches instead of collapsing.
+
 ## What the npm packages ship (besides the JS)
 
 | Package | Ships beyond the entry JS | Deliberately NOT shipped |
 |---|---|---|
-| `dsh-harnessams` (`src/`) | `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering) + `assets/THIRD_PARTY_NOTICES.md` (Plotly MIT attribution); `scripts/` (developer utilities shipped with the package — currently a placeholder README) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
+| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + `assets/THIRD_PARTY_NOTICES.md` (Plotly MIT attribution); `scripts/` (developer utilities shipped with the package — currently a placeholder README) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
 The single shared `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite
@@ -118,7 +141,7 @@ Everything ships as plain source: the plugin entries are plain-JS ESM loaded dir
 | Per-project assembly/analysis scripts (yours to own) | workspace: `<workspace>/<demo>/script/analysis/*.py` (e.g. `gen_ota5t.py`) | next run |
 | Framework scripts shipped with the plugin | SmartAnaSim package dir, e.g. `~/.dsh/profiles/web/node_modules/dsh-harnessams-smart-ana-sim/scripts/` (`sweep_worker_ngspice.py`, `checks.py`, `collect_results.py`, `gen_sweep_report.py`, `trash.py`) | next run |
 | Bundled example copies | this repo: `LocalDesignExample/tools/*.py` — verbatim copies of the plugin scripts above; re-sync when the plugin updates | next run |
-| Plugin JS entries (`src/index.js` in both plugin repos) | dev-mount: the repo's own `src/index.js` (your edit is the source); installed: `node_modules/<package>/src/index.js` | after restarting that DSH instance |
+| Plugin JS entries (`src/index.js` + `src/client.js` here, `src/index.js` in SmartAnaSim) | dev-mount: the repo's own `src/` (your edit is the source); installed: `node_modules/<package>/src/` | after restarting that DSH instance |
 
 Why the difference: every tool invocation spawns a fresh `python <script>` process (system Python from `PATH`) that reads the file from disk again — no rebuild, no reinstall, no DSH restart (a sweep already in progress keeps the copy it loaded). The JS entry, in contrast, is loaded once via ESM at startup and cached by the module system, so it needs a restart of that instance; other instances are separate processes and keep running unaffected.
 

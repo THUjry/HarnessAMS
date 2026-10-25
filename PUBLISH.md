@@ -17,10 +17,12 @@ Checklist (per package, run from the package directory):
    - Confirm `engines.dsh` still matches the verified DSH version. If the DSH version
      changed, re-run the minimal regression first and update `docs/compatibility.md`.
 2. Package content check (must-contain AND must-not-contain)
-   - `dsh-harnessams` (run in `src/`) must contain exactly: `index.js`, `cordis.patch.yml`,
-     `assets/` (`plotly.min.js` about 4.6 MB + `THIRD_PARTY_NOTICES.md` — the Plotly MIT
-     attribution travels with the asset), `scripts/` (currently a placeholder README only),
-     plus `package.json` (npm always includes it).
+   - `dsh-harnessams` (run in `src/`) must contain exactly: `index.js`, `client.js` (the
+     browser half — combo-loaded classic script, single file), `server/` (host-half
+     modules), `cordis.patch.yml`, `assets/` (`plotly.min.js` about 4.6 MB +
+     `THIRD_PARTY_NOTICES.md` — the Plotly MIT attribution travels with the asset),
+     `scripts/` (currently a placeholder README only), plus `package.json` (npm always
+     includes it).
    - Must NOT contain: `LocalDesignExample/` (the ~21 MB vendored simulation environment —
      the biggest leak risk), `docs/`, `tests/`, `install_suite/`, `.gitattributes`, or the
      repo-root README/AGENTS/CHANGELOG (running from `src/` keeps them out).
