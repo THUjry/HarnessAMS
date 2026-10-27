@@ -25,10 +25,10 @@ without external downloads. Each component is used unmodified under its own lice
 
 ## plotly.min.js
 
-Not bundled here. The **single shared copy** for the whole HarnessAMSproject tree lives at
+Not bundled here. The **master copy** for the whole HarnessAMSproject tree lives at
 the repo level inside the `dsh-harnessams` package: `../src/assets/plotly.min.js`
 (plotly.js v3.0.1, MIT, Copyright (c) 2012-2025 Plotly, Inc.; notice and license text:
 `../src/assets/THIRD_PARTY_NOTICES.md`) — it ships with the `dsh-harnessams` npm tarball.
-The report generator (`tools/gen_sweep_report.py`) discovers it automatically — by walking
-up from its own location or via the workspace `plotly_asset` field — and places a copy
-beside each generated report so reports render fully offline.
+The report generator (`tools/gen_sweep_report.py`) discovers it automatically and seeds
+the workspace-level `assets/plotly.min.js` from it; generated reports reference that
+workspace copy with a relative path so they render fully offline.

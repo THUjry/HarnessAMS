@@ -20,9 +20,9 @@ sky130 netlist end-to-end, and (3) reads the workspace config. All green = ready
 - `sky130/` — fossi sky130_fd_pr minimal model closure (`combined_models/` + `cells/`)
   with its Apache-2.0 LICENSE (see its README for the upstream repository and the
   trimming rationale)
-- offline report asset: the repo-level `../src/assets/plotly.min.js` (the single shared copy
-  for the whole project, shipped inside the `dsh-harnessams` package; the report generator
-  discovers it by walking up)
+- offline report asset: the repo-level `../src/assets/plotly.min.js` (the master copy,
+  shipped inside the `dsh-harnessams` package; the report generator seeds the
+  workspace-level `assets/plotly.min.js` from it — that runtime copy is gitignored)
 - `tools/` — verbatim copies of the SmartAnaSim pipeline scripts (see `tools/README.md`)
 - `harnessams.json` — workspace config; all paths relative to this file
 - `demo1/`, `demo2/` — demo project placeholders (content lands with the demo milestones)

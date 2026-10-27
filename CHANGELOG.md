@@ -7,6 +7,14 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- **Report plotly delivery reworked (2026-10-27, D-001 in `docs/decisions.md`)**:
+  report generators seed a single workspace-level
+  `<workspace_root>/assets/plotly.min.js` from the shipped master copy
+  (`src/assets/plotly.min.js`, refreshed on size mismatch) and reference it with a
+  workspace-relative `src` — previously each generated report carried its own 4.6 MB
+  copy. The CDN remains the last-resort fallback, and the in-app
+  `/harnessams/assets/plotly.min.js` route is unchanged.
+  `LocalDesignExample/tools/` re-synced accordingly.
 - **Business-logic rework (2026-10-26): remote connectivity is delegated entirely to
   dsh-remote.** The Servers feature is gone (nodes.yaml registry + the BatchMode
   OpenSSH fallback channel + their routes), replaced by the remote-project model:

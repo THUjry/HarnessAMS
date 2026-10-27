@@ -83,8 +83,9 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
 | `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + `assets/THIRD_PARTY_NOTICES.md` (Plotly MIT attribution); `scripts/` (developer utilities shipped with the package — currently a placeholder README) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
-The single shared `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite
-installs get offline reports without a second copy anywhere. `PUBLISH.md` holds the
+The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite
+installs get offline reports: report generators seed a single workspace-level copy
+from it (see `docs/decisions.md`, D-001). `PUBLISH.md` holds the
 must-contain / must-not-contain checks that guard each tarball.
 
 ## LocalDesignExample (bundled local simulation environment)
@@ -102,11 +103,14 @@ LocalDesignExample/
   demo1/, demo2/         demo project placeholders (content lands with the demo milestones)
 ```
 
-Offline report rendering uses `src/assets/plotly.min.js` (the single shared copy for the
-whole project tree — never duplicated elsewhere; it ships inside the `dsh-harnessams`
-tarball). The report generator finds it by walking up from its own location, via the
-workspace `harnessams.json` `plotly_asset` field, or from a sibling `dsh-harnessams`
-install under `node_modules/`.
+Offline report rendering uses a single workspace-level copy: the report generator seeds
+`<workspace_root>/assets/plotly.min.js` from the master `src/assets/plotly.min.js`
+(which ships inside the `dsh-harnessams` tarball and is found by walking up from its own
+location, via the workspace `harnessams.json` `plotly_asset` field, or from a sibling
+`dsh-harnessams` install under `node_modules/`), and every report references it with a
+workspace-relative `src`. The CDN is the last-resort fallback. See `docs/decisions.md`
+(D-001). The seeded workspace copy is a runtime artifact (gitignored under
+`LocalDesignExample/`).
 
 Run `python check_environment.py` from `LocalDesignExample/` after cloning. Non-Windows
 hosts: install ngspice yourself and point `ngspice_cmd` in `harnessams.json` at it (the
