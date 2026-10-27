@@ -17,8 +17,11 @@ function assertValidShell(cmd) {
 import { sessionProject, readTasks, writeTasks, tasksPath } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { resultText, parseRwMachinesText, fetchMachines, findMirrorForMachine, sessionInMirror } from '../src/server/machines.js'
-import { parseRwExecText, runRemoteCheckButton, REMOTE_CHECK_BUTTONS } from '../src/server/checks.js'
-import { remoteProjectFor, machineForProject, agentForSession, projectSessions, createRemoteProject } from '../src/server/remote.js'
+import {
+  parseRwExecText, runRemoteCheckButton, REMOTE_CHECK_BUTTONS,
+  parseLoadRow, parseBjobsRows, parseBatchRows, rootize,
+} from '../src/server/checks.js'
+import { remoteProjectFor, machineForProject, checkMachinesForLocal, findRemoteProjectForMachine, projectSessions, createRemoteProject } from '../src/server/remote.js'
 
 test('project: sessionProject maps over the workspace registry', () => {
   const registry = {
@@ -222,14 +225,42 @@ test('remote: machineForProject matches host+port+user', () => {
   assert.equal(machineForProject(list, null), null)
 })
 
-test('remote: agentForSession returns a live-store session agent', () => {
-  const sess = { header: { cwd: 'X:/mirror/ws' } }
-  const ctx = { get: (n) => (n === 'sessions' ? { get: (id) => (id === 's1' ? sess : undefined) } : null) }
-  assert.equal(agentForSession(ctx, 's1').agent.session, sess)
-  assert.equal(agentForSession(ctx, 's404'), null)
-  assert.equal(agentForSession(null, 's1'), null)
-  const badCtx = { get: () => ({ get: () => ({ header: {} }) }) } // cwd not a string
-  assert.equal(agentForSession(badCtx, 's1'), null)
+test('remote: checkMachinesForLocal joins machines with remote projects and live sessions', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'hams-cml-'))
+  try {
+    const meta = { host: '192.0.2.11', port: 22, username: 'op', remotePath: '/home/op/sim/AutoAnalog' }
+    const mirror = path.join(root, '192.0.2.11-op-22', 'AutoAnalog')
+    await mkdir(path.join(mirror, 'sub'), { recursive: true })
+    await writeFile(path.join(mirror, '.dsh-remote-meta.json'), JSON.stringify(meta), 'utf8')
+    const ctx = {
+      workspaceRegistry: { list: () => [
+        { id: 'w1', path: 'D:/local-ws', title: 'Local' },
+        { id: 'w2', path: mirror, title: 'node1 (remote)' },
+      ] },
+      get: (n) => (n === 'sessions' ? { list: () => [{ header: { cwd: path.join(mirror, 'sub') } }] } : null),
+    }
+    const machines = [
+      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', current: true,
+        workspace: '/home/op/sim/AutoAnalog', lastConnectedAt: '2026-10-27T08:00:00Z', latencyMs: 12 },
+      { id: 'm-2', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root' }, // no remote project -> not listed
+    ]
+    const out = checkMachinesForLocal(ctx, machines, root)
+    assert.equal(out.length, 1)
+    assert.equal(out[0].id, 'm-1')
+    assert.equal(out[0].name, 'node1')
+    assert.equal(out[0].remotePath, '/home/op/sim/AutoAnalog')
+    assert.match(out[0].mirrorDir.replace(/\\/g, '/'), /AutoAnalog$/)
+    assert.equal(out[0].projectTitle, 'node1 (remote)')
+    assert.equal(out[0].liveSessions, 1)
+    assert.equal(out[0].current, true)
+    assert.equal(out[0].latencyMs, 12)
+    assert.equal(out[0].lastConnectedAt, '2026-10-27T08:00:00Z')
+
+    assert.equal(findRemoteProjectForMachine(ctx, { host: '10.0.0.8', port: 2222, username: 'root' }, root), null)
+    assert.equal(findRemoteProjectForMachine({ workspaceRegistry: { list: () => { throw new Error('down') } } }, machines[0], root), null)
+    assert.deepEqual(checkMachinesForLocal(null, machines, root), [])
+    assert.deepEqual(checkMachinesForLocal(ctx, [], root), [])
+  } finally { await rm(root, { recursive: true, force: true }) }
 })
 
 test('remote: projectSessions counts live sessions rooted in the workspace', () => {
@@ -307,7 +338,7 @@ test('checks: the button surface is the four Overview buttons', () => {
   assert.deepEqual(REMOTE_CHECK_BUTTONS.map((b) => b.id), ['load', 'jobs', 'batches', 'scripts'])
 })
 
-test('checks: runRemoteCheckButton load runs with the project session agent', async () => {
+test('checks: runRemoteCheckButton load runs with the borrowed session agent', async () => {
   const inputs = []
   const tools = {
     get: (name) => (name === 'rw_exec' ? { name } : undefined),
@@ -318,10 +349,12 @@ test('checks: runRemoteCheckButton load runs with the project session agent', as
   }
   const agent = { session: { header: { cwd: 'MIRROR/DIR' } } }
   const r = await runRemoteCheckButton(tools, 'load', { agent, remotePath: '/home/op/sim' })
-  assert.equal(r.channel, 'dsh-remote (project session)')
+  assert.equal(r.channel, 'dsh-remote (remote project session)')
   assert.equal(r.results.length, 1)
   assert.ok(r.results[0].ok, r.results[0].detail)
   assert.match(r.results[0].cmd, /cat \/proc\/loadavg && nproc/)
+  assert.deepEqual(r.results[0].rows, [['0.42', '0.51', '0.55', '3/900', '48']])
+  assert.match(r.results[0].result, /load 0\.42 \/ 48 cpu/)
   assert.equal(inputs[0].agent.session.header.cwd, 'MIRROR/DIR') // binding context
   assert.ok(inputs[0].signal instanceof AbortSignal && inputs[0].callId)
   assert.equal(inputs[0].name, 'rw_exec')
@@ -337,6 +370,7 @@ test('checks: runRemoteCheckButton jobs surfaces a missing bjobs and an empty qu
   assert.equal(r.results[0].ok, false)
   assert.match(r.results[0].result, /command not found/)
   assert.match(r.results[0].detail, /exit code 127/)
+  assert.equal(r.results[0].rows, undefined) // no table for a failed run
 
   // LSF bjobs exits 255 with "No job found" on an empty queue — healthy, not a failure
   const tools2 = {
@@ -347,28 +381,65 @@ test('checks: runRemoteCheckButton jobs surfaces a missing bjobs and an empty qu
   assert.equal(r2.results[0].ok, true)
   assert.match(r2.results[0].result, /No job found/)
   assert.equal(r2.results[0].detail, undefined)
+  assert.deepEqual(r2.results[0].rows, []) // empty table; the client falls back to the text
 })
 
-test('checks: runRemoteCheckButton batches lists progress files in the workspace scope', async () => {
+test('checks: runRemoteCheckButton jobs parses bjobs -a into columned rows', async () => {
+  const bjobsOut = [
+    'JOBID   USER STAT  QUEUE    FROM_HOST  EXEC_HOST  JOB_NAME   SUBMIT_TIME',
+    '15326201 op RUN   normal   login01    node3      sp_00001   Oct 26 21:04',
+    '15325000 op DONE  normal   login01    node4      sweep_ctl  Sep 30 08:15',
+    '15324999 op PEND  normal   login01               wait_job   Feb 12  2025',
+    'garbage line without columns',
+  ].join('\n')
+  const tools = {
+    get: () => ({}),
+    execute: async () => ({ isError: false, value: { text: bjobsOut + '\n[exit code: 0]' }, content: [] }),
+  }
+  const r = await runRemoteCheckButton(tools, 'jobs', { remotePath: '/w' })
+  const e = r.results[0]
+  assert.ok(e.ok, e.detail)
+  assert.equal(e.result, '3 job(s)')
+  // display columns [jobid, stat, exec host, name, submit time]; the PEND row's empty
+  // exec-host cell is recovered by the all-time-tail heuristic (exec host -> '')
+  assert.deepEqual(e.rows[0], ['15326201', 'RUN', 'node3', 'sp_00001', 'Oct 26 21:04'])
+  assert.deepEqual(e.rows[1], ['15325000', 'DONE', 'node4', 'sweep_ctl', 'Sep 30 08:15'])
+  assert.deepEqual(e.rows[2], ['15324999', 'PEND', '', 'wait_job', 'Feb 12 2025'])
+  assert.equal(e.rows.length, 3) // header + garbage skipped
+  assert.ok(e.rowsRaw[0].startsWith('15326201'))
+  assert.equal(e.truncated, false)
+})
+
+test('checks: runRemoteCheckButton batches lists progress files with $ROOT paths', async () => {
   const inputs = []
   const tools = {
     get: () => ({}),
     execute: async (input) => {
       inputs.push(input)
-      return { isError: false, value: { text: '/home/op/sim/b1  [completed] 32/32\n/home/op/sim/b2  [running] 4/16\n[exit code: 0]' }, content: [] }
+      return { isError: false, value: { text:
+        '/home/op/sim/AutoAnalog/b1  [completed] 32/32\n'
+        + '/home/op/sim/AutoAnalog/b2  [running] 4/16\n'
+        + '/elsewhere/b3  [failed] 1/8\n[exit code: 0]' }, content: [] }
     },
   }
   const r = await runRemoteCheckButton(tools, 'batches', { remotePath: '/home/op/sim/AutoAnalog' })
-  assert.ok(r.results[0].ok, r.results[0].detail)
-  assert.match(r.results[0].result, /b1  \[completed\] 32\/32/)
-  assert.match(r.results[0].cmd, /find "\/home\/op\/sim\/AutoAnalog" -maxdepth 4 -name sweep_progress\.json/)
+  const e = r.results[0]
+  assert.ok(e.ok, e.detail)
+  assert.equal(e.result, '3 batch dir(s)')
+  assert.deepEqual(e.rows, [
+    ['$ROOT/b1', 'completed', '32/32'],
+    ['$ROOT/b2', 'running', '4/16'],
+    ['/elsewhere/b3', 'failed', '1/8'], // outside the scope — verbatim
+  ])
+  assert.match(e.cmd, /find "\/home\/op\/sim\/AutoAnalog" -maxdepth 4 -name sweep_progress\.json/)
   assertValidShell(inputs[0].arguments.command)
 
-  // empty result is still a pass — it reports "none found"
+  // empty result is still a pass — it reports "none found", no table
   const tools2 = { get: () => ({}), execute: async () => ({ isError: false, value: { text: '[exit code: 0]' }, content: [] }) }
   const r2 = await runRemoteCheckButton(tools2, 'batches', { remotePath: '/w' })
   assert.ok(r2.results[0].ok)
   assert.match(r2.results[0].result, /no sweep_progress\.json found/)
+  assert.equal(r2.results[0].rows, undefined)
 })
 
 test('checks: runRemoteCheckButton scripts compares local md5 against the remote workspace', async () => {
@@ -392,6 +463,8 @@ test('checks: runRemoteCheckButton scripts compares local md5 against the remote
     const e = r.results[0]
     assert.ok(e.ok, e.detail)
     assert.match(e.result, /1 in sync, 1 differ, 0 only local, 1 only remote/)
+    assert.deepEqual(e.rows, [['a.py', 'in-sync'], ['b.py', 'differs'], ['zz.py', 'only-remote']])
+    assert.equal(e.truncated, false)
     assert.match(e.warn, /drift/)
     assert.match(e.detail, /b\.py — differs/)
     assert.match(e.detail, /zz\.py — only-remote/)
@@ -410,4 +483,67 @@ test('checks: unknown button and missing rw_exec are hard errors', async () => {
   const tools = { get: () => ({}), execute: async () => ({ isError: false, value: { text: 'x' }, content: [] }) }
   await assert.rejects(() => runRemoteCheckButton(tools, 'nope', {}), /unknown check button/)
   await assert.rejects(() => runRemoteCheckButton({ get: () => undefined }, 'load', {}), /rw_exec tool not registered/)
+})
+
+// ---- result parsers (structured rows for the columned tables) ----
+
+test('checks: parseLoadRow takes loadavg + nproc and drops the last-pid field', () => {
+  assert.deepEqual(parseLoadRow('0.42 0.51 0.55 3/900 12345\n48\n'), ['0.42', '0.51', '0.55', '3/900', '48'])
+  assert.equal(parseLoadRow('0.42 0.51 0.55 3/900\n'), null) // no nproc line
+  assert.equal(parseLoadRow('not a loadavg line\n48\n'), null)
+  assert.equal(parseLoadRow(''), null)
+  assert.equal(parseLoadRow(null), null)
+})
+
+test('checks: parseBjobsRows handles header, formats, empty queue and garbage', () => {
+  const parsed = parseBjobsRows('JOBID USER STAT QUEUE FROM_HOST EXEC_HOST JOB_NAME SUBMIT_TIME\n'
+    + '1 op RUN normal login01 node3 job_a Oct 26 21:04\n')
+  assert.deepEqual(parsed.rows, [['1', 'RUN', 'node3', 'job_a', 'Oct 26 21:04']])
+  assert.equal(parsed.total, 1)
+  assert.equal(parsed.truncated, false)
+
+  // the target cluster's zscheduler bjobs adds FROM_CLUSTER/EXEC_CLUSTER columns —
+  // the layout is taken from the header line, not a fixed column count
+  const zsched = parseBjobsRows(
+    'JOBID USER STAT QUEUE FROM_CLUSTER FROM_HOST EXEC_CLUSTER EXEC_HOST JOB_NAME SUBMIT_TIME\n'
+    + '15350701 test_user RUN normal zscheduler node1 zscheduler node3 virtuoso Oct 26 16:43\n')
+  assert.deepEqual(zsched.rows, [['15350701', 'RUN', 'node3', 'virtuoso', 'Oct 26 16:43']])
+
+  const empty = parseBjobsRows('No job found')
+  assert.deepEqual(empty, { rows: [], raw: [], total: 0, truncated: false })
+
+  // numeric job names must not be peeled into the date tail
+  const numeric = parseBjobsRows('2 u RUN q h e 12345 Oct 26 21:04')
+  assert.deepEqual(numeric.rows, [['2', 'RUN', 'e', '12345', 'Oct 26 21:04']])
+
+  // a tail without any time shape stays part of the job name
+  const named = parseBjobsRows('3 u RUN q h e my job name')
+  assert.deepEqual(named.rows, [['3', 'RUN', 'e', 'my job name', '']])
+
+  // a tail without any time shape stays part of the job name; nothing parses -> null
+  assert.equal(parseBjobsRows('only garbage here'), null)
+  assert.equal(parseBjobsRows(''), null)
+
+  // >maxRows entries are capped and flagged
+  const many = Array.from({ length: 35 }, (_, i) => `${1000 + i} u RUN q h e job_${i} Oct 26 21:04`).join('\n')
+  const capped = parseBjobsRows(many)
+  assert.equal(capped.rows.length, 30)
+  assert.equal(capped.total, 35)
+  assert.equal(capped.truncated, true)
+})
+
+test('checks: rootize collapses the workspace-scope prefix only', () => {
+  assert.equal(rootize('/home/op/sim/AutoAnalog/b1', '/home/op/sim/AutoAnalog'), '$ROOT/b1')
+  assert.equal(rootize('/home/op/sim/AutoAnalog', '/home/op/sim/AutoAnalog'), '$ROOT')
+  assert.equal(rootize('/home/op/sim/AutoAnalogX/b1', '/home/op/sim/AutoAnalog'), '/home/op/sim/AutoAnalogX/b1') // prefix boundary
+  assert.equal(rootize('/elsewhere/b1', '/home/op/sim/AutoAnalog'), '/elsewhere/b1')
+  assert.equal(rootize('/b1', ''), '/b1') // no scope -> verbatim
+})
+
+test('checks: parseBatchRows turns one-liner lines into [dir, status, progress]', () => {
+  const rows = parseBatchRows(
+    '/w/b1  [completed] 18/18\n/w/b2  [?] ?/?\nnot a batch line\n',
+    '/w')
+  assert.deepEqual(rows, [['$ROOT/b1', 'completed', '18/18'], ['$ROOT/b2', '?', '?/?']])
+  assert.deepEqual(parseBatchRows('', '/w'), [])
 })

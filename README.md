@@ -54,27 +54,34 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    local folder). Per-project task data lives at `<workspace>/.harnessams/tasks.json`;
    sessions are deliberately not modeled (every session of a workspace shares the task
    list). A workspace inside a dsh-remote mirror is that machine's remote project.
-3. **Task sidebar** — the right-sidebar "HarnessAMS" tab manages the active project's
-   tasks: a tab strip (one card per task, "+" to create, × to delete), an in-task
-   sub-navigation (**Overview** with the health-check panel and the editable
-   description, **Dashboard** and **Sim settings** as placeholders until their
+3. **Task sidebar (local projects only)** — the right-sidebar "HarnessAMS" tab manages
+   the active project's tasks: a tab strip (one card per task, "+" to create, × to
+   delete), an in-task sub-navigation (**Overview** with the health-check panel and the
+   editable description, **Dashboard** and **Sim settings** as placeholders until their
    milestones land), and a conversation header button that opens the tab and — while
    pinned 📌 — re-opens it on every session switch, so the sidebar follows workspace
-   switches instead of collapsing.
+   switches instead of collapsing. **Remote projects get no sidebar at all** (their
+   role is anchoring the connection — remote files are browsed with dsh-remote
+   itself): the tab body shows a one-line note, and the pinned auto-reopen skips
+   remote sessions entirely.
 
-   The **Overview health checks** are per project, one button per function, executed
-   through dsh-remote's `rw_exec` tool shell with the sidebar's own session as the
-   agent context — its cwd already sits inside the remote project's mirror, which is
-   what binds the machine (no cross-project session borrowing, no global
-   active-machine switching). Remote projects get a status header (machine, remote
-   area path, local mirror, live project sessions, last-connection facts) and four
-   buttons: **Load** (`/proc/loadavg` + core count), **LSF jobs** (`bjobs -a` queue
-   overview), **Batch dirs** (work dirs carrying a `sweep_progress.json`, with their
-   status/progress), and **Script sync** (md5 drift between the configured local
-   `sim_scripts_dir` and the remote workspace root — report only, nothing is
-   uploaded). Local projects get one button running the local environment report
-   (python / ngspice / sky130 PDK / disk / write probe). Failing rows offer a
-   one-click agent-diagnosis prompt.
+   The **Overview health checks** live in the local project's sidebar, one button per
+   function. The **Local environment** button runs the local report (python / ngspice
+   / sky130 PDK / disk / write probe). Below it, every dsh-remote machine that has a
+   remote project gets its own block — machine identity (`user@host:port`, current
+   marker, latency, last connection), the remote area path, and the live-session count
+   of that remote project — with four buttons: **Load** (`/proc/loadavg` + core
+   count), **LSF jobs** (`bjobs -a` queue overview), **Batch dirs** (work dirs
+   carrying a `sweep_progress.json`, with their status/progress), and **Script sync**
+   (md5 drift between the configured local `sim_scripts_dir` and the remote workspace
+   root — report only, nothing is uploaded). A run borrows a live session of that
+   machine's remote project as the `rw_exec` agent context (its cwd inside the mirror
+   is what binds the machine — no global active-machine switching); with no live
+   session the buttons stay disabled with guidance. Results render as columned tables
+   (job id / stat / exec host / name / submit time; directory / status / progress;
+   file / sync state), with the workspace-scope prefix abbreviated to `$ROOT` and a
+   legend line expanding it; a check whose output cannot be parsed falls back to its
+   raw text. Failing rows offer a one-click agent-diagnosis prompt.
 
 ## What the npm packages ship (besides the JS)
 

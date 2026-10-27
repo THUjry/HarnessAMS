@@ -5,9 +5,10 @@
 // by a .dsh-remote-meta.json); one remote project per machine is the recommended
 // setup, so most users never need more than one. The mirror's remotePath is the scope
 // boundary for every remote command this plugin runs (checks interpolate it as
-// $WORKSPACE). Sessions opened in the remote project are what bind dsh-remote's rw_*
-// tools to that machine — the health checks pass the sidebar's own session as the
-// agent context, so no cross-project session borrowing is involved. Remote file
+// $WORKSPACE). Remote projects carry no HarnessAMS UI (the sidebar is local-projects
+// only, 2026-10-27): their role is to anchor the connection — sessions opened in the
+// remote project bind dsh-remote's rw_* tools to that machine, and the local project's
+// Overview checks borrow one of those sessions as the agent context. Remote file
 // browsing/editing is deliberately NOT duplicated here: use dsh-remote's own file
 // tools and web surface for that.
 import fs from 'node:fs'
@@ -61,18 +62,48 @@ export function machineForProject(machineList, rp) {
   return null
 }
 
-// The agent context for the rw_* tool shell, taken from a REAL live session — the
-// tool pipeline validates the session object against the live store (a fabricated
-// {header} object is rejected), so only sessions.get() results work. For checks this
-// is the sidebar's own session; its cwd already sits inside the project's mirror,
-// which is what binds rw_exec to the project's machine.
-export function agentForSession(ctx, sessionId) {
-  const sessions = typeof ctx?.get === 'function' ? ctx.get('sessions') : null
-  if (!sessions || typeof sessions.get !== 'function') return null
-  let s = null
-  try { s = sessions.get(sessionId) } catch { return null }
-  if (!s || typeof s?.header?.cwd !== 'string') return null
-  return { agent: { session: s } }
+// The remote-project workspace that belongs to a dsh-remote machine record: a
+// registered DSH workspace whose path resolves into a mirror with the same
+// host+port+username. Returns { ws, rp } or null. Degrades to null (never throws)
+// when the registry service is missing.
+export function findRemoteProjectForMachine(ctx, machine, root) {
+  const registry = ctx?.workspaceRegistry
+  let workspaces = []
+  try { workspaces = typeof registry?.list === 'function' ? registry.list() : [] } catch { workspaces = [] }
+  for (const w of workspaces) {
+    const rp = remoteProjectFor(w?.path, root)
+    if (rp && machineForProject([machine], rp)) return { ws: w, rp }
+  }
+  return null
+}
+
+// Machines checkable from a LOCAL project's Overview: every dsh-remote machine that
+// HAS a remote project (a registered workspace inside its mirror), with that remote
+// project's live-session count — checks borrow one of those sessions as the rw_*
+// agent context (sessionInMirror in machines.js). Machines without a remote project
+// are not listed; the tier-1 console offers their creation.
+export function checkMachinesForLocal(ctx, machineList, root) {
+  const out = []
+  for (const m of machineList ?? []) {
+    const hit = findRemoteProjectForMachine(ctx, m, root)
+    if (!hit) continue
+    out.push({
+      id: m.id,
+      name: m.name || m.host,
+      host: m.host,
+      port: m.port,
+      username: m.username ?? '',
+      remotePath: hit.rp.remotePath,
+      mirrorDir: hit.rp.mirrorDir,
+      projectTitle: hit.ws.title || hit.ws.path,
+      workspace: m.workspace ?? null,
+      current: !!m.current,
+      liveSessions: projectSessions(ctx, hit.ws.path).length,
+      ...(m.lastConnectedAt ? { lastConnectedAt: String(m.lastConnectedAt) } : {}),
+      ...(m.latencyMs != null ? { latencyMs: Number(m.latencyMs) } : {}),
+    })
+  }
+  return out
 }
 
 // Live sessions whose cwd sits inside one workspace path (the remote project's own

@@ -7,6 +7,28 @@ All notable changes are documented here. The format follows
 
 ### Changed
 
+- **Sidebar localized to local projects + columned check results (2026-10-27)**:
+  - Remote projects now render **no HarnessAMS sidebar** (they are connection
+    anchors; remote files are browsed with dsh-remote itself). The tab body shows a
+    one-line bilingual note, the task/check fetches are skipped, and the pinned
+    auto-reopen skips remote sessions (`GET /api/project?sessionId=` gained a
+    `remote` flag; a freshly switched session that is not yet workspace-associated
+    is retried briefly and treated as remote — suppressing once beats opening
+    wrongly).
+  - The four remote checks moved into the **local project's** Overview as one block
+    per machine that has a remote project (`GET /api/checks` now answers
+    `machines[]` with identity, remote area, mirror, and the remote project's
+    live-session count; `GET /api/checks/run` takes `machineId` and borrows a live
+    session of that machine's remote project via `sessionInMirror` — 409 with
+    guidance when none is live; `agentForSession` and the remote-project check
+    path are gone).
+  - Check results render as **columned tables** instead of joined text: load
+    (1/5/15 min, procs, CPUs), LSF jobs (job id, stat, exec host, name, submit
+    time — column layout read from the bjobs header so variant headers like
+    zscheduler's extra FROM_CLUSTER/EXEC_CLUSTER columns parse correctly, capped
+    at 30 rows), batch dirs (directory, status, progress with the workspace-scope
+    prefix abbreviated to `$ROOT` plus a legend line), and script sync (file,
+    state). Unparseable output falls back to the previous raw-text rendering.
 - **Report plotly delivery reworked (2026-10-27, D-001 in `docs/decisions.md`)**:
   report generators seed a single workspace-level
   `<workspace_root>/assets/plotly.min.js` from the shipped master copy
@@ -26,26 +48,24 @@ All notable changes are documented here. The format follows
     the mirror via dsh-remote's same-origin `/dsh-remote/mirror` with forwarded
     session credentials, then register the mirror directory through
     `workspaceRegistry`). Sessions of a remote project bind dsh-remote's `rw_*`
-    tools to that machine; a local project needing a remote simulation borrows one
-    (`sessionInMirror` is kept for that future path). The mirror's `remotePath` is
+    tools to that machine; a local project borrows one through `sessionInMirror`
+    (the Overview checks are that path; remote simulation will reuse it). The
+    mirror's `remotePath` is
     the scope boundary for every remote command. Remote file browsing/editing is
     deliberately NOT duplicated — dsh-remote's own tools and web surface do it.
   - **Overview health checks (tier 3)**: the check UI moved from the tier-1 Servers
-    section into the task sidebar's Overview sub-view, per project, one button per
-    function (`GET /api/checks?sessionId=` describes the surface,
-    `GET /api/checks/run?sessionId=&check=` runs one). Remote projects get a status
-    header (machine, remote area path, local mirror, live project sessions,
-    last-connection facts) and four buttons — **Load** (`/proc/loadavg` + core
-    count), **LSF jobs** (`bjobs -a`, bounded by `timeout 10`), **Batch dirs**
-    (work dirs carrying a `sweep_progress.json` with status/completed/total,
-    bounded by `timeout 15 find -maxdepth 4` + head), and **Script sync** (md5
-    drift between the configured local `sim_scripts_dir` and the remote workspace
-    root — report only, nothing uploaded). Local projects get one button running
-    the seven-item local environment report. Checks execute through the `rw_exec`
-    tool shell with the sidebar's own session as the agent context — its cwd sits
-    inside the project's mirror, which binds the machine, so no cross-project
-    session borrowing and no global active-machine switching are involved (409
-    with guidance when the session is not live or its cwd left the mirror).
+    section into the task sidebar's Overview sub-view, one button per function
+    (`GET /api/checks?sessionId=` describes the surface, `GET /api/checks/run`
+    runs one). Four remote buttons — **Load** (`/proc/loadavg` + core count),
+    **LSF jobs** (`bjobs -a`, bounded by `timeout 10`), **Batch dirs** (work dirs
+    carrying a `sweep_progress.json` with status/completed/total, bounded by
+    `timeout 15 find -maxdepth 4` + head), and **Script sync** (md5 drift between
+    the configured local `sim_scripts_dir` and the remote workspace root — report
+    only, nothing uploaded) — plus the local environment report. Checks execute
+    through the `rw_exec` tool shell; the agent context is a real live session
+    whose cwd sits inside the target machine's mirror (binding without touching
+    the global active machine). See the 2026-10-27 entry above for where the
+    buttons live now and how results render.
 - The console moved from the `/harnessams/ui` page into the DSH client UI as a
   three-tier interface (the page route is gone; every JSON API stays):
   - **Tier 1 — global console page**: a "HarnessAMS" entry in the left sidebar

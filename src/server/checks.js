@@ -2,9 +2,13 @@
 // Overview button set, each an independent one-click check executed through
 // dsh-remote's rw_exec tool shell — there is no ssh channel of our own anymore
 // (2026-10-26 rework; the former BatchMode fallback died with the nodes.yaml registry).
-// The agent context is the calling session of a REMOTE PROJECT (a DSH workspace inside
-// a dsh-remote mirror) — its cwd binds rw_exec to that machine, so checks never borrow
-// sessions across projects and never switch the global active machine.
+// The buttons live in LOCAL projects only (remote projects get no sidebar, 2026-10-27):
+// a run borrows a live session from the target machine's remote project (a DSH
+// workspace inside a dsh-remote mirror) as the agent context — that session's cwd
+// binds rw_exec to the machine without touching the global active machine.
+// Successful outputs are parsed into rows (string[][]) so the client renders proper
+// columned tables; when a parser declines, the entry keeps its raw text and the
+// client falls back to plain-text rendering.
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
@@ -149,22 +153,36 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
     throw new Error('runRemoteCheckButton: opts.agent must wrap a session with header.cwd')
   }
   const agent = opts.agent ?? undefined
-  const channel = agent ? 'dsh-remote (project session)' : 'dsh-remote (active machine)'
+  const channel = agent ? 'dsh-remote (remote project session)' : 'dsh-remote (active machine)'
   const wsPath = opts.remotePath || opts.machine?.workspace || '$HOME'
   const wsq = shq(wsPath)
 
   if (id === 'load') {
     const e = await execViaToolShell(tools, agent, 'Load', 'cat /proc/loadavg && nproc', channel,
-      { maxLines: 2, maxChars: 120, judge: (o) => o.trim().length > 0 })
+      { maxLines: 2, maxChars: 120, judge: (o) => o.trim().length > 0, raw: true })
+    const row = parseLoadRow(e.stdoutRaw)
+    delete e.stdoutRaw
+    if (e.ok && row) { e.rows = [row]; e.result = `load ${row[0]} / ${row[4]} cpu` }
     return { channel, results: [e] }
   }
 
   if (id === 'jobs') {
+    // No head cap on the pipe: it would mask bjobs' own exit code (127 missing
+    // binary, 255 empty queue) behind head's 0. The 8000-char stdoutRaw cap bounds
+    // the parse instead; totals undercount past it and the entry is marked truncated.
     const e = await execViaToolShell(tools, agent, 'LSF jobs', 'timeout 10 bjobs -a 2>&1', channel,
-      { maxLines: 12, maxChars: 900, judge: (o) => o.trim().length > 0 })
+      { maxLines: 14, maxChars: 900, judge: (o) => o.trim().length > 0, raw: true })
     // LSF's bjobs exits 255 with "No job found" when the queue is simply empty —
     // a healthy state, not a check failure (verified live 2026-10-26).
     if (!e.ok && /No (unfinished )?job found/i.test(e.result ?? '')) { e.ok = true; e.detail = undefined }
+    const parsed = e.ok ? parseBjobsRows(e.stdoutRaw) : null
+    delete e.stdoutRaw
+    if (parsed) {
+      e.rows = parsed.rows
+      e.rowsRaw = parsed.raw
+      e.truncated = parsed.truncated || String(parsed.rawTextLen ?? 0) >= 8000
+      if (parsed.total > 0) e.result = `${parsed.total} job(s)`
+    }
     return { channel, results: [e] }
   }
 
@@ -181,8 +199,11 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
       + ` printf '%s  [%s] %s/%s\\n' "$d" "\${st:-?}" "\${com:-?}" "\${tot:-?}";`
       + ' done'
     const e = await execViaToolShell(tools, agent, 'Batch dirs', cmd, channel,
-      { maxLines: 15, maxChars: 1200, judge: () => true })
-    if (e.ok && !e.result) e.result = 'no sweep_progress.json found (depth <= 4)'
+      { maxLines: 15, maxChars: 1200, judge: () => true, raw: true })
+    const rows = parseBatchRows(e.stdoutRaw, wsPath)
+    delete e.stdoutRaw
+    if (e.ok && rows.length) { e.rows = rows; e.result = `${rows.length} batch dir(s)` }
+    else if (e.ok && !e.result) e.result = 'no sweep_progress.json found (depth <= 4)'
     return { channel, results: [e] }
   }
 
@@ -228,10 +249,113 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
     for (const p of remotePy) if (!hashes.has(p)) rows.push({ file: p, state: 'only-remote' })
     const n = (s) => rows.filter((r) => r.state === s).length
     e.result = `${n('in-sync')} in sync, ${n('differs')} differ, ${n('only-local')} only local, ${n('only-remote')} only remote`
+    e.rows = rows.slice(0, 50).map((r) => [r.file, r.state])
+    e.truncated = rows.length > 50
+    // plain-text variant kept as the diagnose/fallback surface
     e.detail = rows.filter((r) => r.state !== 'in-sync').map((r) => `${r.file} — ${r.state}`).slice(0, 30).join('\n') || undefined
     if (n('differs') || n('only-local')) e.warn = 'local/remote script drift detected'
     return { channel, results: [e] }
   }
 
   throw new Error(`unknown check button: ${id}`)
+}
+
+// ---- output parsers (structured rows for the client's columned tables) ----
+// Each returns null (or [] for batches) when the output does not match — callers
+// keep the raw text and the client renders that instead of a broken table.
+
+// /proc/loadavg + nproc → one row [1m, 5m, 15m, runnable/total, CPUs]. loadavg's
+// trailing last-pid field is dropped (noise for a load check).
+export function parseLoadRow(text) {
+  const lines = String(text ?? '').trim().split(/\r?\n/).filter(Boolean)
+  if (lines.length < 2) return null
+  const f = lines[0].trim().split(/\s+/)
+  const cpus = lines[1].trim()
+  const num = /^\d+(\.\d+)?$/
+  if (f.length < 4 || !num.test(f[0]) || !num.test(f[1]) || !num.test(f[2]) || !/^\d+\/\d+$/.test(f[3]) || !/^\d+$/.test(cpus)) return null
+  return [f[0], f[1], f[2], f[3], cpus]
+}
+
+// bjobs -a listing → { rows: [jobid, stat, execHost, name, submitTime][], raw (full
+// lines for tooltips), total, truncated }. Column layout comes from the header line
+// when present — bjobs variants add columns (the target cluster's zscheduler prints
+// FROM_CLUSTER/EXEC_CLUSTER too) — with the standard 6-column prefix as fallback.
+// USER/QUEUE/FROM_* are parsed but not displayed; the tail past JOB_NAME is split
+// into job name + submit time by peeling date/time tokens off the end (LSF formats
+// vary: "Oct 26 21:04", "Feb 12 2025", …). An EMPTY exec-host cell (PEND rows)
+// collapses under whitespace splitting; the parser recovers it from the all-time
+// tail and the full line always rides along as the row tooltip so nothing is hidden.
+export function parseBjobsRows(text, maxRows = 30) {
+  const lines = String(text ?? '').split(/\r?\n/).map((s) => s.trim()).filter(Boolean)
+  if (!lines.length) return null
+  if (/^No (unfinished )?job found/i.test(lines[0])) return { rows: [], raw: [], total: 0, truncated: false }
+  let statIdx = 2, execIdx = 5, nameIdx = 6
+  if (/^JOBID\b/.test(lines[0])) {
+    const h = lines[0].split(/\s+/)
+    const si = h.indexOf('STAT'), ei = h.indexOf('EXEC_HOST'), ni = h.indexOf('JOB_NAME')
+    if (si > 0 && ei > si && ni > ei) { statIdx = si; execIdx = ei; nameIdx = ni }
+  }
+  const rows = []
+  const raw = []
+  const MONTHS = new Set(['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'])
+  const timeTok = /^\d{1,2}:\d{2}(:\d{2})?$/
+  const dayTok = /^\d{1,2}$/
+  const yearTok = /^\d{4}$/
+  const dateLike = (x) => timeTok.test(x) || dayTok.test(x) || yearTok.test(x) || MONTHS.has(x)
+  for (const line of lines) {
+    if (/^JOBID\b/.test(line)) continue
+    const t = line.split(/\s+/)
+    if (t.length < nameIdx + 1) continue
+    const tail = t.slice(nameIdx)
+    let k = tail.length
+    let peeled = 0
+    while (k > 0 && peeled < 4 && dateLike(tail[k - 1])) { k--; peeled++ }
+    const tailToks = tail.slice(k)
+    const isTime = peeled >= 2 && (tailToks.some((x) => timeTok.test(x)) || tailToks.some((x) => MONTHS.has(x)))
+    const submit = isTime ? tailToks.join(' ') : ''
+    let name = isTime ? tail.slice(0, k).join(' ') : tail.join(' ')
+    let execHost = t[execIdx] ?? ''
+    if (!name) {
+      // an empty EXEC_HOST cell collapses under whitespace splitting: the job name
+      // lands in the exec column and the whole tail parses as the submit time —
+      // take the exec cell back as the name (the raw line rides along as tooltip)
+      if (isTime) { name = t[execIdx] ?? ''; execHost = '' }
+      else continue
+    }
+    rows.push([t[0], t[statIdx] ?? '', execHost, name, submit])
+    raw.push(line)
+  }
+  if (!rows.length) return null
+  return {
+    rows: rows.slice(0, maxRows),
+    raw: raw.slice(0, maxRows),
+    total: rows.length,
+    truncated: rows.length > maxRows,
+    rawTextLen: String(text ?? '').length,
+  }
+}
+
+// Batch-dir lines from the remote one-liner (`<dir>  [<status>] <done>/<total>`) →
+// rows [dir, status, progress], with the workspace-scope prefix collapsed to $ROOT
+// (the client shows the legend `$ROOT = <remotePath>`). Always lower-cases nothing —
+// paths pass through verbatim apart from the prefix swap.
+export function parseBatchRows(text, remotePath) {
+  const rows = []
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const m = line.match(/^(\S+)\s+\[([^\]]*)\]\s+(\S+)\/(\S+)$/)
+    if (!m) continue
+    rows.push([rootize(m[1], remotePath), m[2], m[3] + '/' + m[4]])
+  }
+  return rows
+}
+
+// Collapse the workspace-scope prefix: /home/x/sim/AutoAnalog/b1 → $ROOT/b1 (an
+// exact match becomes a bare $ROOT). Anything outside the scope passes through.
+export function rootize(dir, remotePath) {
+  const d = String(dir ?? '')
+  const rp = String(remotePath ?? '')
+  if (!rp) return d
+  if (d === rp) return '$ROOT'
+  if (d.startsWith(rp.endsWith('/') ? rp : rp + '/')) return '$ROOT' + d.slice(rp.length)
+  return d
 }

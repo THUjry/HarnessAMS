@@ -152,10 +152,10 @@ export function findMirrorForMachine(machine, root = remoteWorkspacesRoot()) {
 }
 
 // Borrow a live session whose cwd sits inside the mirror, for the rw_* agent context.
-// NOT used by the Overview checks anymore (they run with the remote project's own
-// session — see remote.js agentForSession); retained for the future remote-simulation
-// path, where a LOCAL project borrows a remote project's session to run a sweep. The
-// host `sessions` service is fetched lazily like dsh-remote itself does
+// This is the borrowing primitive of the remote-project model: the local project's
+// Overview checks use it to run rw_exec on a machine through a session of that
+// machine's remote project (and the future remote-simulation path will reuse it).
+// The host `sessions` service is fetched lazily like dsh-remote itself does
 // (ctx.get('sessions')) so compositions without it degrade instead of failing injection.
 // Returns {agent: {session}} or null when no live session is open in that workspace.
 export function sessionInMirror(ctx, mirrorDir, list) {

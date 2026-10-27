@@ -4,12 +4,14 @@
 //           digital assets (plotly status + report library), disk usage;
 //   tier 2: project = DSH workspace (a local folder) — no per-session data; every
 //           session of a workspace shares one task list; a workspace inside a
-//           dsh-remote mirror is a REMOTE PROJECT;
-//   tier 3: right-sidebar task tab — a tab strip over the active project's tasks with
-//           "+" to create; the Overview sub-view carries the health-check buttons
-//           (remote projects: per-machine one-click checks; local projects: one
-//           local-environment report). Remote file browsing/editing is NOT here —
-//           dsh-remote's own tools and web surface do that.
+//           dsh-remote mirror is a REMOTE PROJECT and renders NO sidebar (connection
+//           anchor only; dsh-remote itself browses its files);
+//   tier 3: right-sidebar task tab, LOCAL projects only — a tab strip over the active
+//           project's tasks with "+" to create; the Overview sub-view carries the
+//           health-check buttons (local environment + one block per machine with a
+//           remote project: load / LSF jobs / batch dirs / script sync, borrowed from
+//           that remote project's live session). Remote file browsing/editing is NOT
+//           here — dsh-remote's own tools and web surface do that.
 // Classic script on the host module loader (same shape as dsh-remote's client): the
 // factory receives a synchronous require, React comes from the host page, and the whole
 // client is one file — combo-loaded classic scripts cannot import sibling modules.
@@ -68,13 +70,13 @@ window.__ModuleLoader__.load({
         'rproj.hint': '推荐每台机器一个远程项目；远程文件的浏览与编辑直接使用 dsh-remote 自带功能。',
         'rproj.empty': 'dsh-remote 中还没有机器 — 请先在 dsh-remote 里添加。',
         'chk.title': '健康检查',
-        'chk.machine': '机器：{m}',
         'chk.remoteArea': '远程区：{path}',
         'chk.mirrorDir': '本地镜像：{p}',
         'chk.sessions': '项目会话：{n}',
         'chk.lastConnected': '上次连接：{t}',
         'chk.latency': '{n} ms 延迟',
-        'chk.notInRegistry': '（未匹配到 dsh-remote 机器记录）',
+        'chk.noSession': '无项目会话——在远程项目“{title}”中打开一个会话后即可检查',
+        'chk.needRemoteProject': '还没有机器建立远程项目——在 HarnessAMS 控制台页创建后即可在此检查。',
         'chk.running': '检查中…',
         'chk.colItem': '检查项',
         'chk.colResult': '结果',
@@ -84,11 +86,32 @@ window.__ModuleLoader__.load({
         'chk.promptCopied': '提示词已复制 — 请粘贴到 DSH 会话中。',
         'chk.copyPrompt': '请将下面的提示词复制到 DSH 会话：',
         'chk.noneYet': '点击按钮运行一项检查。',
+        'chk.truncated': '（列表已截断）',
+        'chk.rootLegend': '$ROOT = {path}',
         'chk.btn.load': '负载',
         'chk.btn.jobs': 'LSF 作业',
         'chk.btn.batches': '批次目录',
         'chk.btn.scripts': '脚本同步',
         'chk.btn.local': '本机环境',
+        'chk.lc.load1': '1 分钟',
+        'chk.lc.load5': '5 分钟',
+        'chk.lc.load15': '15 分钟',
+        'chk.lc.procs': '进程 (可运行/总数)',
+        'chk.lc.cpus': 'CPU 核数',
+        'chk.jc.jobid': '作业号',
+        'chk.jc.stat': '状态',
+        'chk.jc.exec': '执行节点',
+        'chk.jc.name': '作业名',
+        'chk.jc.submit': '提交时间',
+        'chk.bc.dir': '目录',
+        'chk.bc.status': '状态',
+        'chk.bc.progress': '进度',
+        'chk.sc.file': '文件',
+        'chk.sc.state': '同步状态',
+        'chk.sync.in-sync': '一致',
+        'chk.sync.differs': '不一致',
+        'chk.sync.only-local': '仅本地',
+        'chk.sync.only-remote': '仅远程',
         'assets.title': '数字资产',
         'assets.plotlyOk': 'plotly.min.js 已就绪 — {size}',
         'assets.plotlyMissing': '缺少 plotly 资产',
@@ -104,6 +127,7 @@ window.__ModuleLoader__.load({
         'tasks.noSession': '无活动会话',
         'tasks.loadingProject': '正在加载项目…',
         'tasks.noProject': '此会话没有对应项目。',
+        'tasks.remoteProjectNote': '远程项目不提供 HarnessAMS 侧边栏——远程文件的浏览与编辑请直接使用 dsh-remote；检查与任务请在本地项目中进行。',
         'tasks.noTasks': '还没有任务 — 点“+”创建第一个。',
         'tasks.projectLabel': '项目：',
         'tasks.viewOverview': '概览',
@@ -155,13 +179,13 @@ window.__ModuleLoader__.load({
         'rproj.hint': 'One remote project per machine is the recommended setup; browse and edit remote files with dsh-remote itself.',
         'rproj.empty': 'no machines in dsh-remote yet — add one there.',
         'chk.title': 'Health check',
-        'chk.machine': 'Machine: {m}',
         'chk.remoteArea': 'Remote area: {path}',
         'chk.mirrorDir': 'Local mirror: {p}',
         'chk.sessions': 'Project sessions: {n}',
         'chk.lastConnected': 'Last connected: {t}',
         'chk.latency': '{n} ms latency',
-        'chk.notInRegistry': ' (no matching dsh-remote machine record)',
+        'chk.noSession': 'no live session — open a session in the remote project "{title}" to enable checks',
+        'chk.needRemoteProject': 'no machine has a remote project yet — create one on the HarnessAMS console page to check it here.',
         'chk.running': 'Running…',
         'chk.colItem': 'Item',
         'chk.colResult': 'Result',
@@ -171,11 +195,32 @@ window.__ModuleLoader__.load({
         'chk.promptCopied': 'Prompt copied — paste it into a DSH session.',
         'chk.copyPrompt': 'Copy the prompt below into a DSH session:',
         'chk.noneYet': 'Click a button to run a check.',
+        'chk.truncated': '(list truncated)',
+        'chk.rootLegend': '$ROOT = {path}',
         'chk.btn.load': 'Load',
         'chk.btn.jobs': 'LSF jobs',
         'chk.btn.batches': 'Batch dirs',
         'chk.btn.scripts': 'Script sync',
         'chk.btn.local': 'Local environment',
+        'chk.lc.load1': '1 min',
+        'chk.lc.load5': '5 min',
+        'chk.lc.load15': '15 min',
+        'chk.lc.procs': 'procs (run/total)',
+        'chk.lc.cpus': 'CPUs',
+        'chk.jc.jobid': 'job',
+        'chk.jc.stat': 'stat',
+        'chk.jc.exec': 'exec host',
+        'chk.jc.name': 'name',
+        'chk.jc.submit': 'submitted',
+        'chk.bc.dir': 'directory',
+        'chk.bc.status': 'status',
+        'chk.bc.progress': 'progress',
+        'chk.sc.file': 'file',
+        'chk.sc.state': 'sync state',
+        'chk.sync.in-sync': 'in sync',
+        'chk.sync.differs': 'differs',
+        'chk.sync.only-local': 'local only',
+        'chk.sync.only-remote': 'remote only',
         'assets.title': 'Digital assets',
         'assets.plotlyOk': 'plotly.min.js served — {size}',
         'assets.plotlyMissing': 'plotly asset missing',
@@ -191,6 +236,7 @@ window.__ModuleLoader__.load({
         'tasks.noSession': 'no active session',
         'tasks.loadingProject': 'Loading project…',
         'tasks.noProject': 'No project for this session.',
+        'tasks.remoteProjectNote': 'No HarnessAMS sidebar in remote projects — browse and edit remote files with dsh-remote; run checks and manage tasks in a local project.',
         'tasks.noTasks': 'No tasks yet — create the first one with “+”.',
         'tasks.projectLabel': 'Project: ',
         'tasks.viewOverview': 'Overview',
@@ -300,7 +346,7 @@ window.__ModuleLoader__.load({
 .hams-table th, .hams-table td { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding: 3px 8px; text-align: left; vertical-align: top; }
 .hams-table th { opacity: .7; font-weight: 500; }
 .hams-rowbad td { background: color-mix(in srgb, #e05252 12%, transparent); }
-.hams-good { color: #3fb950; } .hams-bad { color: #e05252; font-weight: 600; } .hams-warn { color: #d29922; }
+.hams-good { color: #3fb950; } .hams-bad { color: #e05252; font-weight: 600; } .hams-warn { color: #d29922; } .hams-faint { opacity: .6; }
 .hams-btn { padding: 3px 12px; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); border-radius: 6px; cursor: pointer;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   background: color-mix(in srgb, currentColor 6%, transparent); color: inherit; }
@@ -365,6 +411,36 @@ window.__ModuleLoader__.load({
     }
 
     function esc(s) { return String(s ?? '') }
+
+    // Session -> remote-project classification (from /api/project), shared by the
+    // sidebar body and the pinned-reopen logic so remote projects never get the
+    // sidebar auto-opened. Sessions are few; a hard cap keeps the cache bounded.
+    const remoteProjectCache = new Map()
+    function rememberProjectKind(sessionId, remote) {
+      if (!sessionId) return
+      if (remoteProjectCache.size > 100) remoteProjectCache.clear()
+      remoteProjectCache.set(sessionId, !!remote)
+    }
+    async function isRemoteProject(sessionId) {
+      if (!sessionId) return false
+      if (remoteProjectCache.has(sessionId)) return remoteProjectCache.get(sessionId)
+      // A freshly switched session may not be associated with its workspace yet
+      // (/api/project answers project: null for a moment) — retry briefly. An
+      // unresolved answer suppresses the reopen: opening the sidebar inside a
+      // remote project would defeat its purpose, while skipping once for a local
+      // project self-heals as soon as the cache fills.
+      for (let i = 0; i < 3; i++) {
+        try {
+          const r = await fetchJson(API + '/project?sessionId=' + encodeURIComponent(sessionId))
+          if (r?.project) {
+            rememberProjectKind(sessionId, !!r.project.remote)
+            return !!r.project.remote
+          }
+        } catch { /* transient — retry */ }
+        if (i < 2) await new Promise((res) => setTimeout(res, 250))
+      }
+      return true
+    }
 
     // ---------- tier 1: global console page ----------
 
@@ -496,46 +572,54 @@ window.__ModuleLoader__.load({
       { id: 'sim', labelKey: 'tasks.viewSim' },
     ]
 
-    // Overview health-check panel: for a remote project, a status header (machine,
-    // remote area, local mirror, project sessions) plus one button per check; for a
-    // local project, a single local-environment report button. Every button runs
-    // independently and replaces the results table below it.
-    function CheckPanel({ info, run, onRun }) {
-      const remote = info?.type === 'remote' ? info.remote : null
-      const running = run?.status === 'running'
-      const diagnose = (item) => {
-        const t = 'HarnessAMS health-check failure [' + item + '] — please diagnose: read the ' +
-          '/harnessams/api/checks/run results, reproduce the failing command with the rw_* tools ' +
-          "(dsh-remote) in this project's session, and report the conclusion."
-        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(t).then(() => alert(tr('chk.promptCopied')), () => prompt(tr('chk.copyPrompt'), t))
-        else prompt(tr('chk.copyPrompt'), t)
-      }
-      const machineName = remote
-        ? (remote.machine ? remote.machine.name : (remote.username ? remote.username + '@' : '') + remote.host + ':' + remote.port)
-        : ''
-      return h('div', { style: { marginTop: '10px' } },
-        h('div', { className: 'hams-dim' }, h('b', null, tr('chk.title'))),
-        remote && h('div', { style: { fontSize: 'calc(12.5px + var(--dsh-content-font-delta, 0px))', margin: '4px 0', lineHeight: 1.6 } },
-          h('div', null, tr('chk.machine', { m: machineName + (remote.machine?.current ? tr('rproj.current') : '') })
-            + (remote.machine?.latencyMs != null ? ' · ' + tr('chk.latency', { n: remote.machine.latencyMs }) : '')),
-          h('div', null, tr('chk.remoteArea', { path: remote.remotePath || '—' })),
-          h('div', { title: remote.mirrorDir }, tr('chk.mirrorDir', { p: remote.mirrorDir })),
-          h('div', null, tr('chk.sessions', { n: remote.liveSessions })
-            + (remote.machine?.lastConnectedAt ? ' · ' + tr('chk.lastConnected', { t: String(remote.machine.lastConnectedAt).slice(0, 19).replace('T', ' ') }) : '')),
-          !remote.machine && h('div', { className: 'hams-warn' }, tr('chk.notInRegistry'))),
-        h('div', { className: 'hams-row' },
-          (info?.buttons ?? []).map((b) => h('button', {
-            key: b.id,
-            className: 'hams-btn hams-btn-sm',
-            disabled: running,
-            title: b.item,
-            onClick: () => onRun(b.id),
-          }, running && run?.id === b.id ? tr('chk.running') : tr('chk.btn.' + b.id)))),
-        run?.status === 'failed' && h('div', { className: 'hams-err' }, run.error),
-        run?.results && h('div', null,
+    // Overview health-check panel (LOCAL projects): one local-environment button plus
+    // one block per machine that has a remote project — its four check buttons run
+    // through that remote project's live session (borrowed server-side). Every button
+    // runs independently; results replace whatever showed below.
+    const REMOTE_CHECK_IDS = ['load', 'jobs', 'batches', 'scripts']
+    const CHECK_TABLES = {
+      load: { cols: ['chk.lc.load1', 'chk.lc.load5', 'chk.lc.load15', 'chk.lc.procs', 'chk.lc.cpus'] },
+      jobs: { cols: ['chk.jc.jobid', 'chk.jc.stat', 'chk.jc.exec', 'chk.jc.name', 'chk.jc.submit'] },
+      batches: { cols: ['chk.bc.dir', 'chk.bc.status', 'chk.bc.progress'] },
+      scripts: { cols: ['chk.sc.file', 'chk.sc.state'] },
+    }
+    const JOB_STAT_COLOR = {
+      RUN: 'hams-good', DONE: 'hams-good', EXIT: 'hams-bad', ERROR: 'hams-bad', ZOMBI: 'hams-bad', UDONE: 'hams-good',
+      PEND: 'hams-warn', PSUSP: 'hams-warn', USUSP: 'hams-warn', SSUSP: 'hams-warn',
+    }
+    const SYNC_COLOR = { 'in-sync': 'hams-good', 'differs': 'hams-bad', 'only-local': 'hams-warn', 'only-remote': 'hams-faint' }
+    const batchStatusColor = (s) => (s === 'completed' ? 'hams-good' : s === 'running' ? 'hams-warn'
+      : s === 'failed' || s === 'error' ? 'hams-bad' : 'hams-faint')
+    // Semantic class for one cell of a check table (column index + raw server value).
+    function checkCellClass(check, col, value) {
+      const v = String(value ?? '')
+      if (check === 'jobs' && col === 1) return JOB_STAT_COLOR[v] ?? 'hams-faint'
+      if (check === 'batches' && col === 1) return batchStatusColor(v)
+      if (check === 'scripts' && col === 1) return SYNC_COLOR[v] ?? ''
+      return ''
+    }
+
+    // One columned result table; the server sends rows as string[][]. scripts state
+    // cells are translated here (server keeps protocol values untranslated).
+    function CheckResultTable({ check, x }) {
+      const spec = CHECK_TABLES[check]
+      if (!spec) return null
+      return h('table', { className: 'hams-table' },
+        h('thead', null, h('tr', null, spec.cols.map((k) => h('th', { key: k }, tr(k))))),
+        h('tbody', null, x.rows.map((r, i) => h('tr', { key: i, title: x.rowsRaw?.[i] ?? '' },
+          r.map((cell, j) => h('td', { key: j, className: checkCellClass(check, j, cell) },
+            check === 'scripts' && j === 1 ? tr('chk.sync.' + cell) : esc(cell)))))))
+    }
+
+    // Results of one run: a local run keeps the classic Item/Result table; a remote
+    // run renders one block per entry — head line + columned table (or plain text
+    // fallback when the server could not parse rows) + warn/truncation notes.
+    function CheckResults({ run, machines, diagnose }) {
+      if (!run.machineId) {
+        return h('div', null,
           h('table', { className: 'hams-table' },
-            h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus'), ''].map((c) => h('th', null, c)))),
-            h('tbody', null, run.results.map((x, i) => h('tr', { key: i, className: x.ok ? '' : 'hams-rowbad' },
+            h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus'), ''].map((c) => h('th', { key: c }, c)))),
+            h('tbody', null, (run.results ?? []).map((x, i) => h('tr', { key: i, className: x.ok ? '' : 'hams-rowbad' },
               h('td', { title: x.cmd ?? '' }, esc(x.item)),
               h('td', null,
                 esc(x.result || x.detail || '-'),
@@ -544,7 +628,77 @@ window.__ModuleLoader__.load({
               h('td', null, x.ms + ' ms'),
               h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'),
               h('td', null, x.ok ? null : h('button', { className: 'hams-btn hams-btn-sm', onClick: () => diagnose(x.item) }, tr('chk.diagnose'))))))),
-          run.channel && h('div', { className: 'hams-dim' }, esc(run.channel))),
+          run.channel && h('div', { className: 'hams-dim' }, esc(run.channel)))
+      }
+      const m = machines.find((x) => x.id === run.machineId)
+      return h('div', null,
+        (run.results ?? []).map((x, i) => h('div', { key: i, style: { margin: '6px 0' } },
+          h('div', { className: 'hams-row' },
+            h('b', null, esc(x.item)),
+            h('span', { className: 'hams-dim' }, x.ms + ' ms'),
+            h('span', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'),
+            x.warn ? h('span', { className: 'hams-warn' }, '⚠ ' + esc(x.warn)) : null,
+            !x.ok ? h('button', { className: 'hams-btn hams-btn-sm', onClick: () => diagnose(x.item) }, tr('chk.diagnose')) : null),
+          !x.ok && x.detail ? h('div', { className: 'hams-pre' }, esc(x.detail)) : null,
+          x.rows && x.rows.length ? h(CheckResultTable, { check: run.check, x })
+            : h('div', { className: 'hams-dim' }, esc(x.result || x.detail || '-')),
+          x.truncated ? h('div', { className: 'hams-dim' }, tr('chk.truncated')) : null,
+          run.check === 'batches' && x.rows && x.rows.length && m
+            ? h('div', { className: 'hams-dim' }, tr('chk.rootLegend', { path: m.remotePath })) : null)),
+        run.channel && h('div', { className: 'hams-dim' }, esc(run.channel)))
+    }
+
+    // One machine block: identity/status lines + the four remote check buttons. The
+    // buttons stay disabled until the remote project holds a live session.
+    function MachineCheckBlock({ m, run, running, onRun }) {
+      const machineRun = run && run.machineId === m.id ? run : null
+      const noSession = !m.liveSessions
+      const hostLine = (m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22)
+      return h('div', { style: { margin: '10px 0 2px' } },
+        h('div', { style: { fontSize: 'calc(12.5px + var(--dsh-content-font-delta, 0px))', lineHeight: 1.6 } },
+          h('div', null,
+            h('b', null, esc(m.name || m.host) + (m.current ? tr('rproj.current') : '')), ' ', esc(hostLine),
+            m.latencyMs != null ? ' · ' + tr('chk.latency', { n: m.latencyMs }) : '',
+            m.lastConnectedAt ? ' · ' + tr('chk.lastConnected', { t: String(m.lastConnectedAt).slice(0, 19).replace('T', ' ') }) : ''),
+          h('div', { title: tr('chk.mirrorDir', { p: m.mirrorDir }) }, tr('chk.remoteArea', { path: m.remotePath || '—' })),
+          h('div', { className: noSession ? 'hams-warn' : 'hams-dim' },
+            noSession ? tr('chk.noSession', { title: m.projectTitle }) : tr('chk.sessions', { n: m.liveSessions }))),
+        h('div', { className: 'hams-row' },
+          REMOTE_CHECK_IDS.map((id) => h('button', {
+            key: id,
+            className: 'hams-btn hams-btn-sm',
+            disabled: running || noSession,
+            title: noSession ? tr('chk.noSession', { title: m.projectTitle }) : tr('chk.btn.' + id),
+            onClick: () => onRun(m.id, id),
+          }, running && machineRun && machineRun.id === m.id + ':' + id ? tr('chk.running') : tr('chk.btn.' + id)))))
+    }
+
+    function CheckPanel({ info, run, onRun }) {
+      const running = run?.status === 'running'
+      const diagnose = (item) => {
+        const t = 'HarnessAMS health-check failure [' + item + '] — please diagnose: read the ' +
+          '/harnessams/api/checks/run results, reproduce the failing command with the rw_* tools ' +
+          "(dsh-remote) in this project's session, and report the conclusion."
+        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(t).then(() => alert(tr('chk.promptCopied')), () => prompt(tr('chk.copyPrompt'), t))
+        else prompt(tr('chk.copyPrompt'), t)
+      }
+      const machines = info?.machines ?? []
+      return h('div', { style: { marginTop: '10px' } },
+        h('div', { className: 'hams-dim' }, h('b', null, tr('chk.title'))),
+        h('div', { className: 'hams-row' },
+          (info?.buttons ?? []).map((b) => h('button', {
+            key: b.id,
+            className: 'hams-btn hams-btn-sm',
+            disabled: running,
+            title: b.item,
+            onClick: () => onRun(null, b.id),
+          }, running && run?.id === b.id ? tr('chk.running') : tr('chk.btn.' + b.id)))),
+        info?.machinesReason && h('div', { className: 'hams-dim' }, esc(info.machinesReason)),
+        !info?.machinesReason && machines.length === 0 && info
+          && h('div', { className: 'hams-dim' }, tr(info.machinesTotal ? 'chk.needRemoteProject' : 'rproj.empty')),
+        machines.map((m) => h(MachineCheckBlock, { key: m.id, m, run, running, onRun })),
+        run?.status === 'failed' && h('div', { className: 'hams-err' }, run.error),
+        run?.status === 'done' && h(CheckResults, { run, machines, diagnose }),
         !run && h('div', { className: 'hams-dim' }, tr('chk.noneYet')),
       )
     }
@@ -563,6 +717,7 @@ window.__ModuleLoader__.load({
       const [checkRun, setCheckRun] = useState(null) // { id, status, results?, channel?, error? }
 
       const projectPath = project?.path ?? null
+      const projectRemote = !!project?.remote
 
       useEffect(() => {
         let alive = true
@@ -572,6 +727,7 @@ window.__ModuleLoader__.load({
         fetchJson(API + '/project?sessionId=' + encodeURIComponent(sessionId))
           .then((r) => {
             if (!alive) return
+            rememberProjectKind(sessionId, !!r?.project?.remote)
             setProject(r.project ?? null)
             setReason(r.project ? null : r.reason ?? null)
           })
@@ -579,9 +735,10 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [sessionId])
 
+      // Remote projects are connection anchors — no task store, no check surface.
       useEffect(() => {
         let alive = true
-        if (!projectPath || !sessionId) { setTasks([]); setSelectedId(null); return }
+        if (!projectPath || !sessionId || projectRemote) { setTasks([]); setSelectedId(null); return }
         fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId))
           .then((d) => {
             if (!alive) return
@@ -590,27 +747,33 @@ window.__ModuleLoader__.load({
           })
           .catch((e) => { if (alive) setError(String(e.message ?? e)) })
         return () => { alive = false }
-      }, [projectPath, sessionId])
+      }, [projectPath, sessionId, projectRemote])
 
-      // Overview check surface for the current project (remote vs local); fetched
-      // independently of the task list so a failed check surface never blocks tasks.
+      // Overview check surface (local projects: local environment + per-machine
+      // remote checks); fetched independently so it never blocks the task list.
       useEffect(() => {
         let alive = true
         setChecksInfo(null); setCheckRun(null)
-        if (!projectPath || !sessionId) return
+        if (!projectPath || !sessionId || projectRemote) return
         fetchJson(API + '/checks?sessionId=' + encodeURIComponent(sessionId))
           .then((r) => { if (alive) setChecksInfo(r) })
           .catch(() => { if (alive) setChecksInfo(null) })
         return () => { alive = false }
-      }, [projectPath, sessionId])
+      }, [projectPath, sessionId, projectRemote])
 
-      const runCheck = async (id) => {
-        setCheckRun({ id, status: 'running', results: null })
+      // mid=null runs the local-environment check; otherwise mid is the machineId of
+      // the machine block the button sits in (remote checks borrow that machine's
+      // remote-project session server-side).
+      const runCheck = async (mid, id) => {
+        const key = mid ? mid + ':' + id : id
+        setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'running', results: null })
         try {
-          const r = await fetchJson(API + '/checks/run?sessionId=' + encodeURIComponent(sessionId) + '&check=' + encodeURIComponent(id))
-          setCheckRun({ id, status: 'done', results: r.results, channel: r.channel })
+          const q = 'sessionId=' + encodeURIComponent(sessionId) + '&check=' + encodeURIComponent(id)
+            + (mid ? '&machineId=' + encodeURIComponent(mid) : '')
+          const r = await fetchJson(API + '/checks/run?' + q)
+          setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'done', results: r.results, channel: r.channel })
         } catch (e) {
-          setCheckRun({ id, status: 'failed', error: String(e.message ?? e), results: null })
+          setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'failed', error: String(e.message ?? e), results: null })
         }
       }
 
@@ -648,6 +811,15 @@ window.__ModuleLoader__.load({
         if (!selected || descDraft === null) return
         persist(tasks.map((t) => t.id === selected.id ? { ...t, description: descDraft } : t))
         setDescDraft(null)
+      }
+
+      // Remote projects render nothing but the explanatory note — no tab strip, no
+      // tasks, no checks. Their role is anchoring the connection; remote files go
+      // through dsh-remote itself, and checks run from local projects.
+      if (project && projectRemote) {
+        return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
+          h('div', { className: 'hams-body' },
+            h('div', { className: 'hams-dim' }, tr('tasks.remoteProjectNote'))))
       }
 
       return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
@@ -749,8 +921,9 @@ window.__ModuleLoader__.load({
     // Sticky task sidebar: DSH resets the right sidebar to its start page whenever the
     // conversation switches. While pinned (default on), the header button re-opens the
     // task tab on every sessionId change so the sidebar follows workspace switches
-    // instead of collapsing. Clicking the header button always opens + pins; the pin
-    // toggle lives at the end of the task tab strip.
+    // instead of collapsing — EXCEPT for remote projects, which get no sidebar at all.
+    // Clicking the header button always opens + pins; the pin toggle lives at the end
+    // of the task tab strip.
     let openSidebarTab = null
     const STICKY_KEY = 'hams-task-sidebar-pinned'
     const pinStore = {
@@ -776,10 +949,17 @@ window.__ModuleLoader__.load({
       const [pinned] = usePinned()
       useEffect(() => {
         if (!pinned || !sessionId || !openSidebarTab) return
+        let cancelled = false
         // the host tears the right pane down and up around a switch; a short delay
         // keeps the reopen from landing on the intermediate state
-        const t = setTimeout(() => { if (openSidebarTab) openSidebarTab() }, 350)
-        return () => clearTimeout(t)
+        const t = setTimeout(() => {
+          if (cancelled || !openSidebarTab) return
+          // remote projects must NOT get the sidebar auto-opened (cache-backed check)
+          void isRemoteProject(sessionId).then((remote) => {
+            if (!cancelled && !remote && openSidebarTab) openSidebarTab()
+          })
+        }, 350)
+        return () => { cancelled = true; clearTimeout(t) }
       }, [sessionId, pinned])
       return h('button', {
         className: 'hams-btn hams-btn-sm hams-headerbtn' + (pinned ? ' hams-pin-on' : ''),
