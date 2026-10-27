@@ -291,48 +291,48 @@ window.__ModuleLoader__.load({
       const el = document.createElement('style')
       el.id = 'dsh-harnessams-css'
       el.textContent = `
-.hams-page { padding: 20px 28px 48px; max-width: 1000px; font-size: 14px; }
-.hams-h1 { font-size: 20px; margin: 0 0 4px; font-weight: 600; }
-.hams-meta { opacity: .7; font-size: 12.5px; margin-bottom: 14px; }
+.hams-page { padding: 20px 28px 48px; max-width: 1000px; font-size: var(--dsh-content-font-size, 14px); }
+.hams-h1 { font-size: calc(20px + var(--dsh-content-font-delta, 0px)); margin: 0 0 4px; font-weight: 600; }
+.hams-meta { opacity: .7; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); margin-bottom: 14px; }
 .hams-section { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 8px; padding: 12px 16px 14px; margin: 14px 0; }
-.hams-section > h2 { font-size: 15px; margin: 0 0 8px; font-weight: 600; }
-.hams-table { border-collapse: collapse; width: 100%; font-size: 13px; margin: 8px 0; }
+.hams-section > h2 { font-size: calc(15px + var(--dsh-content-font-delta, 0px)); margin: 0 0 8px; font-weight: 600; }
+.hams-table { border-collapse: collapse; width: 100%; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); margin: 8px 0; }
 .hams-table th, .hams-table td { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding: 3px 8px; text-align: left; vertical-align: top; }
 .hams-table th { opacity: .7; font-weight: 500; }
 .hams-rowbad td { background: color-mix(in srgb, #e05252 12%, transparent); }
 .hams-good { color: #3fb950; } .hams-bad { color: #e05252; font-weight: 600; } .hams-warn { color: #d29922; }
-.hams-btn { padding: 3px 12px; font-size: 13px; border-radius: 6px; cursor: pointer;
+.hams-btn { padding: 3px 12px; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); border-radius: 6px; cursor: pointer;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   background: color-mix(in srgb, currentColor 6%, transparent); color: inherit; }
 .hams-btn:disabled { opacity: .45; cursor: default; }
-.hams-btn-sm { padding: 0 7px; font-size: 12px; }
-.hams-input, .hams-select, .hams-textarea { font-size: 13px; border-radius: 5px; padding: 3px 7px; color: inherit;
+.hams-btn-sm { padding: 0 7px; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); }
+.hams-input, .hams-select, .hams-textarea { font-size: calc(13px + var(--dsh-content-font-delta, 0px)); border-radius: 5px; padding: 3px 7px; color: inherit;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   background: color-mix(in srgb, currentColor 4%, transparent); font-family: inherit; }
 .hams-input, .hams-textarea { width: 100%; box-sizing: border-box; }
 .hams-textarea { min-height: 90px; resize: vertical; }
-.hams-badge { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: 12px;
+.hams-badge { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: calc(12px + var(--dsh-content-font-delta, 0px));
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
 .hams-badge-good { color: #3fb950; border-color: color-mix(in srgb, #3fb950 45%, transparent); }
 .hams-badge-bad { color: #d29922; border-color: color-mix(in srgb, #d29922 45%, transparent); }
 .hams-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
-.hams-err { color: #e05252; padding: 8px; font-size: 13px; }
-.hams-pre { font-size: 11.5px; white-space: pre-wrap; margin: 4px 0; opacity: .8; overflow: auto; }
+.hams-err { color: #e05252; padding: 8px; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); }
+.hams-pre { font-size: calc(11.5px + var(--dsh-content-font-delta, 0px)); white-space: pre-wrap; margin: 4px 0; opacity: .8; overflow: auto; }
 .hams-link { color: inherit; }
-.hams-dim { opacity: .65; font-size: 12.5px; }
+.hams-dim { opacity: .65; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
 /* tier 3: task tab strip (modeled after dsh-ssh-ops' server tab strip) */
 .hams-tabstrip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px 8px 0;
   border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
 .hams-tasktab { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; max-width: 180px;
-  border-radius: 6px 6px 0 0; cursor: pointer; font-size: 12.5px;
+  border-radius: 6px 6px 0 0; cursor: pointer; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px));
   border: 1px solid transparent; border-bottom: none; }
 .hams-tasktab.active { border-color: color-mix(in srgb, currentColor 25%, transparent);
   background: color-mix(in srgb, currentColor 7%, transparent); }
 .hams-tasktab .hams-tabname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hams-tasktab .hams-x { opacity: .55; cursor: pointer; font-size: 13px; line-height: 1; }
+.hams-tasktab .hams-x { opacity: .55; cursor: pointer; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); line-height: 1; }
 .hams-tasktab .hams-x:hover { opacity: 1; color: #e05252; }
 .hams-addbtn { border: 1px dashed color-mix(in srgb, currentColor 35%, transparent); background: none;
-  color: inherit; border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: 13px; }
+  color: inherit; border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); }
 .hams-body { padding: 10px 12px; overflow: auto; }
 .hams-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.38); display: flex;
   align-items: center; justify-content: center; z-index: 90; }
@@ -340,17 +340,17 @@ window.__ModuleLoader__.load({
   padding: 16px 18px; min-width: 320px; max-width: 440px;
   background: color-mix(in srgb, black 20%, canvas); color: fieldtext;
   color: light-dark(canvasText, #e6e6e6); backdrop-filter: blur(3px); }
-.hams-dialog h3 { margin: 0 0 10px; font-size: 14.5px; font-weight: 600; }
+.hams-dialog h3 { margin: 0 0 10px; font-size: calc(14.5px + var(--dsh-content-font-delta, 0px)); font-weight: 600; }
 .hams-field { margin: 8px 0; }
-.hams-field label { display: block; font-size: 12px; opacity: .7; margin-bottom: 3px; }
+.hams-field label { display: block; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); opacity: .7; margin-bottom: 3px; }
 .hams-taskdesc { margin-top: 8px; }
 .hams-subtabs { display: flex; gap: 2px; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
   margin-bottom: 8px; }
-.hams-subtab { padding: 3px 10px; font-size: 12px; cursor: pointer; color: inherit; background: none;
+.hams-subtab { padding: 3px 10px; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); cursor: pointer; color: inherit; background: none;
   border: none; border-bottom: 2px solid transparent; opacity: .7; }
 .hams-subtab.active { opacity: 1; border-bottom-color: currentColor; font-weight: 600; }
 .hams-dash { margin-top: 12px; border: 1px dashed color-mix(in srgb, currentColor 25%, transparent);
-  border-radius: 8px; padding: 14px; opacity: .75; font-size: 12.5px; }
+  border-radius: 8px; padding: 14px; opacity: .75; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
 .hams-headerbtn { display: inline-flex; align-items: center; gap: 4px; }
 .hams-pin-on { border-color: color-mix(in srgb, #3fb950 45%, transparent); color: #3fb950; }
 `
@@ -515,7 +515,7 @@ window.__ModuleLoader__.load({
         : ''
       return h('div', { style: { marginTop: '10px' } },
         h('div', { className: 'hams-dim' }, h('b', null, tr('chk.title'))),
-        remote && h('div', { style: { fontSize: '12.5px', margin: '4px 0', lineHeight: 1.6 } },
+        remote && h('div', { style: { fontSize: 'calc(12.5px + var(--dsh-content-font-delta, 0px))', margin: '4px 0', lineHeight: 1.6 } },
           h('div', null, tr('chk.machine', { m: machineName + (remote.machine?.current ? tr('rproj.current') : '') })
             + (remote.machine?.latencyMs != null ? ' · ' + tr('chk.latency', { n: remote.machine.latencyMs }) : '')),
           h('div', null, tr('chk.remoteArea', { path: remote.remotePath || '—' })),
@@ -650,7 +650,7 @@ window.__ModuleLoader__.load({
         setDescDraft(null)
       }
 
-      return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0 } },
+      return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
         // tab strip: one card per task, "+" to create (modeled after dsh-ssh-ops' server tabs);
         // trailing pin toggle controls the reopen-on-switch behavior
         h('div', { className: 'hams-tabstrip' },
