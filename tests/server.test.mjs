@@ -331,6 +331,16 @@ test('checks: parseRwExecText splits stdout/stderr and reads exit markers', () =
   assert.equal(slow.timedOut, true)
   assert.equal(slow.exitCode, 0) // no exit marker — timedOut carries the failure
   assert.equal(slow.stdout, 'partial')
+
+  // dsh-remote 0.8.53+ promotion (jobs service present): the whole result is the
+  // marker + guidance — the command is STILL RUNNING and must never read as ok.
+  const promoted = parseRwExecText('[still running after 20000ms; moved to background job job-ab12cd]\n'
+    + 'Read its output with job_output (job_id="job-ab12cd") and stop it with job_kill.')
+  assert.equal(promoted.promotedJob, 'job-ab12cd')
+  assert.equal(promoted.stdout, '')
+  assert.equal(promoted.stderr, '')
+  assert.equal(promoted.timedOut, false)
+  assert.equal(promoted.exitCode, 0)
 })
 
 test('checks: the button surface is the four Overview buttons', () => {

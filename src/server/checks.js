@@ -84,16 +84,24 @@ export const REMOTE_CHECK_BUTTONS = [
 
 // rw_exec has no machine parameter — it binds from the calling session's cwd (a cwd
 // inside a local mirror resolves to that mirror's machine). The caller passes the
-// remote project's OWN live session as the agent context (dsh-remote 0.8.51 bindingFor
-// reads exec.agent.session.header.cwd). A fabricated bare {header:{cwd}} object does
-// NOT work — the tool pipeline validates the session against the live session store
-// (`session "undefined" is not live in this store`), which is why a real session object
-// is required. Coupling points to re-verify when dsh-remote updates: that cwd shape
-// and the rw_exec result text format parsed below. Per-command budget: the tool caps
-// itself at dsh-remote's commandTimeoutMs (default 20 s) and reports it in-band; our
-// AbortSignal sits above that so the tool's own timeout marker surfaces first.
+// remote project's OWN live session as the agent context (dsh-remote 0.8.54 bindingFor,
+// unchanged since 0.8.51, reads exec.agent.session.header.cwd). A fabricated bare
+// {header:{cwd}} object does NOT work — the tool pipeline validates the session against
+// the live session store (`session "undefined" is not live in this store`), which is why
+// a real session object is required. Coupling points to re-verify when dsh-remote
+// updates: that cwd shape and the rw_exec result text format parsed below. Per-command
+// budget: the tool caps itself at dsh-remote's commandTimeoutMs (default 20 s) and
+// reports it in-band; our AbortSignal sits above that so the tool's own timeout marker
+// surfaces first. Since 0.8.53 a command outliving that budget with the jobs service
+// present is PROMOTED to a background job instead of killed — parseRwExecText
+// recognizes that marker so a still-running command is never judged ok.
 export function parseRwExecText(text) {
   let raw = String(text ?? '')
+  // Promotion (dsh-remote 0.8.53+): the ENTIRE result becomes the marker plus a
+  // job_output/job_kill guidance line — no stdout, no stderr, no exit marker. The
+  // command keeps running on the remote, so this must never read as a clean exit.
+  const promoted = raw.match(/\[still running after \d+ms; moved to background job ([^\]]+)\]/)
+  if (promoted) return { stdout: '', stderr: '', exitCode: 0, timedOut: false, promotedJob: promoted[1] }
   // rw_exec appends the trailing markers to the END of the joined text — after the
   // stderr section — so strip them before splitting stdout from stderr.
   const timedOut = /\[command timed out after \d+ms\]/.test(raw)
@@ -105,7 +113,7 @@ export function parseRwExecText(text) {
   let stdout = raw, stderr = ''
   const errAt = stdout.indexOf('-- stderr --')
   if (errAt >= 0) { stderr = stdout.slice(errAt + '-- stderr --'.length).trim(); stdout = stdout.slice(0, errAt) }
-  return { stdout: stdout.trimEnd(), stderr, exitCode, timedOut }
+  return { stdout: stdout.trimEnd(), stderr, exitCode, timedOut, promotedJob: '' }
 }
 
 // One rw_exec call → one result entry. opts.raw keeps the full stdout on the entry
@@ -127,10 +135,15 @@ async function execViaToolShell(tools, agent, item, cmd, channel, { maxLines = 3
       return entry
     }
     const p = parseRwExecText(text)
-    entry.ok = p.exitCode === 0 && !p.timedOut && (!judge || judge(p.stdout))
+    entry.ok = p.exitCode === 0 && !p.timedOut && !p.promotedJob && (!judge || judge(p.stdout))
     if (raw) entry.stdoutRaw = p.stdout.slice(0, 8000)
     entry.result = (p.stdout || '').trim().split(/\r?\n/).slice(0, maxLines).join(' | ').slice(0, maxChars)
-    if (!entry.ok) entry.detail = (p.timedOut ? 'timed out; ' : '') + (p.stderr || `exit code ${p.exitCode}`).slice(0, 300)
+    if (!entry.ok) {
+      entry.detail = p.promotedJob
+        ? `moved to background job ${p.promotedJob} (command still running on the remote)`
+        : (p.timedOut ? 'timed out; ' : '') + (p.stderr || `exit code ${p.exitCode}`)
+      entry.detail = entry.detail.slice(0, 300)
+    }
   } catch (e) {
     entry.detail = String(e?.message ?? e).slice(0, 300)
   }

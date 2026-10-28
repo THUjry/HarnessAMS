@@ -53,6 +53,15 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    project that needs to run a remote simulation borrows one of them. Machine
    management (add/remove/credentials) and **remote file browsing/editing stay in
    dsh-remote itself** — HarnessAMS deliberately does not duplicate them.
+
+   **Credential storage** (dsh-remote 0.8.54, source audited 2026-10-28): for
+   security, tick "encrypt saved password" when saving a machine — the password then
+   lives in the OS credential store (Windows DPAPI / macOS keychain / libsecret) and
+   never in a plaintext file, and since 0.8.54 a failed keychain write refuses to
+   save rather than silently downgrading to plaintext. If the keychain genuinely does
+   not work in your environment, plaintext storage stays available: without the tick
+   (the form default), or with `credentialFallback: plain` as the failure fallback —
+   in `~/.dsh/remote-workspaces/machines.json`.
 2. **Project = DSH workspace** — a project is nothing more than a DSH workspace (a
    local folder). Per-project task data lives at `<workspace>/.harnessams/tasks.json`;
    sessions are deliberately not modeled (every session of a workspace shares the task
