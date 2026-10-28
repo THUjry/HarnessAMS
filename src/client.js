@@ -467,7 +467,9 @@ window.__ModuleLoader__.load({
     // Remote projects (tier 1): the dsh-remote machine list with each machine's mirror
     // and remote-project workspace. Machine management itself lives in dsh-remote —
     // here we only read the registry and offer one-click remote-project creation
-    // (ensure mirror + register the mirror directory as a DSH workspace).
+    // (register the machine's existing mirror directory as a DSH workspace; the
+    // mirror itself must be created in dsh-remote — machines without one render no
+    // button, just the pick-a-workspace hint).
     function RemoteProjectsSection() {
       const [machines, setMachines] = useState(null)
       const [err, setErr] = useState(null)

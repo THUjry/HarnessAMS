@@ -289,7 +289,7 @@ test('remote: createRemoteProject registers the mirror as a workspace', async ()
       create: async (p, title) => { calls.push({ p, title }); return { id: 'w9', path: p, title } },
     }
     const r = await createRemoteProject({ workspaceRegistry: registry },
-      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op' }, { headers: {} }, fetch, root)
+      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op' }, root)
     assert.ok(r.created, JSON.stringify(r))
     assert.equal(r.workspace.id, 'w9')
     assert.equal(calls[0].title, 'node1 (remote)')
@@ -301,16 +301,15 @@ test('remote: createRemoteProject registers the mirror as a workspace', async ()
       create: async () => { throw new Error('must not be called') },
     }
     const r2 = await createRemoteProject({ workspaceRegistry: registry2 },
-      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op' }, { headers: {} }, fetch, root)
+      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op' }, root)
     assert.equal(r2.created, false)
     assert.equal(r2.workspace.id, 'w1')
 
-    // no mirror + HTTP failure -> actionable error, no throw
+    // no mirror -> actionable error pointing at dsh-remote, no throw, no create
     const r3 = await createRemoteProject({ workspaceRegistry: registry },
-      { id: 'm-2', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root' },
-      { headers: { host: '127.0.0.1:3188', cookie: 's=1' } },
-      async () => ({ ok: false, status: 500 }), root)
-    assert.match(r3.error, /mirror creation failed/)
+      { id: 'm-2', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root' }, root)
+    assert.match(r3.error, /no local mirror/)
+    assert.match(r3.error, /rw_pick_workspace|dsh-remote/)
     assert.equal(calls.length, 1) // no second create
   } finally { await rm(root, { recursive: true, force: true }) }
 })

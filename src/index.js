@@ -67,7 +67,8 @@ async function handle(req, res, ctx) {
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     // Write surface is narrow by design: tasks (project data, local file write) and
-    // remote-project creation (workspaceRegistry + same-origin dsh-remote route).
+    // remote-project creation (workspaceRegistry registration of an existing
+    // dsh-remote mirror; the mirror itself must be picked in dsh-remote first).
     if (req.method === 'PUT' && route === '/api/tasks') {
       const sessionId = url.searchParams.get('sessionId')
       const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
@@ -89,7 +90,7 @@ async function handle(req, res, ctx) {
       if (!list.ok) { json(503, { error: `dsh-remote machines unavailable: ${list.reason}` }); return }
       const m = list.machines.find((x) => x.id === machineId || x.name === machineId)
       if (!m) { json(404, { error: `no such dsh-remote machine: ${machineId}` }); return }
-      const r = await createRemoteProject(ctx, m, req)
+      const r = await createRemoteProject(ctx, m)
       if (r.error) { json(409, { error: r.error }); return }
       json(200, { ok: true, ...r })
       return

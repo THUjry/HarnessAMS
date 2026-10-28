@@ -44,8 +44,11 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    mirror, and remote project. A **remote project** is simply a DSH workspace opened
    inside a machine's local mirror
    (`~/.dsh/remote-workspaces/<host>-<user>-<port>/<ws>`) — one per machine is the
-   recommended setup, and the page creates it in one click (ensure the mirror via
-   dsh-remote, then register the mirror directory as a DSH workspace). Sessions of a
+   recommended setup, and the page creates it in one click by registering the
+   machine's EXISTING mirror directory as a DSH workspace — mirrors are never
+   created here: pick the remote workspace once in dsh-remote (rw_pick_workspace
+   or its picker) so the mirror exists; machines without one get an actionable
+   error. Sessions of a
    remote project are what bind dsh-remote's `rw_*` tools to that machine; a local
    project that needs to run a remote simulation borrows one of them. Machine
    management (add/remove/credentials) and **remote file browsing/editing stay in

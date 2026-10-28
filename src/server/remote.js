@@ -121,34 +121,20 @@ export function projectSessions(ctx, workspacePath) {
   })
 }
 
-// One-click remote-project creation (tier 1): ensure the machine has a local mirror
-// (dsh-remote's own POST /dsh-remote/mirror, reached same-origin with the browser's
-// credentials forwarded), then register the mirror directory as a DSH workspace via
-// workspaceRegistry — one remote project per machine, at the mirror root. Never
-// switches dsh-remote's global active machine and never stores credentials.
-export async function createRemoteProject(ctx, machine, req, fetchImpl = fetch, root = remoteWorkspacesRoot()) {
+// One-click remote-project creation (tier 1): register a machine's EXISTING dsh-remote
+// mirror as a DSH workspace via workspaceRegistry — the mirror itself is never created
+// here (the ensure-mirror POST was removed 2026-10-28: sending {machineId} without a
+// path is a guaranteed 400 on dsh-remote's /dsh-remote/mirror, so it never worked).
+// Mirrors are born when the user picks a remote workspace in dsh-remote itself
+// (rw_pick_workspace or its picker UI); a machine without one gets an actionable
+// error. One remote project per machine, at the mirror root. Never switches
+// dsh-remote's global active machine and never stores credentials.
+export async function createRemoteProject(ctx, machine, root = remoteWorkspacesRoot()) {
   if (!machine || (!machine.id && !machine.host)) return { error: 'machine record required' }
-  let mirror = findMirrorForMachine(machine, root)
-  let createdMirror = false
+  const mirror = findMirrorForMachine(machine, root)
   if (!mirror) {
-    const host = req?.headers?.host ?? '127.0.0.1:3080'
-    const headers = { 'content-type': 'application/json' }
-    if (req?.headers?.cookie) headers.cookie = req.headers.cookie
-    if (req?.headers?.authorization) headers.authorization = req.headers.authorization
-    let res = null
-    try {
-      res = await fetchImpl(`http://${host}/dsh-remote/mirror`, {
-        method: 'POST', headers, body: JSON.stringify({ machineId: machine.id }),
-        signal: AbortSignal.timeout(20000),
-      })
-    } catch { res = null }
-    if (!res?.ok) {
-      return { error: `dsh-remote mirror creation failed (HTTP ${res?.status ?? 'network error'}) — `
-        + `pick a remote workspace once in dsh-remote (rw_pick_workspace) so the machine has a local mirror` }
-    }
-    mirror = findMirrorForMachine(machine, root)
-    if (!mirror) return { error: 'mirror route responded OK but no mirror was found afterwards' }
-    createdMirror = true
+    return { error: `no local mirror for machine ${machine.name || machine.host} — `
+      + `pick a remote workspace in dsh-remote first (rw_pick_workspace or its picker), then retry here` }
   }
   const registry = ctx?.workspaceRegistry
   if (!registry || typeof registry.create !== 'function') return { error: 'workspaceRegistry service unavailable' }
@@ -158,8 +144,8 @@ export async function createRemoteProject(ctx, machine, req, fetchImpl = fetch, 
     return p === m || p.startsWith(m + '/')
   })
   if (existing) {
-    return { workspace: { id: existing.id, path: existing.path, title: existing.title }, created: false, createdMirror }
+    return { workspace: { id: existing.id, path: existing.path, title: existing.title }, created: false }
   }
   const w = await registry.create(mirror.mirrorDir, `${machine.name || machine.host} (remote)`)
-  return { workspace: { id: w.id, path: w.path, title: w.title }, created: true, createdMirror }
+  return { workspace: { id: w.id, path: w.path, title: w.title }, created: true }
 }
