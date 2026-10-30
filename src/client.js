@@ -10,8 +10,9 @@
 //           project's tasks with "+" to create; the Overview sub-view carries the
 //           health-check buttons (local environment + one block per machine with a
 //           remote project: load / LSF jobs / batch dirs / script sync, borrowed from
-//           that remote project's live session). Remote file browsing/editing is NOT
-//           here — dsh-remote's own tools and web surface do that.
+//           that remote project's live session); the Dashboard sub-view shows the
+//           task-registered local HTML reports (browse-to-add / dropdown / reload).
+//           Remote file browsing/editing is NOT here — dsh-remote's own tools do it.
 // Classic script on the host module loader (same shape as dsh-remote's client): the
 // factory receives a synchronous require, React comes from the host page, and the whole
 // client is one file — combo-loaded classic scripts cannot import sibling modules.
@@ -141,7 +142,20 @@ window.__ModuleLoader__.load({
         'tasks.nameLabel': '名称',
         'tasks.descOptional': '描述（可选）',
         'tasks.create': '创建',
-        'tasks.dashPlaceholder': '占位 — 本任务的扫描报告与图表将在后续里程碑落地。',
+        'dash.noReports': '（暂无报告）',
+        'dash.addTitle': '添加 HTML 报告',
+        'dash.refresh': '刷新报告（强制重载）',
+        'dash.remove': '移除当前报告（只解除登记，不删除文件）',
+        'dash.openTab': '在新标签页打开',
+        'dash.empty': '尚未添加报告 — 浏览本地磁盘加入已有的 HTML 报告。',
+        'dash.addFirst': '+ 添加报告',
+        'dash.currentDir': '当前目录',
+        'dash.parentDir': '上一级',
+        'dash.pickFile': '选择 HTML 文件（点击即添加）',
+        'dash.emptyDir': '（此目录没有子目录或 HTML 文件）',
+        'dash.manualLabel': '或输入报告的绝对路径',
+        'dash.manualPlaceholder': 'D:\\path\\to\\report.html',
+        'dash.add': '添加',
         'tasks.simTitle': '仿真设置',
         'tasks.simPlaceholder': '占位 — 本任务的 SmartAnaSim 配置将在后续里程碑落地。',
         'tasks.pinOn': '已固定：切换会话/工作区时任务侧栏会自动重开 — 点击取消跟随',
@@ -250,7 +264,20 @@ window.__ModuleLoader__.load({
         'tasks.nameLabel': 'Name',
         'tasks.descOptional': 'Description (optional)',
         'tasks.create': 'Create',
-        'tasks.dashPlaceholder': 'Placeholder — sweep reports and plots for this task land here in later milestones.',
+        'dash.noReports': '(no reports)',
+        'dash.addTitle': 'Add an HTML report',
+        'dash.refresh': 'Reload the report (hard reload)',
+        'dash.remove': 'Remove the current report (unregisters it; the file is kept)',
+        'dash.openTab': 'Open in a new tab',
+        'dash.empty': 'No report added yet — browse the local disk to add an existing HTML report.',
+        'dash.addFirst': '+ Add report',
+        'dash.currentDir': 'Current directory',
+        'dash.parentDir': 'Parent directory',
+        'dash.pickFile': 'Pick an HTML file (click to add it)',
+        'dash.emptyDir': '(no subdirectories or HTML files here)',
+        'dash.manualLabel': 'Or type the report’s absolute path',
+        'dash.manualPlaceholder': '/path/to/report.html',
+        'dash.add': 'Add',
         'tasks.simTitle': 'Simulation settings',
         'tasks.simPlaceholder': 'Placeholder — SmartAnaSim configuration for this task lands here in later milestones.',
         'tasks.pinOn': 'Pinned: the task tab reopens when you switch sessions/workspaces — click to stop following',
@@ -397,6 +424,22 @@ window.__ModuleLoader__.load({
 .hams-subtab.active { opacity: 1; border-bottom-color: currentColor; font-weight: 600; }
 .hams-dash { margin-top: 12px; border: 1px dashed color-mix(in srgb, currentColor 25%, transparent);
   border-radius: 8px; padding: 14px; opacity: .75; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
+/* tier 3 Dashboard: report viewer (toolbar + iframe) and the add-report browser */
+.hams-dashview { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; min-height: 0; }
+.hams-dashtoolbar { margin: 0; flex-wrap: nowrap; }
+.hams-dashtoolbar .hams-select { flex: 1 1 120px; min-width: 60px; max-width: 100%; }
+.hams-btn { text-decoration: none; }
+.hams-dashframe { width: 100%; height: calc(100vh - 230px); min-height: 300px;
+  border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 8px; }
+.hams-list { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 6px;
+  max-height: 240px; overflow: auto; display: flex; flex-direction: column; }
+.hams-listitem { display: flex; align-items: center; gap: 6px; text-align: left; padding: 3px 8px;
+  cursor: pointer; background: none; border: none; color: inherit;
+  font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
+.hams-listitem:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+.hams-listitem .hams-dim { margin-left: auto; }
+.hams-listitem .hams-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hams-browse-dialog { max-width: 560px; width: min(560px, 92vw); }
 .hams-headerbtn { display: inline-flex; align-items: center; gap: 4px; }
 .hams-pin-on { border-color: color-mix(in srgb, #3fb950 45%, transparent); color: #3fb950; }
 `
@@ -814,6 +857,9 @@ window.__ModuleLoader__.load({
         persist(tasks.map((t) => t.id === selected.id ? { ...t, description: descDraft } : t))
         setDescDraft(null)
       }
+      // Dashboard sub-view mutator: applies fn to the selected task and persists
+      // the whole list (same single-writer channel as description edits).
+      const updateTask = (fn) => persist(tasks.map((t) => t.id === selected.id ? fn(t) : t))
 
       // Remote projects render nothing but the explanatory note — no tab strip, no
       // tasks, no checks. Their role is anchoring the connection; remote files go
@@ -874,9 +920,7 @@ window.__ModuleLoader__.load({
                 descDraft !== null && h('div', { className: 'hams-row' },
                   h('button', { className: 'hams-btn hams-btn-sm', onClick: saveDescription }, tr('common.save')),
                   h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDescDraft(null) }, tr('common.cancel'))))),
-            view === 'dashboard' && h('div', { className: 'hams-dash' },
-              h('b', null, tr('tasks.viewDashboard')), h('br'),
-              tr('tasks.dashPlaceholder')),
+            view === 'dashboard' && h(TaskDashboard, { task: selected, updateTask }),
             view === 'sim' && h('div', { className: 'hams-dash' },
               h('b', null, tr('tasks.simTitle')), h('br'),
               tr('tasks.simPlaceholder'))),
@@ -918,6 +962,125 @@ window.__ModuleLoader__.load({
           h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
             h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')),
             h('button', { className: 'hams-btn', disabled: !valid, onClick: () => onCreate(name.trim(), description) }, tr('tasks.create')))))
+    }
+
+    // Dashboard sub-view: the task's registered local HTML reports. The report
+    // list + current selection live in the task store (reports[] /
+    // dashboard_selected); files are served read-only from
+    // /harnessams/dash/<taskId>/<reportId>/… with the report's own directory as
+    // root, so the document's relative references (data/*.js, images) keep
+    // working inside the iframe. Refresh remounts the iframe via the key/nonce
+    // (a plain location.reload is unreliable across same-origin documents).
+    function TaskDashboard({ task, updateTask }) {
+      const [nonce, setNonce] = useState(0)
+      const [dialogOpen, setDialogOpen] = useState(false)
+      const reports = task.reports ?? []
+      const selectedId = reports.some((r) => r.id === task.dashboard_selected)
+        ? task.dashboard_selected
+        : (reports[0]?.id ?? null)
+      const current = reports.find((r) => r.id === selectedId) ?? null
+
+      const addReport = (absPath, name) => {
+        // Client-generated id (same shape the server assigns) so adding +
+        // selecting the new report is one persist round-trip.
+        const id = 'r-' + Math.random().toString(36).slice(2, 10)
+        const base = absPath.split(/[\\/]/).pop() || absPath
+        updateTask((t) => ({
+          ...t,
+          reports: [...(t.reports ?? []), { id, name: name || base, path: absPath }],
+          dashboard_selected: id,
+        }))
+      }
+      const removeCurrent = () => updateTask((t) => {
+        const rest = (t.reports ?? []).filter((r) => r.id !== selectedId)
+        return { ...t, reports: rest, dashboard_selected: rest[0]?.id ?? null }
+      })
+      const dashUrl = current ? '/harnessams/dash/' + encodeURIComponent(task.id) + '/' + encodeURIComponent(current.id) + '/' : null
+
+      return h('div', { className: 'hams-dashview' },
+        h('div', { className: 'hams-row hams-dashtoolbar' },
+          h('select', {
+              className: 'hams-select',
+              value: selectedId ?? '',
+              disabled: !reports.length,
+              title: current ? current.path : tr('dash.noReports'),
+              onChange: (e) => updateTask((t) => ({ ...t, dashboard_selected: e.target.value })),
+            },
+            reports.length
+              ? reports.map((r) => h('option', { key: r.id, value: r.id }, esc(r.name)))
+              : h('option', { value: '' }, tr('dash.noReports'))),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.addTitle'), onClick: () => setDialogOpen(true) }, '＋'),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻'),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.remove'), disabled: !current, onClick: removeCurrent }, '×'),
+          current && h('a', { className: 'hams-btn hams-btn-sm', title: tr('dash.openTab'), href: dashUrl, target: '_blank', rel: 'noopener' }, '↗')),
+        current
+          ? h('iframe', {
+              key: current.id + ':' + nonce,
+              className: 'hams-dashframe',
+              title: current.name,
+              src: dashUrl + '?_r=' + nonce,
+            })
+          : h('div', { className: 'hams-dash' },
+              tr('dash.empty'), ' ',
+              h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDialogOpen(true) }, tr('dash.addFirst'))),
+        dialogOpen && h(AddReportDialog, {
+          onCancel: () => setDialogOpen(false),
+          onAdd: (p, n) => { setDialogOpen(false); addReport(p, n) },
+        }),
+      )
+    }
+
+    // Add-report browser: a one-level directory listing (server /api/browse —
+    // subdirectories + *.html files, dot-directories hidden) starting at the
+    // workspace root; clicking an HTML file registers it. The manual path field
+    // covers paths outside the browsable tree.
+    function AddReportDialog({ onCancel, onAdd }) {
+      const [cwd, setCwd] = useState(null) // null = server default (workspace root)
+      const [listing, setListing] = useState(null)
+      const [error, setError] = useState(null)
+      const [manual, setManual] = useState('')
+      useEffect(() => {
+        let alive = true
+        setError(null); setListing(null)
+        fetchJson(API + '/browse' + (cwd ? '?path=' + encodeURIComponent(cwd) : ''))
+          .then((r) => { if (alive) setListing(r) })
+          .catch((e) => { if (alive) setError(String(e.message ?? e)) })
+        return () => { alive = false }
+      }, [cwd])
+      const addManual = () => { const p = manual.trim(); if (p) onAdd(p, '') }
+      return h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) onCancel() } },
+        h('div', { className: 'hams-dialog hams-browse-dialog' },
+          h('h3', null, tr('dash.addTitle')),
+          h('div', { className: 'hams-field' },
+            h('label', null, tr('dash.currentDir')),
+            h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+              h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.parentDir'),
+                disabled: !listing?.parent, onClick: () => setCwd(listing.parent) }, '↑'),
+              h('span', { className: 'hams-dim',
+                style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                esc(listing ? listing.path : '…')))),
+          h('div', { className: 'hams-field' },
+            h('label', null, tr('dash.pickFile')),
+            h('div', { className: 'hams-list' },
+              error && h('div', { className: 'hams-err' }, error),
+              listing && !error && h('div', null,
+                listing.dirs.map((d) => h('button', { key: 'd:' + d, className: 'hams-listitem',
+                  onClick: () => setCwd(listing.path + '/' + d) },
+                  h('span', { className: 'hams-name' }, '📁 ' + esc(d)))),
+                listing.htmls.map((f) => h('button', { key: 'f:' + f.name, className: 'hams-listitem',
+                  onClick: () => onAdd(listing.path + '/' + f.name, f.name) },
+                  h('span', { className: 'hams-name' }, '📄 ' + esc(f.name)),
+                  h('span', { className: 'hams-dim' }, fmtBytes(f.bytes)))),
+                !listing.dirs.length && !listing.htmls.length && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('dash.emptyDir'))))),
+          h('div', { className: 'hams-field' },
+            h('label', null, tr('dash.manualLabel')),
+            h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+              h('input', { className: 'hams-input', placeholder: tr('dash.manualPlaceholder'), value: manual,
+                onChange: (e) => setManual(e.target.value),
+                onKeyDown: (e) => { if (e.key === 'Enter') addManual() } }),
+              h('button', { className: 'hams-btn', disabled: !manual.trim(), onClick: addManual }, tr('dash.add')))),
+          h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
+            h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')))))
     }
 
     // Sticky task sidebar: DSH resets the right sidebar to its start page whenever the

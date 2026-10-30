@@ -9,12 +9,16 @@
 //            health-check buttons, consumed per active session.
 // Routes are not token-gated by the DSH web server (verified 2026-10-25): only local
 // management reads/writes live here — no credentials, no remote-execution passthrough.
+// The Dashboard viewer is display-only: it serves task-registered local HTML reports
+// read-only (/dash/<taskId>/<reportId>/…, bounded by each report's own directory) and
+// a one-level listing for the add-report picker (/api/browse) — no file writes.
 // Remote connectivity is delegated entirely to dsh-remote: remote checks run from a
 // LOCAL project's Overview through the rw_exec tool shell, borrowing a live session
 // of the target machine's remote project as the agent context (no global-machine
 // switching). Remote file browsing/editing is NOT proxied here — dsh-remote's own
 // tools and web surface do it.
 import fsp from 'node:fs/promises'
+import os from 'node:os'
 import path from 'node:path'
 import { findWorkspaceConfig } from './server/workspace.js'
 import { runLocalChecks, runRemoteCheckButton, REMOTE_CHECK_BUTTONS } from './server/checks.js'
@@ -23,6 +27,7 @@ import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty } from './serv
 import { remoteMachinesStatus, fetchMachines, sessionInMirror } from './server/machines.js'
 import { remoteProjectFor, checkMachinesForLocal, findRemoteProjectForMachine, createRemoteProject } from './server/remote.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
+import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 
 export const name = 'dsh-harnessams'
 // workspaceRegistry/tools are required on the web composition (both ship with dsh-base);
@@ -196,6 +201,14 @@ async function handle(req, res, ctx) {
     json(200, { ok: true, workspace_root: root, config_path: ws.configPath, demos })
     return
   }
+  if (route === '/api/browse') {
+    // One-level directory listing for the add-report dialog; no path param =
+    // start at the workspace root (home dir as a last resort).
+    const r = await browseDir(url.searchParams.get('path'), ws ? ws.config.workspace_root : os.homedir())
+    if (r.error) { json(400, { error: r.error }); return }
+    json(200, { ok: true, ...r })
+    return
+  }
   // ---- tier 2: project mapping + task store ----
   if (route === '/api/project') {
     const mapped = sessionProject(ctx.workspaceRegistry, url.searchParams.get('sessionId'))
@@ -212,6 +225,25 @@ async function handle(req, res, ctx) {
     json(200, { ok: true, project, ...(await readTasks(project.path)) })
     return
   }
+  if (route.startsWith('/dash/')) {
+    // Task-attached dashboard reports: /dash/<taskId>/<reportId>/<rel…> (empty
+    // rel = the report document itself). rel resolves against the report's own
+    // directory so the document's relative references (data/*.js, images) keep
+    // working; the ids are opaque lookups into the task stores, not paths.
+    const segs = route.slice('/dash/'.length).split('/').map((s) => {
+      try { return decodeURIComponent(s) } catch { return null }
+    })
+    if (segs.length < 2 || segs.slice(0, 2).some((s) => !s)) { json(400, { error: 'bad dashboard route (expected /dash/<taskId>/<reportId>/<rel…>)' }); return }
+    const [taskId, reportId] = segs
+    const rel = segs.slice(2).join('/')
+    const hit = await resolveReportFile(ctx.workspaceRegistry, taskId, reportId, rel)
+    if (hit.error) { json(hit.code ?? 404, { error: hit.error }); return }
+    const st = await fsp.stat(hit.abs).catch(() => null)
+    if (!st || !st.isFile()) { json(404, { error: 'not found' }); return }
+    res.writeHead(200, { 'Content-Type': mimeFor(hit.abs), 'Content-Length': st.size })
+    res.end(await fsp.readFile(hit.abs))
+    return
+  }
   if (route.startsWith('/reports/')) {
     // Embedded reports (decision #4): static read-only, whitelist root = workspace, no traversal
     const rel = decodeURIComponent(route.slice('/reports/'.length)).replace(/\\/g, '/')
@@ -219,7 +251,9 @@ async function handle(req, res, ctx) {
     const abs = path.resolve(ws.config.workspace_root, rel)
     if (!abs.startsWith(path.resolve(ws.config.workspace_root)) || !(await fsp.stat(abs).catch(() => null))) { json(404, { error: 'not found' }); return }
     const st = await fsp.stat(abs)
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Content-Length': st.size })
+    // MIME by extension: a blanket text/html silently kills the report's
+    // data/*.js scripts (browser refuses non-JS MIME on <script src>)
+    res.writeHead(200, { 'Content-Type': mimeFor(abs), 'Content-Length': st.size })
     res.end(await fsp.readFile(abs))
     return
   }

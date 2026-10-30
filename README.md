@@ -69,8 +69,12 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
 3. **Task sidebar (local projects only)** — the right-sidebar "HarnessAMS" tab manages
    the active project's tasks: a tab strip (one card per task, "+" to create, × to
    delete), an in-task sub-navigation (**Overview** with the health-check panel and the
-   editable description, **Dashboard** and **Sim settings** as placeholders until their
-   milestones land), and a conversation header button that opens the tab and — while
+   editable description, **Dashboard** as an HTML-report viewer — browse the local disk
+   to add existing reports to the task, switch them in a dropdown, reload them on
+   demand; reports are served read-only from `/harnessams/dash/<taskId>/<reportId>/…`
+   with each report's own directory as root so their relative `data/*.js` references
+   keep working, and **Sim settings** as a placeholder until its milestone lands), and
+   a conversation header button that opens the tab and — while
    pinned 📌 — re-opens it on every session switch, so the sidebar follows workspace
    switches instead of collapsing. **Remote projects get no sidebar at all** (their
    role is anchoring the connection — remote files are browsed with dsh-remote
