@@ -180,11 +180,12 @@ test('machines: findMirrorForMachine matches host+port+user from meta files', as
 
 test('machines: sessionInMirror borrows a live session rooted in the mirror', () => {
   const svc = { list: () => [
-    { header: { cwd: 'D:/proj/harnessams-workspace' } },
-    { header: { cwd: 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog/sub' } },
+    { id: 's-local', header: { cwd: 'D:/proj/harnessams-workspace' } },
+    { id: 's-remote', header: { cwd: 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog/sub' } },
   ] }
   const hit = sessionInMirror(null, 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog', svc)
   assert.ok(hit, 'no session borrowed')
+  assert.equal(hit.agent.id, 's-remote') // rw_exec's background-job owner
   assert.equal(hit.agent.session.header.cwd, 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog/sub')
   assert.equal(sessionInMirror(null, 'C:/other', svc), null)
   assert.equal(sessionInMirror(null, 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog', { list: () => [] }), null)
@@ -369,6 +370,8 @@ test('checks: runRemoteCheckButton load runs with the borrowed session agent', a
   assert.deepEqual(r.results[0].rows, [['0.42', '0.51', '0.55', '3/900', '48']])
   assert.match(r.results[0].result, /load 0\.42 \/ 48 cpu/)
   assert.equal(inputs[0].agent.session.header.cwd, 'MIRROR/DIR') // binding context
+  assert.equal(inputs[0].arguments.promoteOnTimeout, false) // no background-job owner needed
+  assert.equal(inputs[0].arguments.timeoutMs, 40000)
   assert.ok(inputs[0].signal instanceof AbortSignal && inputs[0].callId)
   assert.equal(inputs[0].name, 'rw_exec')
 })

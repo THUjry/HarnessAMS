@@ -138,6 +138,17 @@ All notable changes are documented here. The format follows
   template, and the seven-item remote command set (connect/load/mem/disk/ws/
   ngspice/du) in favor of the four Overview buttons.
 
+### Fixed
+
+- **Remote Overview checks on dsh-remote 0.8.66 (2026-10-31)**: the borrowed
+  session agent now carries `id` alongside `session` (`sessionInMirror`) —
+  rw_exec derives the background-job owner from `exec.agent.id`, so the old
+  id-less wrapper made the tool shell fail before any command ran. rw_exec is
+  now called with `promoteOnTimeout:false` (a borrowed agent has no job
+  controller, so a promoted command would be stranded on the remote) and its
+  AbortSignal sits 30 s above the requested `timeoutMs`, so the tool's own
+  timeout marker surfaces instead of a client-side abort.
+
 ## [0.1.0] - 2026-10-25
 
 First release (stage 1 scope; not yet published to npm).

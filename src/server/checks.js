@@ -88,13 +88,20 @@ export const REMOTE_CHECK_BUTTONS = [
 // unchanged since 0.8.51, reads exec.agent.session.header.cwd). A fabricated bare
 // {header:{cwd}} object does NOT work — the tool pipeline validates the session against
 // the live session store (`session "undefined" is not live in this store`), which is why
-// a real session object is required. Coupling points to re-verify when dsh-remote
-// updates: that cwd shape and the rw_exec result text format parsed below. Per-command
-// budget: the tool caps itself at dsh-remote's commandTimeoutMs (default 20 s) and
-// reports it in-band; our AbortSignal sits above that so the tool's own timeout marker
-// surfaces first. Since 0.8.53 a command outliving that budget with the jobs service
-// present is PROMOTED to a background job instead of killed — parseRwExecText
-// recognizes that marker so a still-running command is never judged ok.
+// a real session object is required. The agent wrapper carries BOTH `session` and
+// `id`: rw_exec takes the background-job owner from `exec.agent.id`, and a wrapper
+// without it fails the whole call before the command runs. Coupling points to
+// re-verify when dsh-remote updates: that wrapper shape, the cwd shape and the
+// rw_exec result text format parsed below. Per-command budget: we ask rw_exec for
+// REMOTE_EXEC_TIMEOUT_MS (above dsh-remote's 20 s default) and keep our AbortSignal
+// REMOTE_EXEC_SIGNAL_MARGIN_MS above that, so the tool's in-band timeout marker
+// surfaces instead of a client-side abort. Promotion is disabled
+// (`promoteOnTimeout: false`): a borrowed agent has no job controller, so a command
+// moved to the background would keep running on the remote with nobody to collect
+// it. parseRwExecText still recognizes the promotion marker defensively (other
+// callers / older dsh-remote versions) so a still-running command is never judged ok.
+const REMOTE_EXEC_TIMEOUT_MS = 40000
+const REMOTE_EXEC_SIGNAL_MARGIN_MS = 30000
 export function parseRwExecText(text) {
   let raw = String(text ?? '')
   // Promotion (dsh-remote 0.8.53+): the ENTIRE result becomes the marker plus a
@@ -125,8 +132,8 @@ async function execViaToolShell(tools, agent, item, cmd, channel, { maxLines = 3
     const r = await tools.execute({
       callId: 'harnessams-check-' + Math.random().toString(36).slice(2, 8),
       name: 'rw_exec',
-      arguments: { command: cmd },
-      signal: AbortSignal.timeout(40000),
+      arguments: { command: cmd, timeoutMs: REMOTE_EXEC_TIMEOUT_MS, promoteOnTimeout: false },
+      signal: AbortSignal.timeout(REMOTE_EXEC_TIMEOUT_MS + REMOTE_EXEC_SIGNAL_MARGIN_MS),
       ...(agent ? { agent } : {}),
     })
     const text = resultText(r)

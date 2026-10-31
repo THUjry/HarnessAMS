@@ -158,7 +158,9 @@ export function findMirrorForMachine(machine, root = remoteWorkspacesRoot()) {
 // machine's remote project (and the future remote-simulation path will reuse it).
 // The host `sessions` service is fetched lazily like dsh-remote itself does
 // (ctx.get('sessions')) so compositions without it degrade instead of failing injection.
-// Returns {agent: {session}} or null when no live session is open in that workspace.
+// Returns {agent: {id, session}} or null when no live session is open in that
+// workspace. The id matters: dsh-remote's rw_exec derives the background-job
+// owner from exec.agent.id, so a wrapper without it cannot promote a command.
 export function sessionInMirror(ctx, mirrorDir, list) {
   if (!mirrorDir) return null
   const sessions = list ?? (typeof ctx?.get === 'function' ? ctx.get('sessions') : null)
@@ -169,7 +171,9 @@ export function sessionInMirror(ctx, mirrorDir, list) {
   const root = norm(mirrorDir)
   for (const s of live) {
     const cwd = norm(s?.header?.cwd)
-    if (cwd && (cwd === root || cwd.startsWith(root + '/'))) return { agent: { session: s } }
+    if (cwd && (cwd === root || cwd.startsWith(root + '/'))) {
+      return { agent: { id: s.id, session: s } }
+    }
   }
   return null
 }
