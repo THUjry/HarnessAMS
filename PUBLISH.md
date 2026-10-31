@@ -33,6 +33,8 @@ Checklist (per package, run from the package directory):
 4. Post-publish verification
    - `dsh plugin --profile web add <package>`, restart the profile (`dsh --profile web`),
      confirm the console routes / tools register (`--dump-config` shows the rows).
+   - Verifying the remote-project routes additionally requires dsh-remote exact-pinned in
+     the profile: `dsh plugin --profile web add --save-exact dsh-remote@0.8.66`.
 5. Suite last
    - `dsh-harnessams-suite` pins the exact published versions of the member plugins;
      bump and publish it only after **both** plugin packages are out.

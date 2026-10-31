@@ -147,6 +147,7 @@ walking upward from wherever they run.
 ### Path A (standard, recommended): per-plugin install
 
 ```powershell
+dsh plugin --profile web add --save-exact dsh-remote@0.8.66    # remote-projects prerequisite — runtime tool-shell consumer, deliberately NOT an npm dependency
 dsh plugin --profile web add dsh-harnessams dsh-harnessams-smart-ana-sim
 dsh --profile web    # restart the profile after installing: bundle membership is a startup boundary
 ```
@@ -154,6 +155,7 @@ dsh --profile web    # restart the profile after installing: bundle membership i
 ### Path B (convenience): aggregate bundle, one command (first-party plugins only)
 
 ```powershell
+dsh plugin --profile web add --save-exact dsh-remote@0.8.66    # remote-projects prerequisite — NOT part of the suite bundle
 dsh plugin --profile web add dsh-harnessams-suite
 dsh --profile web --dump-config    # confirm the layers and rows appear as expected
 ```
@@ -166,12 +168,15 @@ Write a `cordis.yml` inside the plugin repo (`name` pointing to the absolute pat
 dsh --profile web --patch <path-to>\cordis.yml --port 3080 --no-open
 ```
 
+The web profile must already have dsh-remote exact-pinned for remote projects — `dsh plugin --profile web add --save-exact dsh-remote@0.8.66` (runtime tool-shell consumer, deliberately NOT an npm dependency).
+
 Note: with the npm-installed CLI, `--profile web` already names the profile — do **not** append a positional `web` argument (the launcher rejects it with `too many arguments`); flags after the launcher options (such as `--port` / `--open`) reach the web app. Verified against `@deepseek-ai/dsh@0.2.1-rc.2` installed from npm (2026-10-25).
 
 ## Environment
 
 - Node.js >= 22.19 (verified on v24.22.1);
 - DSH: `npm i -g @deepseek-ai/dsh` then `dsh --profile web`; **verified version 0.2.1-rc.2** (developer preview — pin the version; before upgrading, check the upstream release notes and rerun the minimal regression);
+- dsh-remote: `dsh plugin --profile web add --save-exact dsh-remote@0.8.66` — required at runtime for remote projects/checks (consumed via the DSH tool shell, not a package dependency); **verified version 0.8.66** (2026-10-31, source-audited; before upgrading, check the upstream release notes and rerun the minimal regression);
 - Beware: npm hosts an unrelated same-name package `dsh`; remove it first with `npm rm -g dsh` if present;
 - Simulation environment (SmartAnaSim): ngspice-47 portable + sky130 fossi `combined_models` — a ready-to-run bundle of both ships in this repo under `LocalDesignExample/` (the full sky130/ngspice gotcha list lives in the SmartAnaSim repo).
 
