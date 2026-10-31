@@ -20,7 +20,7 @@ src/                     dsh-harnessams — console plugin package:
                          index.js (host-half routes, plain JS, no build chain),
                          server/ (host-half modules: workspace/checks/disk/project/machines/remote/assets),
                          client.js (browser half — single-file classic script on window.__ModuleLoader__),
-                         assets/ (plotly.min.js + THIRD_PARTY_NOTICES), scripts/ (shipped developer utilities)
+                         assets/ (plotly.min.js + the vendored xterm bundle + THIRD_PARTY_NOTICES), scripts/ (shipped developer utilities)
 install_suite/           dsh-harnessams-suite — aggregate bundle (pure patch package)
 tests/                   unit tests (bare node --test, from the repo root)
 docs/                    plugin index, compatibility matrix
@@ -113,7 +113,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
 
 | Package | Ships beyond the entry JS | Deliberately NOT shipped |
 |---|---|---|
-| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + `assets/THIRD_PARTY_NOTICES.md` (Plotly MIT attribution); `scripts/` (developer utilities shipped with the package — currently a placeholder README) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
+| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/` (developer utilities shipped with the package — currently a placeholder README) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
 The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite
