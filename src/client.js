@@ -1223,13 +1223,16 @@ window.__ModuleLoader__.load({
       const wrapRef = useRef(null)
       const searchRef = useRef(null)
 
-      const machinesRef = useRef(machines); machinesRef.current = machines
-      const connRef = useRef(conn); connRef.current = conn
-      const activeIdRef = useRef(activeId); activeIdRef.current = activeId
-
       const active = machines.find((m) => m.id === activeId)
         ?? machines.find((m) => m.current) ?? machines[0] ?? null
       const activeIdSafe = active?.id ?? null
+
+      const machinesRef = useRef(machines); machinesRef.current = machines
+      const connRef = useRef(conn); connRef.current = conn
+      // runtime effects (poll/resize/reopen/search) must follow the machine the user
+      // SEES — the same fallback-resolved id the attach effect connects — not the raw
+      // click state, or the default-active machine connects but never paints (blind typing).
+      const activeIdRef = useRef(activeIdSafe); activeIdRef.current = activeIdSafe
 
       const setMachineConn = (id, patch) => setConn((c) => ({ ...c, [id]: { ...(c[id] ?? {}), ...patch } }))
 
@@ -1256,8 +1259,13 @@ window.__ModuleLoader__.load({
         if (l.ok) {
           const mine = (l.body?.sessions ?? []).filter((s) => !s.closed)
           if (mine.length) {
-            entry.sessionId = mine[mine.length - 1].id // most recent of this machine
-            entry.from = 0 // replay the ring tail into the pooled xterm
+            const sid = mine[mine.length - 1].id // most recent of this machine
+            const same = entry.sessionId === sid
+            entry.sessionId = sid
+            // same-PTY reattach (sub-tab/session switch): keep the polling offset so only
+            // the ring delta appends — replaying from 0 would duplicate everything still
+            // on screen. A different PTY starts clean: reset, then replay its ring.
+            if (!same) { entry.from = 0; entry.term?.reset() }
             setMachineConn(m.id, { status: 'live' })
             return
           }
@@ -1275,6 +1283,7 @@ window.__ModuleLoader__.load({
         }
         entry.sessionId = o.body.id
         entry.from = 0
+        entry.term?.reset() // a reused pooled term must not keep the previous PTY's screen
         if (m.remotePath) void termInput(m.id, "cd '" + String(m.remotePath).replace(/'/g, "'\\''") + "'\n")
         setMachineConn(m.id, { status: 'live' })
       }

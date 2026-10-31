@@ -42,6 +42,22 @@ test('terminal: xterm pooling, polling lifecycle and UX hooks are wired', () => 
   assert.ok(src.includes('ResizeObserver'), 'adaptive fit hook present')
   assert.ok(src.includes('search.findNext'), 'search addon wired')
   assert.ok(src.includes('visibilitychange'), 'poll wake on visibility change')
+  // runtime effects follow the fallback-resolved machine, not the raw click state —
+  // regression: mirroring raw activeId left the default-active machine unpainted
+  const refPos = src.indexOf('const activeIdRef = useRef(')
+  const safePos = src.indexOf('const activeIdSafe = active?.id ?? null')
+  assert.ok(refPos > 0 && safePos > 0 && refPos > safePos, 'activeIdSafe must be computed before the ref')
+  assert.ok(/const activeIdRef = useRef\(activeIdSafe\); activeIdRef\.current = activeIdSafe/.test(src),
+    'activeIdRef must mirror activeIdSafe (fallback included), not raw activeId')
+  // reattach: same-PTY keeps the polling offset (delta-only), a different PTY resets
+  // before replaying its ring — regression: unconditional from=0 replay duplicated the
+  // whole visible buffer on every sub-tab/session switch
+  assert.ok(/const same = entry\.sessionId === sid/.test(src)
+    && /if \(!same\) \{ entry\.from = 0; entry\.term\?\.reset\(\) \}/.test(src),
+    'same-PTY reattach must keep the offset; different PTY must reset before replay')
+  const openFresh = src.indexOf("entry.sessionId = o.body.id")
+  assert.ok(openFresh > 0 && /entry\.term\?\.reset\(\)/.test(src.slice(openFresh, openFresh + 200)),
+    'fresh open on a reused pooled term must reset the old screen first')
 })
 
 test('terminal: vendored assets exist and the whitelist serves them', async () => {

@@ -140,6 +140,20 @@ All notable changes are documented here. The format follows
 
 ### Fixed
 
+- **Terminal sub-tab paint lifecycle (2026-10-31, browser-verified end-to-end
+  against node1)**: two defects found in the live run —
+  - The default-active machine connected but never painted (typing worked
+    remotely, nothing showed): the runtime effects (output polling, resize,
+    reopen, search) read `activeIdRef`, which mirrored the raw `activeId` click
+    state (null until a machine tab is clicked), while rendering and connecting
+    used the fallback-resolved `activeIdSafe`. The ref now mirrors
+    `activeIdSafe`, so effects follow the machine the user actually sees.
+  - Every sub-tab/session switch duplicated the whole visible buffer: a pooled
+    xterm reattaching to its still-live PTY replayed dsh-remote's ring from
+    offset 0 without clearing. A same-PTY reattach now keeps the polling offset
+    (delta-only append); a different PTY resets the term before replaying its
+    ring, and a fresh open on a reused pooled term resets the previous PTY's
+    screen. Regression assertions added to `tests/terminal.test.mjs`.
 - **Remote Overview checks on dsh-remote 0.8.66 (2026-10-31)**: the borrowed
   session agent now carries `id` alongside `session` (`sessionInMirror`) —
   rw_exec derives the background-job owner from `exec.agent.id`, so the old
