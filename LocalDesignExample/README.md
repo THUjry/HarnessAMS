@@ -23,7 +23,8 @@ sky130 netlist end-to-end, and (3) reads the workspace config. All green = ready
 - offline report asset: the repo-level `../src/assets/plotly.min.js` (the master copy,
   shipped inside the `dsh-harnessams` package; the report generator seeds the
   workspace-level `assets/plotly.min.js` from it — that runtime copy is gitignored)
-- `tools/` — verbatim copies of the SmartAnaSim pipeline scripts (see `tools/README.md`)
+- `tools/` — verbatim copies of the SmartAnaSim pipeline scripts, mirroring the plugin's
+  `common/` + `ngspice/` layout (see `tools/README.md`)
 - `harnessams.json` — workspace config; all paths relative to this file
 - `demo1/`, `demo2/` — demo project placeholders (content lands with the demo milestones)
 - `check_environment.py` — the self-check
@@ -35,7 +36,8 @@ This directory is a valid HarnessAMS workspace: `harnessams.json` sits at its ro
 both the console plugin and the Python pipeline discover it by walking upward from
 wherever they run. Relative path fields resolve against the config file, so the clone
 location does not matter. With the DSH plugins installed, a DSH session pointed at a demo
-directory here drives the `sim_*` tools against this environment unchanged.
+directory here drives the `ngspice_*` assembly/sweep tools and the shared `sim_*`
+post-processing tools against this environment unchanged.
 
 ## Licenses
 

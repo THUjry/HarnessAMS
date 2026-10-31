@@ -90,8 +90,10 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    of that remote project — with four buttons: **Load** (`/proc/loadavg` + core
    count), **LSF jobs** (`bjobs -a` queue overview), **Batch dirs** (work dirs
    carrying a `sweep_progress.json`, with their status/progress), and **Script sync**
-   (md5 drift between the configured local `sim_scripts_dir` and the remote workspace
-   root — report only, nothing is uploaded). A run borrows a live session of that
+   (md5 drift between the configured local `sim_scripts_dir` tree and the remote
+   scripts root — `remote_scripts_dir` when the workspace config sets it, else the
+   remote workspace root; recursive over `scripts/{common,ngspice,spectre,snp}`,
+   report only, nothing is uploaded). A run borrows a live session of that
    machine's remote project as the `rw_exec` agent context (its cwd inside the mirror
    is what binds the machine — no global active-machine switching); with no live
    session the buttons stay disabled with guidance. Results render as columned tables
@@ -121,7 +123,8 @@ external downloads:
 LocalDesignExample/
   ngspice-47-portable/   ngspice_con.exe + runtime DLLs (Windows x64; see its README)
   sky130/                fossi sky130_fd_pr minimal model closure (combined_models + cells) + LICENSE
-  tools/                 verbatim copies of the SmartAnaSim pipeline scripts (keep in sync with the plugin version)
+  tools/                 verbatim copies of the SmartAnaSim pipeline scripts (common/ + ngspice/;
+                         keep in sync with the plugin version)
   harnessams.json        workspace config with paths relative to this file (works from any clone location)
   check_environment.py   self-check: runs the bundled ngspice on a minimal sky130 netlist and audits the assets
   demo1/, demo2/         demo project placeholders (content lands with the demo milestones)
@@ -199,7 +202,7 @@ Everything ships as plain source: the plugin entries are plain-JS ESM loaded dir
 |---|---|---|
 | Per-project assembly/analysis scripts (yours to own) | workspace: `<workspace>/<demo>/script/analysis/*.py` (e.g. `gen_ota5t.py`) | next run |
 | Framework scripts shipped with the plugin | SmartAnaSim package dir, e.g. `~/.dsh/profiles/web/node_modules/dsh-harnessams-smart-ana-sim/scripts/` (`sweep_worker_ngspice.py`, `checks.py`, `collect_results.py`, `gen_sweep_report.py`, `trash.py`) | next run |
-| Bundled example copies | this repo: `LocalDesignExample/tools/*.py` — verbatim copies of the plugin scripts above; re-sync when the plugin updates | next run |
+| Bundled example copies | this repo: `LocalDesignExample/tools/{common,ngspice}/*.py` — verbatim copies of the plugin scripts above; re-sync when the plugin updates | next run |
 | Plugin JS entries (`src/index.js` + `src/client.js` here, `src/index.js` in SmartAnaSim) | dev-mount: the repo's own `src/` (your edit is the source); installed: `node_modules/<package>/src/` | after restarting that DSH instance |
 
 Why the difference: every tool invocation spawns a fresh `python <script>` process (system Python from `PATH`) that reads the file from disk again — no rebuild, no reinstall, no DSH restart (a sweep already in progress keeps the copy it loaded). The JS entry, in contrast, is loaded once via ESM at startup and cached by the module system, so it needs a restart of that instance; other instances are separate processes and keep running unaffected.

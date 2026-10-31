@@ -157,6 +157,32 @@ function shq(s) {
   return '"' + String(s ?? '').replace(/([$"\\`])/g, '\\$1') + '"'
 }
 
+// Recursively hash a local pipeline-scripts tree: relative POSIX path -> md5.
+// Bounded (50 files, skips __pycache__/*.pyc) because the remote listing is capped
+// the same way; the pipeline keeps the scripts/{common,ngspice,spectre,snp} layout.
+function collectScriptFiles(dir, limit = 50) {
+  const out = new Map()
+  const walk = (d, prefix) => {
+    if (out.size >= limit) return
+    let entries
+    try { entries = fs.readdirSync(d, { withFileTypes: true }) } catch { return }
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    for (const ent of entries) {
+      if (out.size >= limit) return
+      if (ent.name === '__pycache__' || ent.name.endsWith('.pyc')) continue
+      const rel = prefix ? `${prefix}/${ent.name}` : ent.name
+      const abs = path.join(d, ent.name)
+      if (ent.isDirectory()) { walk(abs, rel); continue }
+      if (!ent.name.endsWith('.py')) continue
+      try {
+        out.set(rel, crypto.createHash('md5').update(fs.readFileSync(abs)).digest('hex'))
+      } catch { /* unreadable file — skip */ }
+    }
+  }
+  walk(dir, '')
+  return out
+}
+
 // Run one Overview button. opts: { agent, remotePath, machine, ws }. Returns
 // { channel, results: [entry...] } — results is an array so every button renders in
 // the same results table.
@@ -222,25 +248,22 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
 
   if (id === 'scripts') {
     // Drift check between the configured local pipeline-scripts directory and the
-    // remote workspace root, by md5 — report only, nothing is uploaded.
+    // remote scripts root, by md5 — report only, nothing is uploaded. The local
+    // tree is walked recursively (scripts/{common,ngspice,spectre,snp}) and keys are
+    // relative POSIX paths; the remote root comes from the optional
+    // harnessams.json `remote_scripts_dir` (a remote absolute path, never resolved
+    // locally) and falls back to the remote workspace root for flat layouts.
     const dir = opts.ws?.config?.sim_scripts_dir
-    const hashes = new Map()
-    if (dir && fs.existsSync(dir)) {
-      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-        if (!ent.isFile()) continue
-        try {
-          hashes.set(ent.name, crypto.createHash('md5').update(fs.readFileSync(path.join(dir, ent.name))).digest('hex'))
-        } catch { /* unreadable file — skip */ }
-        if (hashes.size >= 50) break
-      }
-    }
+    const hashes = dir && fs.existsSync(dir) ? collectScriptFiles(dir) : new Map()
     if (!hashes.size) {
       return { channel, results: [{ item: 'Script sync', cmd: '(local sim_scripts_dir)', channel, ms: 0, ok: false,
         detail: 'sim_scripts_dir not configured or has no files (harnessams.json)' }] }
     }
     const names = [...hashes.keys()]
-    const cmd = 'cd ' + wsq + ' && md5sum ' + names.map(shq).join(' ') + ' 2>/dev/null'
-      + '; echo __REMOTE_PY__; ls -1 *.py 2>/dev/null | head -50'
+    const remoteBase = opts.ws?.config?.remote_scripts_dir || wsPath
+    const cmd = 'cd ' + shq(remoteBase) + ' && md5sum ' + names.map(shq).join(' ') + ' 2>/dev/null'
+      + '; echo __REMOTE_PY__; find . -maxdepth 4 -name \'*.py\' -not -path \'*/__pycache__/*\''
+      + ' | sed \'s|^\\./||\' | sort | head -50'
     const e = await execViaToolShell(tools, agent, 'Script sync', cmd, channel, { raw: true })
     if (!e.ok) { delete e.stdoutRaw; return { channel, results: [e] } }
     const rawOut = e.stdoutRaw ?? ''

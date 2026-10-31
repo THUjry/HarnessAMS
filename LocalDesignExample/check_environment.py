@@ -23,8 +23,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 NGSPICE_FILES = ["ngspice_con.exe", "libomp140.x86_64.dll", "samplerate.dll",
                  "sndfile.dll", "COPYING"]
-TOOLS_FILES = ["sweep_worker_ngspice.py", "checks.py", "collect_results.py",
-               "gen_sweep_report.py", "trash.py"]
+TOOLS_FILES = [
+    "common/common_workspace.py", "common/common_units.py", "common/common_sweep_engine.py",
+    "common/common_collect_results.py", "common/common_gen_sweep_report.py",
+    "common/common_trash.py",
+    "ngspice/ngspice_sweep_worker.py", "ngspice/ngspice_checks.py",
+]
 
 SMOKE_NETLIST = """* Environment self-check: diode-connected sky130 nfet, tt corner, DC sweep.
 .lib "{pdk_lib}" tt

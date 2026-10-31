@@ -10,8 +10,12 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 
 // The generated one-liners must be valid shell — a misplaced quote shipped once and
-// only failed live (bash: -c: syntax error), so every built command is syntax-checked.
+// only failed live (bash: -c: syntax error), so every built command is syntax-checked
+// when bash is available (the Windows CI runner may not have Git Bash on PATH).
+let bashAvailable = true
+try { execFileSync('bash', ['--version'], { stdio: 'pipe' }) } catch { bashAvailable = false }
 function assertValidShell(cmd) {
+  if (!bashAvailable) return
   execFileSync('bash', ['-n', '-c', cmd], { stdio: 'pipe' })
 }
 import { sessionProject, readTasks, writeTasks, tasksPath } from '../src/server/project.js'
@@ -451,11 +455,14 @@ test('checks: runRemoteCheckButton batches lists progress files with $ROOT paths
   assert.equal(r2.results[0].rows, undefined)
 })
 
-test('checks: runRemoteCheckButton scripts compares local md5 against the remote workspace', async () => {
+test('checks: runRemoteCheckButton scripts compares the nested local tree against the remote scripts root', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-scripts-'))
   try {
-    await writeFile(path.join(dir, 'a.py'), 'AAA', 'utf8')
-    await writeFile(path.join(dir, 'b.py'), 'BBB', 'utf8')
+    await mkdir(path.join(dir, 'ngspice'))
+    await mkdir(path.join(dir, 'spectre'))
+    await writeFile(path.join(dir, 'ngspice', 'a.py'), 'AAA', 'utf8')
+    await writeFile(path.join(dir, 'spectre', 'b.py'), 'BBB', 'utf8')
+    await writeFile(path.join(dir, '__pycache__'), '', 'utf8').catch(() => {})
     const md5 = (s) => crypto.createHash('md5').update(s).digest('hex')
     const inputs = []
     const tools = {
@@ -463,7 +470,9 @@ test('checks: runRemoteCheckButton scripts compares local md5 against the remote
       execute: async (input) => {
         inputs.push(input)
         return { isError: false, value: { text:
-          md5('AAA') + '  a.py\n' + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  b.py\n__REMOTE_PY__\nzz.py\n[exit code: 0]',
+          md5('AAA') + '  ngspice/a.py\n'
+          + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  spectre/b.py\n'
+          + '__REMOTE_PY__\nngspice/a.py\nspectre/b.py\nsnp/c.py\n[exit code: 0]',
         }, content: [] }
       },
     }
@@ -472,14 +481,26 @@ test('checks: runRemoteCheckButton scripts compares local md5 against the remote
     const e = r.results[0]
     assert.ok(e.ok, e.detail)
     assert.match(e.result, /1 in sync, 1 differ, 0 only local, 1 only remote/)
-    assert.deepEqual(e.rows, [['a.py', 'in-sync'], ['b.py', 'differs'], ['zz.py', 'only-remote']])
+    assert.deepEqual(e.rows, [
+      ['ngspice/a.py', 'in-sync'],
+      ['spectre/b.py', 'differs'],
+      ['snp/c.py', 'only-remote'],
+    ])
     assert.equal(e.truncated, false)
     assert.match(e.warn, /drift/)
-    assert.match(e.detail, /b\.py — differs/)
-    assert.match(e.detail, /zz\.py — only-remote/)
-    // command scopes to the remote workspace and quotes both local files
-    assert.match(inputs[0].arguments.command, /cd "\/home\/op\/sim" && md5sum "a\.py" "b\.py"/)
+    assert.match(e.detail, /spectre\/b\.py — differs/)
+    assert.match(e.detail, /snp\/c\.py — only-remote/)
+    // relative POSIX paths, recursive remote listing, default root = remote workspace
+    assert.match(inputs[0].arguments.command,
+      /cd "\/home\/op\/sim" && md5sum "ngspice\/a\.py" "spectre\/b\.py"/)
+    assert.match(inputs[0].arguments.command, /find \. -maxdepth 4 -name '\*\.py'/)
     assertValidShell(inputs[0].arguments.command)
+
+    // an explicit remote_scripts_dir (a REMOTE absolute path) replaces the workspace root
+    const rRoot = await runRemoteCheckButton(tools, 'scripts',
+      { remotePath: '/home/op/sim', ws: { config: {
+        sim_scripts_dir: dir, remote_scripts_dir: '/home/op/sim/HarnessAMS/scripts' } } })
+    assert.match(rRoot.results[0].cmd, /cd "\/home\/op\/sim\/HarnessAMS\/scripts"/)
 
     // an unconfigured scripts dir fails with guidance, not a crash
     const r2 = await runRemoteCheckButton(tools, 'scripts', { remotePath: '/w', ws: {} })

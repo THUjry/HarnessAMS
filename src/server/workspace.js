@@ -25,7 +25,8 @@ export function findWorkspaceConfig() {
     if (fs.existsSync(c)) {
       const config = JSON.parse(fs.readFileSync(c, 'utf8'))
       // Relative path fields resolve against the config file's directory, so a checked-in
-      // example workspace works from any clone location
+      // example workspace works from any clone location. `remote_scripts_dir` is a REMOTE
+      // absolute path and deliberately stays opaque (never resolved against a local base).
       const base = path.dirname(c)
       for (const k of ['workspace_root', 'ngspice_cmd', 'pdk_lib', 'trash_dir', 'sim_scripts_dir']) {
         const v = config[k]
