@@ -54,7 +54,8 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    management (add/remove/credentials) and **remote file browsing/editing stay in
    dsh-remote itself** — HarnessAMS deliberately does not duplicate them.
 
-   **Credential storage** (dsh-remote 0.8.54, source audited 2026-10-28): for
+   **Credential storage** (dsh-remote 0.8.66, source audited 2026-10-31; credential
+   logic identical to 0.8.54): for
    security, tick "encrypt saved password" when saving a machine — the password then
    lives in the OS credential store (Windows DPAPI / macOS keychain / libsecret) and
    never in a plaintext file, and since 0.8.54 a failed keychain write refuses to
