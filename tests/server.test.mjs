@@ -242,7 +242,7 @@ test('remote: checkMachinesForLocal joins machines with remote projects and live
         { id: 'w1', path: 'D:/local-ws', title: 'Local' },
         { id: 'w2', path: mirror, title: 'node1 (remote)' },
       ] },
-      get: (n) => (n === 'sessions' ? { list: () => [{ header: { cwd: path.join(mirror, 'sub') } }] } : null),
+      get: (n) => (n === 'sessions' ? { list: () => [{ id: 's-live-1', header: { cwd: path.join(mirror, 'sub') } }] } : null),
     }
     const machines = [
       { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', current: true,
@@ -257,6 +257,7 @@ test('remote: checkMachinesForLocal joins machines with remote projects and live
     assert.match(out[0].mirrorDir.replace(/\\/g, '/'), /AutoAnalog$/)
     assert.equal(out[0].projectTitle, 'node1 (remote)')
     assert.equal(out[0].liveSessions, 1)
+    assert.equal(out[0].sessionId, 's-live-1') // remote-terminal binding hint
     assert.equal(out[0].current, true)
     assert.equal(out[0].latencyMs, 12)
     assert.equal(out[0].lastConnectedAt, '2026-10-27T08:00:00Z')

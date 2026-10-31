@@ -15,8 +15,12 @@
 // Remote connectivity is delegated entirely to dsh-remote: remote checks run from a
 // LOCAL project's Overview through the rw_exec tool shell, borrowing a live session
 // of the target machine's remote project as the agent context (no global-machine
-// switching). Remote file browsing/editing is NOT proxied here — dsh-remote's own
-// tools and web surface do it.
+// switching). The remote-terminal sub-tab is likewise a pure CONSUMER of dsh-remote's
+// own /dsh-remote/term/* polling PTY routes (same-origin, its guardRoute auth applies):
+// this plugin adds no execution surface of its own — it only discloses each machine's
+// first live-session id on /api/checks so the client can pass it as the binding hint,
+// and serves the vendored xterm.js bundle under /assets/. Remote file browsing/editing
+// is NOT proxied here — dsh-remote's own tools and web surface do it.
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'

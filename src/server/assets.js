@@ -1,7 +1,8 @@
-// Digital assets: the single shared plotly.min.js served from the plugin package under
-// /harnessams/assets/. Whitelist-by-lookup (no path traversal), immutable caching with a
-// size-based ETag — the file never changes in place (it ships in the tarball), so
-// content-addressed busting on upgrade happens via the package version instead.
+// Digital assets: the single shared plotly.min.js and the xterm.js terminal bundle,
+// served from the plugin package under /harnessams/assets/. Whitelist-by-lookup (no
+// path traversal), immutable caching with a size-based ETag — files never change in
+// place (they ship in the tarball), so content-addressed busting on upgrade happens
+// via the package version instead.
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -9,9 +10,15 @@ const ASSET_DIR = path.resolve(import.meta.dirname ?? '.', '../assets')
 const ALLOWED = new Map([
   ['plotly.min.js', path.join(ASSET_DIR, 'plotly.min.js')],
   ['THIRD_PARTY_NOTICES.md', path.join(ASSET_DIR, 'THIRD_PARTY_NOTICES.md')],
+  // task-sidebar remote terminal (vendored @xterm/xterm 5.5.0 + addons, see THIRD_PARTY_NOTICES.md)
+  ['xterm.js', path.join(ASSET_DIR, 'xterm.js')],
+  ['xterm.css', path.join(ASSET_DIR, 'xterm.css')],
+  ['xterm-addon-fit.js', path.join(ASSET_DIR, 'xterm-addon-fit.js')],
+  ['xterm-addon-search.js', path.join(ASSET_DIR, 'xterm-addon-search.js')],
 ])
 const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
 }
 const cache = new Map()

@@ -79,14 +79,17 @@ export function findRemoteProjectForMachine(ctx, machine, root) {
 
 // Machines checkable from a LOCAL project's Overview: every dsh-remote machine that
 // HAS a remote project (a registered workspace inside its mirror), with that remote
-// project's live-session count — checks borrow one of those sessions as the rw_*
-// agent context (sessionInMirror in machines.js). Machines without a remote project
+// project's live-session count and ONE live-session id — checks borrow one of those
+// sessions as the rw_* agent context (sessionInMirror in machines.js), and the remote
+// terminal sub-tab passes the same id to dsh-remote's /dsh-remote/term/* routes as the
+// binding hint so the PTY opens on THAT machine. Machines without a remote project
 // are not listed; the tier-1 console offers their creation.
 export function checkMachinesForLocal(ctx, machineList, root) {
   const out = []
   for (const m of machineList ?? []) {
     const hit = findRemoteProjectForMachine(ctx, m, root)
     if (!hit) continue
+    const live = projectSessions(ctx, hit.ws.path)
     out.push({
       id: m.id,
       name: m.name || m.host,
@@ -98,7 +101,8 @@ export function checkMachinesForLocal(ctx, machineList, root) {
       projectTitle: hit.ws.title || hit.ws.path,
       workspace: m.workspace ?? null,
       current: !!m.current,
-      liveSessions: projectSessions(ctx, hit.ws.path).length,
+      liveSessions: live.length,
+      sessionId: live[0]?.id ?? null,
       ...(m.lastConnectedAt ? { lastConnectedAt: String(m.lastConnectedAt) } : {}),
       ...(m.latencyMs != null ? { latencyMs: Number(m.latencyMs) } : {}),
     })

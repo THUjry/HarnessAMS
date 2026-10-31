@@ -26,7 +26,7 @@ window.__ModuleLoader__.load({
 
     const React = require('react')
     const h = React.createElement
-    const { useState, useEffect, useMemo } = React
+    const { useState, useEffect, useMemo, useRef } = React
 
     const name = 'dsh-harnessams'
     const PANEL_ID = 'dsh-harnessams'
@@ -156,6 +156,22 @@ window.__ModuleLoader__.load({
         'dash.manualLabel': '或输入报告的绝对路径',
         'dash.manualPlaceholder': 'D:\\path\\to\\report.html',
         'dash.add': '添加',
+        'tasks.viewTerm': '远程终端',
+        'term.noMachines': '没有可连的远程机器 — 在 dsh-remote 里选择机器并创建远程项目后，从总览页运行一次检查即可出现在这里。',
+        'term.infoMissing': '机器信息未加载（总览检查信息不可用）。',
+        'term.connect': '连接',
+        'term.reopen': '重新打开终端',
+        'term.dead': '终端会话已失效（空闲超时或远端会话已结束）。',
+        'term.closed': '远端会话已结束。',
+        'term.startDir': '起始目录',
+        'term.noSession': '无活会话 — 切到该机远程项目一次后再来（保持连接）。',
+        'term.search': '搜索（Enter 下一个 / Shift+Enter 上一个 / Esc 关闭）',
+        'term.searchNo': '无匹配',
+        'term.snippets': '快捷命令（点击填入，回车执行）',
+        'term.loading': '正在加载终端组件…',
+        'term.vendorFail': '终端组件加载失败：{msg}',
+        'term.unavailable': 'dsh-remote 终端路由不可用（需 dsh-remote ≥ 0.8.54）。',
+        'term.fontSize': '字号（Ctrl+滚轮可调）',
         'tasks.simTitle': '仿真设置',
         'tasks.simPlaceholder': '占位 — 本任务的 SmartAnaSim 配置将在后续里程碑落地。',
         'tasks.pinOn': '已固定：切换会话/工作区时任务侧栏会自动重开 — 点击取消跟随',
@@ -278,6 +294,22 @@ window.__ModuleLoader__.load({
         'dash.manualLabel': 'Or type the report’s absolute path',
         'dash.manualPlaceholder': '/path/to/report.html',
         'dash.add': 'Add',
+        'tasks.viewTerm': 'Terminal',
+        'term.noMachines': 'No reachable remote machine — pick a machine and create a remote project in dsh-remote, then run one check from the Overview for it to appear here.',
+        'term.infoMissing': 'Machine info not loaded (Overview check info unavailable).',
+        'term.connect': 'Connect',
+        'term.reopen': 'Reopen the terminal',
+        'term.dead': 'The terminal session is gone (idle timeout or the remote session ended).',
+        'term.closed': 'The remote session ended.',
+        'term.startDir': 'Start directory',
+        'term.noSession': 'No live session — switch to this machine’s remote project once (keep it connected), then come back.',
+        'term.search': 'Search (Enter next / Shift+Enter previous / Esc closes)',
+        'term.searchNo': 'No match',
+        'term.snippets': 'Snippets (click to fill, press Enter to run)',
+        'term.loading': 'Loading the terminal component…',
+        'term.vendorFail': 'Failed to load the terminal component: {msg}',
+        'term.unavailable': 'dsh-remote terminal routes unavailable (needs dsh-remote ≥ 0.8.54).',
+        'term.fontSize': 'Font size (Ctrl+wheel adjusts)',
         'tasks.simTitle': 'Simulation settings',
         'tasks.simPlaceholder': 'Placeholder — SmartAnaSim configuration for this task lands here in later milestones.',
         'tasks.pinOn': 'Pinned: the task tab reopens when you switch sessions/workspaces — click to stop following',
@@ -442,6 +474,30 @@ window.__ModuleLoader__.load({
 .hams-browse-dialog { max-width: 560px; width: min(560px, 92vw); }
 .hams-headerbtn { display: inline-flex; align-items: center; gap: 4px; }
 .hams-pin-on { border-color: color-mix(in srgb, #3fb950 45%, transparent); color: #3fb950; }
+/* tier 3 remote terminal: machine tab strip + pooled xterm viewport (dsh-ssh-ops-shaped) */
+.hams-termtabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 6px; }
+.hams-termtab { padding: 2px 10px; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); cursor: pointer;
+  color: inherit; background: none; border: 1px solid color-mix(in srgb, currentColor 20%, transparent);
+  border-radius: 6px 6px 0 0; opacity: .75; }
+.hams-termtab.active { opacity: 1; font-weight: 600;
+  border-bottom-color: transparent; background: color-mix(in srgb, currentColor 8%, transparent); }
+.hams-termtab:disabled { opacity: .35; cursor: default; }
+.hams-termhead { display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: calc(12px + var(--dsh-content-font-delta, 0px)); opacity: .85; margin-bottom: 4px; }
+.hams-termhead .hams-termtitle { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hams-termstate { width: 8px; height: 8px; border-radius: 50%; flex: none; display: inline-block; }
+.hams-termstate.live { background: #3fb950; }
+.hams-termstate.dead { background: #e05252; }
+.hams-termstate.busy { background: #d29922; }
+.hams-termwrap { position: relative; border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
+  border-radius: 8px; padding: 4px; height: calc(100vh - 262px); min-height: 260px; overflow: hidden; }
+.hams-termhost { width: 100%; height: 100%; }
+.hams-termhost .terminal { width: 100%; height: 100%; }
+.hams-termsearch { display: flex; gap: 6px; align-items: center; margin: 0 0 4px;
+  font-size: calc(12px + var(--dsh-content-font-delta, 0px)); }
+.hams-termsnip { display: flex; gap: 4px; flex-wrap: wrap; align-items: center;
+  margin: 4px 0 0; font-size: calc(11.5px + var(--dsh-content-font-delta, 0px)); }
+.hams-termsnip .hams-btn-sm { opacity: .85; }
 `
       document.head.append(el)
     }
@@ -609,11 +665,12 @@ window.__ModuleLoader__.load({
 
     // ---------- tier 3: per-project task sidebar ----------
 
-    // Lowest navigation level inside a task: overview / dashboard / sim settings
-    // (dashboard and sim settings are placeholders until their milestones land).
+    // Lowest navigation level inside a task: overview / dashboard / remote terminal /
+    // sim settings (sim settings is a placeholder until its milestone lands).
     const TASK_VIEWS = [
       { id: 'overview', labelKey: 'tasks.viewOverview' },
       { id: 'dashboard', labelKey: 'tasks.viewDashboard' },
+      { id: 'term', labelKey: 'tasks.viewTerm' },
       { id: 'sim', labelKey: 'tasks.viewSim' },
     ]
 
@@ -921,6 +978,7 @@ window.__ModuleLoader__.load({
                   h('button', { className: 'hams-btn hams-btn-sm', onClick: saveDescription }, tr('common.save')),
                   h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDescDraft(null) }, tr('common.cancel'))))),
             view === 'dashboard' && h(TaskDashboard, { task: selected, updateTask }),
+            view === 'term' && h(TaskTerminal, { info: checksInfo }),
             view === 'sim' && h('div', { className: 'hams-dash' },
               h('b', null, tr('tasks.simTitle')), h('br'),
               tr('tasks.simPlaceholder'))),
@@ -1081,6 +1139,356 @@ window.__ModuleLoader__.load({
               h('button', { className: 'hams-btn', disabled: !manual.trim(), onClick: addManual }, tr('dash.add')))),
           h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
             h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')))))
+    }
+
+    // ---------- tier 3 remote terminal (dsh-ssh-ops-shaped UI over dsh-remote's PTY) ----------
+    // Channel discipline: no SSH layer of our own — every byte rides dsh-remote's
+    // /dsh-remote/term/* polling routes (host-owned ssh2 PTYs behind its guardRoute
+    // auth). Multi-machine targeting = the binding hint: each machine entry from
+    // /api/checks carries `sessionId`, the id of one live session of that machine's
+    // remote project; dsh-remote resolves the hint to the machine and opens the PTY on
+    // ITS pool (resolveRequestBinding: a hinted session inside its mirror binds to that
+    // machine). A fresh session lands in the project root via a first `cd` input.
+    // xterm instances are pooled per machine, so tab switches, task switches, chat
+    // switches and page reloads keep scrollback (the remote session survives all of
+    // them; dsh-remote GCs it only after 30 idle minutes).
+    const TERM_API = '/dsh-remote/term'
+    const TERM_FONT_KEY = 'hams-term-font'
+    const TERM_SNIPPETS = ['ll', 'df -h', 'bjobs -a', 'cd ..']
+    const TERM_POOL = new Map() // machineId -> { el, term, fit, search, sessionId, from, attached }
+
+    // Vendored @xterm/xterm 5.5.0 + fit/search addons, loaded as classic scripts from
+    // the plugin's whitelisted asset route (UMD globals: Terminal, FitAddon, SearchAddon).
+    let xtermLoading = null
+    function loadXtermBundle() {
+      if (window.Terminal && window.FitAddon?.FitAddon && window.SearchAddon?.SearchAddon) return Promise.resolve()
+      if (xtermLoading) return xtermLoading
+      xtermLoading = new Promise((resolve, reject) => {
+        const link = document.createElement('link')
+        link.rel = 'stylesheet'
+        link.href = '/harnessams/assets/xterm.css'
+        document.head.append(link)
+        const files = ['xterm.js', 'xterm-addon-fit.js', 'xterm-addon-search.js']
+        let done = 0
+        for (const f of files) {
+          const s = document.createElement('script')
+          s.src = '/harnessams/assets/' + f
+          s.onload = () => { done++; if (done === files.length) resolve() }
+          s.onerror = () => { xtermLoading = null; reject(new Error(f)) }
+          document.head.append(s)
+        }
+      })
+      return xtermLoading
+    }
+
+    function termFontSize() {
+      const v = Number(localStorage.getItem(TERM_FONT_KEY))
+      return v >= 8 && v <= 28 ? v : 12
+    }
+    // xterm paints its own canvas — the palette cannot inherit CSS, so pick light/dark
+    // from the host page's body background luminance (follows the DSH theme).
+    function termPalette() {
+      let dark = true
+      try {
+        const m = getComputedStyle(document.body).backgroundColor.match(/(\d+)[,\s]+(\d+)[,\s]+(\d+)/)
+        if (m) dark = (0.299 * m[1] + 0.587 * m[2] + 0.114 * m[3]) < 128
+      } catch { /* keep dark */ }
+      return dark
+        ? { background: '#14171c', foreground: '#e6edf3', cursor: '#e6edf3', cursorAccent: '#14171c', selectionBackground: 'rgba(88,140,255,.35)' }
+        : { background: '#ffffff', foreground: '#1f2328', cursor: '#1f2328', cursorAccent: '#ffffff', selectionBackground: 'rgba(60,120,255,.25)' }
+    }
+
+    // term routes answer { ok:false, error } with an HTTP status — no throwing, callers
+    // branch on status (404 = session lost, 403/409/503 = actionable dsh-remote text).
+    async function termFetch(url, opts) {
+      const r = await fetch(url, opts)
+      const body = await r.json().catch(() => ({}))
+      return { ok: r.ok, status: r.status, body }
+    }
+    const termPost = (path, m, payload) => termFetch(TERM_API + path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, sessionId: m.sessionId }),
+    })
+
+    function TaskTerminal({ info }) {
+      const machines = (info?.machines ?? []).filter((x) => x.sessionId)
+      const [activeId, setActiveId] = useState(null)
+      const [conn, setConn] = useState({}) // machineId -> { status: connecting|live|dead|error, error? }
+      const [loaded, setLoaded] = useState(false)
+      const [loadError, setLoadError] = useState(null)
+      const [searchOpen, setSearchOpen] = useState(false)
+      const [searchQ, setSearchQ] = useState('')
+      const hostRef = useRef(null)
+      const wrapRef = useRef(null)
+      const searchRef = useRef(null)
+
+      const machinesRef = useRef(machines); machinesRef.current = machines
+      const connRef = useRef(conn); connRef.current = conn
+      const activeIdRef = useRef(activeId); activeIdRef.current = activeId
+
+      const active = machines.find((m) => m.id === activeId)
+        ?? machines.find((m) => m.current) ?? machines[0] ?? null
+      const activeIdSafe = active?.id ?? null
+
+      const setMachineConn = (id, patch) => setConn((c) => ({ ...c, [id]: { ...(c[id] ?? {}), ...patch } }))
+
+      const markDead = (id, message) => {
+        const entry = TERM_POOL.get(id)
+        if (entry) entry.sessionId = null
+        setMachineConn(id, { status: 'dead', error: message ?? tr('term.dead') })
+      }
+
+      const termInput = async (machineId, data) => {
+        const m = machinesRef.current.find((x) => x.id === machineId)
+        const entry = TERM_POOL.get(machineId)
+        if (!m || !entry?.sessionId) return
+        const r = await termPost('/input', m, { id: entry.sessionId, data: String(data).slice(0, 65536) })
+        if (r.status === 404) markDead(machineId)
+      }
+
+      const ensureSession = async (m) => {
+        const entry = TERM_POOL.get(m.id)
+        if (!entry || (entry.sessionId && connRef.current[m.id]?.status === 'live')) return
+        setMachineConn(m.id, { status: 'connecting', error: null })
+        // 1) reattach: dsh-remote keeps host-owned sessions alive across reloads/switches
+        const l = await termFetch(TERM_API + '/list?sessionId=' + encodeURIComponent(m.sessionId))
+        if (l.ok) {
+          const mine = (l.body?.sessions ?? []).filter((s) => !s.closed)
+          if (mine.length) {
+            entry.sessionId = mine[mine.length - 1].id // most recent of this machine
+            entry.from = 0 // replay the ring tail into the pooled xterm
+            setMachineConn(m.id, { status: 'live' })
+            return
+          }
+        } else if (l.status === 404) {
+          setMachineConn(m.id, { status: 'error', error: tr('term.unavailable') })
+          return
+        }
+        // 2) open fresh (cols estimated from the viewport; refined by fit right after)
+        const wrap = wrapRef.current
+        const cols = Math.max(40, Math.min(400, Math.floor(((wrap?.clientWidth ?? 400) - 12) / 7.2)))
+        const o = await termPost('/open', m, { cols, rows: 30 })
+        if (!o.ok || !o.body?.id) {
+          setMachineConn(m.id, { status: 'error', error: o.body?.error ?? (o.status === 404 ? tr('term.unavailable') : String(o.status)) })
+          return
+        }
+        entry.sessionId = o.body.id
+        entry.from = 0
+        if (m.remotePath) void termInput(m.id, "cd '" + String(m.remotePath).replace(/'/g, "'\\''") + "'\n")
+        setMachineConn(m.id, { status: 'live' })
+      }
+
+      // vendor bundle once per page
+      useEffect(() => {
+        let alive = true
+        loadXtermBundle().then(() => { if (alive) setLoaded(true) })
+          .catch((e) => { if (alive) setLoadError(String(e.message ?? e)) })
+        return () => { alive = false }
+      }, [])
+
+      // attach the active machine's pooled xterm into the host div (+ session bring-up)
+      useEffect(() => {
+        if (!loaded || activeIdSafe == null) return
+        const m = machinesRef.current.find((x) => x.id === activeIdSafe)
+        const host = hostRef.current
+        if (!m || !host) return
+        let entry = TERM_POOL.get(m.id)
+        if (!entry) {
+          entry = { el: document.createElement('div'), term: null, fit: null, search: null, sessionId: null, from: 0, attached: false }
+          TERM_POOL.set(m.id, entry)
+        }
+        const fresh = !entry.term
+        if (fresh) {
+          const term = new window.Terminal({
+            cursorBlink: true, scrollback: 5000, convertEol: true, allowProposedApi: true,
+            fontFamily: "Consolas, 'Courier New', monospace", fontSize: termFontSize(), theme: termPalette(),
+          })
+          const fit = new window.FitAddon.FitAddon()
+          const search = new window.SearchAddon.SearchAddon()
+          term.loadAddon(fit); term.loadAddon(search)
+          term.onData((data) => { void termInput(m.id, data) })
+          term.onSelectionChange(() => {
+            const sel = term.getSelection()
+            if (sel && navigator.clipboard) navigator.clipboard.writeText(sel).catch(() => { /* no permission */ })
+          })
+          entry.term = term; entry.fit = fit; entry.search = search
+        }
+        for (const [id, e] of TERM_POOL) {
+          if (id !== m.id && e.attached) { e.el.remove(); e.attached = false }
+        }
+        if (!entry.attached) { host.append(entry.el); entry.attached = true }
+        if (fresh) entry.term.open(entry.el)
+        entry.term.refresh(0, entry.term.rows - 1)
+        try { entry.fit.fit() } catch { /* zero-size until first layout */ }
+        void ensureSession(m)
+        return () => { /* keep the element pooled; cleanup happens on full unmount */ }
+      }, [loaded, activeIdSafe])
+
+      // detach everything when the sub-view unmounts (instances stay pooled)
+      useEffect(() => () => {
+        for (const e of TERM_POOL.values()) {
+          if (e.attached) { e.el.remove(); e.attached = false }
+        }
+      }, [])
+
+      // output polling: active machine only, paused while the page is hidden
+      useEffect(() => {
+        let alive = true
+        let inflight = false
+        const tick = async () => {
+          if (!alive || document.hidden || inflight) return
+          const m = machinesRef.current.find((x) => x.id === activeIdRef.current)
+          const entry = m && TERM_POOL.get(m.id)
+          if (!m || !entry?.sessionId || connRef.current[m.id]?.status !== 'live') return
+          inflight = true
+          try {
+            const r = await termFetch(TERM_API + '/output?id=' + encodeURIComponent(entry.sessionId)
+              + '&from=' + entry.from + '&sessionId=' + encodeURIComponent(m.sessionId))
+            if (!alive) return
+            if (r.status === 404) { markDead(m.id); return }
+            if (!r.ok) return // transient — next tick retries
+            if (r.body?.closed) { markDead(m.id, tr('term.closed')); return }
+            const chunks = r.body?.chunks ?? []
+            if (chunks.length) entry.term?.write(chunks.join(''))
+            if (typeof r.body?.next === 'number') entry.from = r.body.next
+          } catch { /* network hiccup — retry on the next tick */ }
+          finally { inflight = false }
+        }
+        const iv = setInterval(tick, 150)
+        const wake = () => { void tick() }
+        document.addEventListener('visibilitychange', wake)
+        return () => { alive = false; clearInterval(iv); document.removeEventListener('visibilitychange', wake) }
+      }, [activeIdSafe])
+
+      // adaptive fit + PTY resize
+      useEffect(() => {
+        const wrap = wrapRef.current
+        if (!wrap || typeof ResizeObserver === 'undefined') return
+        let raf = 0
+        const ro = new ResizeObserver(() => {
+          cancelAnimationFrame(raf)
+          raf = requestAnimationFrame(() => {
+            const m = machinesRef.current.find((x) => x.id === activeIdRef.current)
+            const entry = m && TERM_POOL.get(m.id)
+            if (!entry?.term || !entry.attached) return
+            try { entry.fit.fit() } catch { /* not laid out yet */ }
+            if (entry.sessionId && connRef.current[m.id]?.status === 'live') {
+              void termPost('/resize', m, { id: entry.sessionId, cols: entry.term.cols, rows: entry.term.rows })
+            }
+          })
+        })
+        ro.observe(wrap)
+        return () => { ro.disconnect(); cancelAnimationFrame(raf) }
+      }, [])
+
+      // follow the host theme (palette cannot inherit; repaint pooled instances)
+      useEffect(() => {
+        const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null
+        const apply = () => {
+          for (const e of TERM_POOL.values()) if (e.term) e.term.options.theme = termPalette()
+        }
+        mq?.addEventListener?.('change', apply)
+        return () => mq?.removeEventListener?.('change', apply)
+      }, [])
+
+      // Ctrl+F opens the search bar; Ctrl+wheel zooms the pooled terminals
+      useEffect(() => {
+        const wrap = wrapRef.current
+        if (!wrap) return
+        const onKey = (e) => {
+          if ((e.ctrlKey || e.metaKey) && String(e.key).toLowerCase() === 'f') {
+            e.preventDefault(); setSearchOpen(true)
+            setTimeout(() => searchRef.current?.focus(), 0)
+          }
+        }
+        const onWheel = (e) => {
+          if (!e.ctrlKey) return
+          e.preventDefault()
+          const v = Math.min(28, Math.max(8, termFontSize() + (e.deltaY < 0 ? 1 : -1)))
+          localStorage.setItem(TERM_FONT_KEY, String(v))
+          for (const en of TERM_POOL.values()) {
+            if (!en.term) continue
+            en.term.options.fontSize = v
+            try { en.fit?.fit() } catch { /* not attached */ }
+          }
+        }
+        wrap.addEventListener('keydown', onKey)
+        wrap.addEventListener('wheel', onWheel, { passive: false })
+        return () => { wrap.removeEventListener('keydown', onKey); wrap.removeEventListener('wheel', onWheel) }
+      }, [])
+
+      const reopen = async () => {
+        const m = machinesRef.current.find((x) => x.id === activeIdRef.current)
+        if (!m) return
+        const entry = TERM_POOL.get(m.id)
+        if (entry?.sessionId) {
+          void termPost('/close', m, { id: entry.sessionId })
+          entry.sessionId = null; entry.from = 0
+          entry.term?.reset()
+        }
+        entry?.term?.clear()
+        await ensureSession(m)
+      }
+
+      const doSearch = (backward) => {
+        const entry = TERM_POOL.get(activeIdRef.current)
+        if (!entry?.search || !searchQ) return
+        try { backward ? entry.search.findPrevious(searchQ) : entry.search.findNext(searchQ) }
+        catch { /* addon unavailable */ }
+      }
+
+      if (!info) return h('div', { className: 'hams-dim', style: { marginTop: 8 } }, tr('term.infoMissing'))
+      if (!machines.length) return h('div', { className: 'hams-dim', style: { marginTop: 8 } }, tr('term.noMachines'))
+
+      const st = conn[activeIdSafe] ?? { status: 'connecting' }
+      const hostLine = active
+        ? (active.username ? active.username + '@' : '') + (active.host ?? '') + ':' + (active.port ?? 22)
+        : ''
+
+      return h('div', { style: { marginTop: 8 } },
+        h('div', { className: 'hams-termtabs', role: 'tablist' },
+          machines.map((m) => h('button', {
+            key: m.id,
+            className: 'hams-termtab' + (m.id === activeIdSafe ? ' active' : ''),
+            disabled: !m.sessionId,
+            title: m.sessionId
+              ? (m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22) + (m.remotePath ? ' · ' + m.remotePath : '')
+              : tr('term.noSession'),
+            onClick: () => setActiveId(m.id),
+          }, esc(m.name || m.host)))),
+        active && h('div', null,
+          h('div', { className: 'hams-termhead' },
+            h('span', { className: 'hams-termstate ' + (st.status === 'live' ? 'live' : st.status === 'connecting' ? 'busy' : 'dead'),
+              title: st.status }),
+            h('span', { className: 'hams-termtitle' },
+              hostLine + (active.remotePath ? ' · ' + tr('term.startDir') + ' ' + active.remotePath : '')),
+            h('button', { className: 'hams-btn hams-btn-sm', onClick: reopen, disabled: !active.sessionId }, tr('term.reopen'))),
+          loadError && h('div', { className: 'hams-err' }, tr('term.vendorFail', { msg: loadError })),
+          !loaded && !loadError && h('div', { className: 'hams-dim' }, tr('term.loading')),
+          searchOpen && h('div', { className: 'hams-termsearch' },
+            h('input', { ref: searchRef, className: 'hams-input', autoFocus: true, value: searchQ,
+              placeholder: tr('term.search'),
+              onChange: (e) => setSearchQ(e.target.value),
+              onKeyDown: (e) => {
+                if (e.key === 'Enter') { e.preventDefault(); doSearch(e.shiftKey) }
+                if (e.key === 'Escape') { e.preventDefault(); setSearchOpen(false) }
+              } }),
+            h('button', { className: 'hams-btn hams-btn-sm', onClick: () => doSearch(false) }, '↓'),
+            h('button', { className: 'hams-btn hams-btn-sm', onClick: () => doSearch(true) }, '↑'),
+            h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setSearchOpen(false) }, '×')),
+          st.status === 'error' && h('div', { className: 'hams-err' }, st.error ?? ''),
+          st.status === 'dead' && h('div', { className: 'hams-warn' }, st.error ?? tr('term.dead')),
+          h('div', { ref: wrapRef, className: 'hams-termwrap', tabIndex: -1 },
+            h('div', { ref: hostRef, className: 'hams-termhost' })),
+          h('div', { className: 'hams-termsnip' },
+            h('span', { className: 'hams-dim' }, tr('term.snippets') + '：'),
+            TERM_SNIPPETS.map((s) => h('button', {
+              key: s, className: 'hams-btn hams-btn-sm',
+              disabled: st.status !== 'live',
+              onClick: () => { void termInput(active.id, s) },
+            }, s)))),
+      )
     }
 
     // Sticky task sidebar: DSH resets the right sidebar to its start page whenever the

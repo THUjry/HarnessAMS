@@ -74,7 +74,14 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    to add existing reports to the task, switch them in a dropdown, reload them on
    demand; reports are served read-only from `/harnessams/dash/<taskId>/<reportId>/…`
    with each report's own directory as root so their relative `data/*.js` references
-   keep working, and **Sim settings** as a placeholder until its milestone lands), and
+   keep working, **Terminal** as an interactive remote terminal per dsh-remote machine
+   (xterm.js over dsh-remote's own `/dsh-remote/term/*` polling PTY routes — no SSH
+   layer of our own; a fresh session lands in the machine's remote project root, and
+   targeting works by passing one of that machine's live remote-project sessions as
+   the binding hint, so the machine needs a live session, same precondition as the
+   check buttons; search / font zoom / copy-on-select / theme follow / pooled
+   scrollback across tab and page switches are built in), and **Sim settings** as a
+   placeholder until its milestone lands), and
    a conversation header button that opens the tab and — while
    pinned 📌 — re-opens it on every session switch, so the sidebar follows workspace
    switches instead of collapsing. **Remote projects get no sidebar at all** (their
