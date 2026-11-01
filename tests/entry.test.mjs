@@ -6,7 +6,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile, stat } from 'node:fs/promises'
 import { execFileSync } from 'node:child_process'
-import { name, inject, apply } from '../src/index.js'
+import { name, inject, apply, toolDefinitions } from '../src/index.js'
+import { makeTool } from '../src/tool.js'
 
 test('plugin metadata', () => {
   assert.equal(name, 'dsh-harnessams')
@@ -14,17 +15,39 @@ test('plugin metadata', () => {
   assert.equal(typeof apply, 'function')
 })
 
-test('apply registers the /harnessams prefix route', async () => {
+test('apply registers the /harnessams prefix route and the model tools', async () => {
   const routes = []
+  const registered = []
   const ctx = {
     effect: (fn) => { fn() },
     webServer: { register: (r, label) => routes.push({ ...r, label }) },
+    tools: { register: (t) => registered.push(t.name) },
   }
   await apply(ctx)
   assert.equal(routes.length, 1)
   assert.equal(routes[0].kind, 'prefix')
   assert.equal(routes[0].path, '/harnessams')
   assert.equal(typeof routes[0].handler, 'function')
+  assert.deepEqual(registered.sort(), [
+    'bsub_fetch', 'bsub_poll', 'bsub_submit',
+    'sim_collect', 'sim_progress', 'sim_report', 'sim_trash',
+  ])
+})
+
+test('every tool compiles to an object-rooted JSON Schema with typed properties', () => {
+  const defs = toolDefinitions()
+  assert.equal(defs.length, 7)
+  for (const def of defs) {
+    const tool = makeTool(def)
+    assert.equal(tool.parameters.type, 'object', `${def.name} parameters root`)
+    for (const [, prop] of Object.entries(tool.parameters.properties)) {
+      assert.equal(typeof prop.type, 'string', `${def.name} property type`)
+      assert.notEqual(prop.required, false, `${def.name} must not carry required:false`)
+    }
+    assert.equal(tool.output.schema.type, 'object')
+    assert.equal(tool.output.schema.additionalProperties, true)
+    assert.equal(typeof tool.output.render, 'function')
+  }
 })
 
 test('packaging contract: client half declared and whitelisted', async () => {
@@ -37,7 +60,7 @@ test('packaging contract: client half declared and whitelisted', async () => {
     assert.ok(pkg.peerDependencies?.[dep], `peer dependency missing for client inject: ${dep}`)
     assert.ok(pkg.devDependencies?.[dep], `dev dependency missing for client inject: ${dep}`)
   }
-  for (const f of ['index.js', 'client.js', 'server/', 'cordis.patch.yml', 'assets/']) {
+  for (const f of ['index.js', 'client.js', 'server/', 'tools/', 'scripts/', 'cordis.patch.yml', 'assets/']) {
     assert.ok(pkg.files.includes(f), `files whitelist must include ${f}`)
   }
   const st = await stat(new URL('../src/assets/plotly.min.js', import.meta.url))

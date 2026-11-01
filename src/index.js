@@ -21,6 +21,10 @@
 // first live-session id on /api/checks so the client can pass it as the binding hint,
 // and serves the vendored xterm.js bundle under /assets/. Remote file browsing/editing
 // is NOT proxied here — dsh-remote's own tools and web surface do it.
+// Model tools (moved from SmartAnaSim 2026-11-01, keeping that plugin simulator-only):
+// the generic remote batch channel (bsub_submit/bsub_poll/bsub_fetch; worker scripts
+// come from the workspace sim_scripts_dir) and the simulator-agnostic analysis/ops
+// tools (sim_collect/sim_progress/sim_report/sim_trash; analysis Python under scripts/).
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -32,11 +36,18 @@ import { remoteMachinesStatus, fetchMachines, sessionInMirror } from './server/m
 import { remoteProjectFor, checkMachinesForLocal, findRemoteProjectForMachine, createRemoteProject } from './server/remote.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
+import { registerTools } from './tool.js'
+import { bsubTools } from './tools/bsub.js'
+import { sharedTools } from './tools/shared.js'
 
 export const name = 'dsh-harnessams'
 // workspaceRegistry/tools are required on the web composition (both ship with dsh-base);
 // the handlers still guard against undefined so degraded embeds fail soft, not loud.
 export const inject = ['webServer', 'workspaceRegistry', 'tools']
+
+export function toolDefinitions(ctx = {}) {
+  return [...bsubTools(ctx), ...sharedTools(ctx)]
+}
 
 export function apply(ctx) {
   ctx.effect(() => {
@@ -48,6 +59,11 @@ export function apply(ctx) {
     if (ctx.logger?.info) ctx.logger.info('[harnessams] routes mounted at /harnessams')
     else console.log('[harnessams] routes mounted at /harnessams')
   }, 'harnessams webserver routes')
+  ctx.effect(() => {
+    const names = registerTools(ctx, toolDefinitions(ctx))
+    if (ctx.logger?.info) ctx.logger.info('[harnessams] registered %d tools', names.size)
+    else console.log('[harnessams] registered', names.size, 'tools')
+  }, 'harnessams tools')
 }
 
 async function readBodyJson(req, limit = 1 << 20) {

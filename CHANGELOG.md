@@ -5,6 +5,26 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — 2026-11-01 (tool redistribution)
+
+- **Model tools moved in from SmartAnaSim** (that plugin is now simulator-only):
+  `apply()` registers 7 tools in a second `ctx.effect` — the generic remote batch
+  channel `bsub_submit`/`bsub_poll`/`bsub_fetch` (code moved verbatim:
+  `src/tools/bsub.js` + `src/bsub.js` + `src/remote.js` + the `src/tool.js` schema
+  compiler) and the simulator-agnostic analysis tools
+  `sim_collect`/`sim_progress`/`sim_report`/`sim_trash` (`src/tools/shared.js`).
+  The worker upload tree / worker lookup root switched from the plugin's own
+  `scripts/` to the workspace `sim_scripts_dir` (points at the SmartAnaSim
+  package; `HARNESSAMS_SIM_SCRIPTS_DIR` overrides discovery, with guidance
+  errors) — cross-package npm resolution is never required under dev-mount.
+  Analysis Python ships here now (`src/scripts/common/`: collect/report/trash +
+  a byte-identical `common_workspace.py` copy); `sim_report`'s guarded
+  tasks.json injection became a same-package second writer beside
+  `server/project.js`. `LocalDesignExample/tools/common/` re-synced from the new
+  source (trash unchanged — identical bytes). Archive extraction (`extractArchive`)
+  now runs tar with a relative archive operand (cwd=runDir): GNU tar on PATH
+  parses absolute `C:\...` operands as `host:path`.
+
 ### Added
 
 - **Dashboard report viewer + report-injection coordination (2026-10-30/11-01)**:

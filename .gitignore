@@ -2,3 +2,5 @@ node_modules/
 dist/
 *.tgz
 LocalDesignExample/assets/
+__pycache__/
+*.pyc
