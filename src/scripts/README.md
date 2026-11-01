@@ -5,10 +5,10 @@ SmartAnaSim plugin 2026-11-01, which now ships simulator code only). Spawned by 
 plugin's model tools via `src/py.js` (`runPython`, fresh system-Python process per call).
 
 - `common/common_collect_results.py` — aggregate `NN/point_meta.json` into `results.json`
-  (sim_collect backend)
+  (sim_analysis collect step)
 - `common/common_gen_sweep_report.py` — render `sweep/Round*/top/results.json` into the
-  Plotly HTML dashboard (sim_report backend)
-- `common/common_trash.py` — workspace trash (list/trash/restore/purge; sim_trash backend)
+  Plotly HTML dashboard (sim_analysis report=true step)
+- `common/common_trash.py` — workspace trash (list/trash/restore/purge; safe_trash backend)
 - `common/common_workspace.py` — harnessams.json discovery + atomic JSON helpers; a
   byte-identical copy also ships with SmartAnaSim (`scripts/common/` there — the sweep
   workers import it) and in `LocalDesignExample/tools/common/`. Keep all copies identical.

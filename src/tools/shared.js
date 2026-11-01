@@ -6,8 +6,8 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { cliError, readJsonIfExists, resolveDir, runPython } from '../py.js'
 
-// --- Optional sim_report injection target: the HarnessAMS task dashboard ---
-// This plugin's own sidebar owns the task store at
+// --- Optional sim_analysis(report=true, task=…) injection target: the
+// HarnessAMS task dashboard. This plugin's own sidebar owns the task store at
 // <workspace>/.harnessams/tasks.json (the DSH workspace the sidebar session
 // runs in; server/project.js is the sidebar's writer). The store shape is still
 // mirrored below and the write stays defensive: anything unexpected is refused,
@@ -83,40 +83,105 @@ export function registerReportIntoTask(storeDir, taskRef, reportPath) {
   return { task: { id: task.id, name: task.name }, report: entry }
 }
 
+// The sweep convention places run directories at <project>/sweep/RoundN/top;
+// derive the project root from a run_dir (null when the shape does not match).
+function deriveProjectDir(runDir) {
+  const round = path.basename(path.dirname(runDir))
+  const sweep = path.basename(path.dirname(path.dirname(runDir)))
+  if (/^Round/.test(round) && sweep === 'sweep') {
+    return path.dirname(path.dirname(path.dirname(runDir)))
+  }
+  return null
+}
+
 export function sharedTools() {
   return [
     {
-      name: 'sim_collect',
-      description: 'Collect a finished sweep: aggregates every NN/point_meta.json of a run directory into '
-        + 'results.json (per-point metrics, min/max/mean summary). The simulator label comes from '
-        + 'the run\'s .simulator marker (or the template extension) and drives the report header.',
+      name: 'sim_analysis',
+      description: 'Analyze a finished sweep and optionally render its dashboard. Always aggregates every '
+        + 'NN/point_meta.json of the run directory into results.json (per-point metrics, min/max/mean summary; '
+        + 'the simulator label comes from the run\'s .simulator marker or the template extension). When '
+        + 'report=true, also regenerates the sweep-result HTML report (interactive Plotly metric charts, '
+        + 'summary cards, per-point table; works from file:// and inside the WebUI) at '
+        + '<project>/Analysis/<project>_report.html — the project root defaults to the sweep/RoundN/top '
+        + 'structure of run_dir. With task=<id or exact name>, the generated report is also registered into '
+        + 'that HarnessAMS task\'s dashboard (nearest .harnessams/tasks.json above the project); a '
+        + 'registration failure never fails the analysis.',
       parameters: {
-        run_dir: { type: 'string', required: true, description: 'Run directory (sweep/RoundN/top)' },
-        out: { type: 'string', description: 'Output results.json path (default: <run_dir>/results.json)' },
+        run_dir: { type: 'string', required: true, description: 'Run directory (sweep/RoundN/top) holding NN/point_meta.json' },
+        out: { type: 'string', description: 'Output results.json path (default: <run_dir>/results.json; must stay at the default when report=true)' },
         simulator: { type: 'string', enum: ['ngspice', 'spectre'], description: 'Override the detected simulator label' },
+        report: { type: 'boolean', description: 'Also generate the HTML dashboard for the project (default false)' },
+        round: { type: 'string', description: 'report only: round name to render (e.g. Round1; default: all Round*)' },
+        task: { type: 'string', description: 'report only: register the generated report into this task\'s dashboard '
+          + '(HarnessAMS sidebar): task id or exact task name. Omit to only generate the report.' },
+        project_dir: { type: 'string', description: 'report only: project root containing sweep/Round*/top '
+          + '(default: derived from run_dir\'s sweep/RoundN/top structure)' },
       },
       async execute(args) {
         const runDir = resolveDir(args.run_dir)
-        const argv = ['--work-dir', runDir]
-        if (args.out) argv.push('--out', path.resolve(args.out))
-        if (args.simulator) argv.push('--simulator', String(args.simulator))
-        const { stdout } = await runPython('common/common_collect_results.py', argv, 180_000)
+        // Collect step: point metas -> results.json. The report generator reads
+        // results.json from the canonical <run_dir>/results.json location, so a
+        // custom --out is incompatible with report=true (fail early, actionable).
+        const defaultResults = path.join(runDir, 'results.json')
+        const resultsPath = args.out ? path.resolve(args.out) : defaultResults
+        if (args.report && resultsPath !== path.resolve(defaultResults)) {
+          throw new Error('report=true requires the default results.json location (<run_dir>/results.json) '
+            + '— the report generator reads results.json from the run directory; drop out= or omit report')
+        }
+        const collectArgv = ['--work-dir', runDir]
+        if (args.out) collectArgv.push('--out', resultsPath)
+        if (args.simulator) collectArgv.push('--simulator', String(args.simulator))
+        const collect = await runPython('common/common_collect_results.py', collectArgv, 180_000)
           .catch((e) => { throw new Error(`collect failed: ${cliError(e)}`) })
-        const resultsPath = args.out ? path.resolve(args.out) : path.join(runDir, 'results.json')
         const results = readJsonIfExists(resultsPath)
-        return {
+        const result = {
           ok: true,
-          output: stdout.trim(),
+          output: collect.stdout.trim(),
           results_file: resultsPath,
           simulator: results?.simulator ?? null,
           summary: results?.summary ?? null,
         }
+        if (!args.report) return result
+
+        // Report step: results.json -> HTML dashboard (+ optional task injection).
+        const project = args.project_dir ? resolveDir(args.project_dir)
+          : (deriveProjectDir(runDir)
+            ?? (() => { throw new Error(`run_dir does not match <project>/sweep/RoundN/top: ${runDir} `
+              + '(pass project_dir explicitly or use a conventional run directory)') })())
+        const reportArgv = ['--project', project]
+        if (args.round) reportArgv.push('--round', String(args.round))
+        const reportRun = await runPython('common/common_gen_sweep_report.py', reportArgv, 300_000)
+          .catch((e) => { throw new Error(`report generation failed: ${cliError(e)}`) })
+        // The script's final stdout line is "[report] N round(s) -> <abs path>";
+        // parse it, fall back to the default naming rule if the format drifts.
+        const m = /\[report\] \d+ round\(s\) -> (.+)\s*$/.exec(reportRun.stdout.trim())
+        const reportPath = m?.[1] ?? path.join(project, 'Analysis', path.basename(project) + '_report.html')
+        result.output = (collect.stdout.trim() + '\n' + reportRun.stdout.trim()).trim()
+        result.report_dir = path.join(project, 'Analysis')
+        result.report_path = reportPath
+        if (args.task) {
+          // Optional injection: the report is already on disk, so a failure here
+          // is reported, never thrown — the caller can retry with a fixed target.
+          const found = findTasksStore(project)
+          if (!found) {
+            result.registered = false
+            result.register_error = `no HarnessAMS task store (.harnessams/tasks.json) found above ${project} — create a task in the HarnessAMS task sidebar first`
+          } else {
+            const r = registerReportIntoTask(found.storeDir, args.task, reportPath)
+            if (r.error) { result.registered = false; result.register_error = r.error }
+            else { result.registered = true; result.task = r.task; result.report = r.report }
+          }
+        }
+        return result
       },
     },
     {
       name: 'sim_progress',
       description: 'Read a sweep batch\'s progress file (sweep_progress.json in the run directory; no simulation '
-        + 'is started). Useful for local runs and for a remote batch after bsub_fetch downloaded its progress file.',
+        + 'is started). This is the LOCAL file window: use it directly for local runs; for a remote batch poll '
+        + 'bsub_poll while it runs (it also sees the LSF queue state, which this file never knows) and call '
+        + 'this tool after bsub_fetch brought the progress file back.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Run directory holding sweep_progress.json' },
       },
@@ -140,47 +205,7 @@ export function sharedTools() {
       },
     },
     {
-      name: 'sim_report',
-      description: 'Generate the sweep-result HTML report (interactive Plotly metric charts, summary cards, '
-        + 'per-point table) from sweep/Round*/top/results.json. Works from file:// and inside the '
-        + 'WebUI; writes <project>/Analysis/<project>_report.html. With task=<id or exact name>, the report is '
-        + 'also registered into that HarnessAMS task\'s dashboard (nearest .harnessams/tasks.json above the '
-        + 'project); a registration failure never fails report generation.',
-      parameters: {
-        project_dir: { type: 'string', required: true, description: 'Project root containing sweep/Round*/top/results.json' },
-        round: { type: 'string', description: 'Round name to render (e.g. Round1; default: all Round*)' },
-        task: { type: 'string', description: 'Register the generated report into this task\'s dashboard '
-          + '(HarnessAMS sidebar): task id or exact task name. Omit to only generate the report.' },
-      },
-      async execute(args) {
-        const project = resolveDir(args.project_dir)
-        const argv = ['--project', project]
-        if (args.round) argv.push('--round', String(args.round))
-        const { stdout } = await runPython('common/common_gen_sweep_report.py', argv, 300_000)
-          .catch((e) => { throw new Error(`report generation failed: ${cliError(e)}`) })
-        // The script's final stdout line is "[report] N round(s) -> <abs path>";
-        // parse it, fall back to the default naming rule if the format drifts.
-        const m = /\[report\] \d+ round\(s\) -> (.+)\s*$/.exec(stdout.trim())
-        const reportPath = m?.[1] ?? path.join(project, 'Analysis', path.basename(project) + '_report.html')
-        const result = { ok: true, output: stdout.trim(), report_dir: path.join(project, 'Analysis'), report_path: reportPath }
-        if (args.task) {
-          // Optional injection: the report is already on disk, so a failure here
-          // is reported, never thrown — the caller can retry with a fixed target.
-          const found = findTasksStore(project)
-          if (!found) {
-            result.registered = false
-            result.register_error = `no HarnessAMS task store (.harnessams/tasks.json) found above ${project} — create a task in the HarnessAMS task sidebar first`
-          } else {
-            const r = registerReportIntoTask(found.storeDir, args.task, reportPath)
-            if (r.error) { result.registered = false; result.register_error = r.error }
-            else { result.registered = true; result.task = r.task; result.report = r.report }
-          }
-        }
-        return result
-      },
-    },
-    {
-      name: 'sim_trash',
+      name: 'safe_trash',
       description: 'Workspace trash (safety by default): move paths into <workspace>/.trash instead of deleting, '
         + 'then list, restore, or explicitly purge an entry.',
       parameters: {

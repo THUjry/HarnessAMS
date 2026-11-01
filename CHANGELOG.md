@@ -5,6 +5,20 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed — 2026-11-01 (analysis tool merge)
+
+- **`sim_collect` + `sim_report` merged into `sim_analysis`**; `sim_trash`
+  renamed **`safe_trash`** (user decision). `sim_analysis(run_dir, …)` always
+  aggregates `NN/point_meta.json` into `results.json` and only renders the HTML
+  dashboard when `report=true` (project root derived from run_dir's
+  `sweep/RoundN/top` structure, or passed as `project_dir`; `round`/`task`
+  apply to the report step; a custom `out` combined with `report=true` is
+  rejected early — the generator reads the canonical location).
+  `sim_progress` stays a separate LOCAL progress-file window; its description
+  now records the dual-window timing: remote batches poll `bsub_poll` while
+  running (LSF queue state) and switch to `sim_progress`/`sim_analysis` after
+  `bsub_fetch`. Tool count 7 → 6.
+
 ### Added — 2026-11-01 (tool redistribution)
 
 - **Model tools moved in from SmartAnaSim** (that plugin is now simulator-only):

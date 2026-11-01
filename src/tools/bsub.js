@@ -257,7 +257,7 @@ export function bsubTools(ctx) {
       description: 'Fetch artifacts from a remote LSF batch: tar-gzips the requested files on the remote host, '
         + 'downloads the archive over dsh-remote and extracts it into the local run directory (the archive is '
         + 'kept as fetch_<job_id>.tgz). If tar is unavailable it falls back to a bounded per-file download. '
-        + 'Afterwards sim_collect / spectre_parse / snp_read can read the local run directory directly.',
+        + 'Afterwards sim_analysis / spectre_parse / snp_read can read the local run directory directly.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory to extract into' },
         includes: { type: 'array', items: { type: 'string' },

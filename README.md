@@ -8,7 +8,7 @@
 
 | Plugin | npm package | row id | Responsibility | Stage | Status |
 |---|---|---|---|---|---|
-| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (remote projects, digital assets, disk usage), project = DSH workspace, per-project task sidebar with health checks; the generic remote batch channel (`bsub_*`, worker tree from the workspace `sim_scripts_dir`) and the simulator-agnostic analysis tools (`sim_collect`/`sim_progress`/`sim_report`/`sim_trash`) | stage 1 | implemented (this repo, `src/`) |
+| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (remote projects, digital assets, disk usage), project = DSH workspace, per-project task sidebar with health checks; the generic remote batch channel (`bsub_*`, worker tree from the workspace `sim_scripts_dir`) and the simulator-agnostic analysis tools (`sim_analysis`/`sim_progress`/`safe_trash`) | stage 1 | implemented (this repo, `src/`) |
 | HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local ngspice and Spectre channels (code-driven netlist assembly with hard PDK isolation), PSF parsing, S-parameter reading/extraction — simulator-specific code only | stage 1 | implemented (separate repo) |
 | HarnessAMS-SmartPostLayout | (repo in stage 2) | `harnessams-smart-post-layout` | One-click post-layout simulation | stage 2 | not started |
 | HarnessAMS-aligner | (repo in stage 3) | `harnessams-aligner` | Multi-level alignment | stage 3 | not started |
@@ -79,7 +79,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    with each report's own directory as root so their relative `data/*.js` references
    keep working, the iframe fills the sidebar via a flex height chain and embeds the
    report compact + scaled to the DSH font-size setting, SmartAnaSim's
-   `sim_report(task=…)` registers generated reports straight into a task, and the
+   `sim_analysis(report=true, task=…)` registers generated reports straight into a task, and the
    sidebar re-bases its writes on a fresh GET so the two writers never clobber each
    other, **Terminal** as an interactive remote terminal per dsh-remote machine
    (xterm.js over dsh-remote's own `/dsh-remote/term/*` polling PTY routes — no SSH
@@ -120,7 +120,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
 
 | Package | Ships beyond the entry JS | Deliberately NOT shipped |
 |---|---|---|
-| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 7 model tools: `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_collect`/`sim_progress`/`sim_report`/`sim_trash`); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (4 `.py`: the analysis pipeline collect/report/trash + a byte-identical `common_workspace.py` copy) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
+| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 6 model tools: `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (4 `.py`: the analysis pipeline collect/report/trash + a byte-identical `common_workspace.py` copy) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
 The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite
