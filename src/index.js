@@ -24,7 +24,7 @@
 // Model tools (moved from SmartAnaSim 2026-11-01, keeping that plugin simulator-only):
 // the generic remote batch channel (bsub_submit/bsub_poll/bsub_fetch; worker scripts
 // come from the workspace sim_scripts_dir) and the simulator-agnostic analysis/ops
-// tools (sim_collect/sim_progress/sim_report/sim_trash; analysis Python under scripts/).
+// tools (sim_analysis/sim_progress/safe_trash; analysis Python under scripts/).
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -48,6 +48,8 @@ export const inject = ['webServer', 'workspaceRegistry', 'tools']
 export function toolDefinitions(ctx = {}) {
   return [...bsubTools(ctx), ...sharedTools(ctx)]
 }
+// Current shared surface: sim_analysis (collect + optional report dashboard),
+// sim_progress (local progress-file window), safe_trash.
 
 export function apply(ctx) {
   ctx.effect(() => {

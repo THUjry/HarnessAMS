@@ -1,6 +1,7 @@
-// Tests for the sim_report injection target (task=<id|name>): locating the
-// HarnessAMS task store above a project dir, the guarded read-modify-write of
-// tasks.json, and the full tool.execute flow against a minimal sweep fixture.
+// Tests for the sim_analysis(report=true, task=<id|name>) injection target:
+// locating the HarnessAMS task store above a project dir, the guarded
+// read-modify-write of tasks.json, and the full tool.execute flow (collect ->
+// report -> inject) against a minimal sweep fixture.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -122,25 +123,29 @@ test('inject: registerReportIntoTask refuses bad shapes and unknown tasks withou
   }
 })
 
-test('inject: sim_report e2e — generates the report and registers it into the task', async () => {
+test('inject: sim_analysis e2e — collects, generates the report and registers it into the task', async () => {
   const { ws, storeDir } = await makeWorkspace()
   try {
     // minimal sweep fixture: one round, two points over one grouping param
     const top = path.join(ws, 'demoX', 'sweep', 'Round1', 'top')
-    await mkdir(top, { recursive: true })
-    await writeFile(path.join(top, 'results.json'), JSON.stringify({
-      simulator: 'ngspice',
-      n_points: 2, n_success: 2, n_partial: 0, n_failed: 0,
-      points: [
-        { params: { vgs: 0.6 }, metrics: { gain: 60.0 } },
-        { params: { vgs: 0.7 }, metrics: { gain: 65.0 } },
-      ],
-      summary: {},
+    await mkdir(path.join(top, '00'), { recursive: true })
+    await mkdir(path.join(top, '01'), { recursive: true })
+    await writeFile(path.join(top, '.simulator'), 'ngspice\n', 'utf8')
+    await writeFile(path.join(top, '00', 'point_meta.json'), JSON.stringify({
+      point_index: 0, point_name: '00', status: 'success',
+      params: { vgs: 0.6 }, signals: { gain: 60.0 },
+    }), 'utf8')
+    await writeFile(path.join(top, '01', 'point_meta.json'), JSON.stringify({
+      point_index: 1, point_name: '01', status: 'success',
+      params: { vgs: 0.7 }, signals: { gain: 65.0 },
     }), 'utf8')
 
-    const tool = makeTool(sharedTools().find((d) => d.name === 'sim_report'))
-    const res = await tool.execute({ project_dir: path.join(ws, 'demoX'), task: 'OTA 装配验证' })
+    const tool = makeTool(sharedTools().find((d) => d.name === 'sim_analysis'))
+    const res = await tool.execute({ run_dir: top, report: true, task: 'OTA 装配验证' })
     assert.equal(res.ok, true)
+    assert.equal(res.simulator, 'ngspice')
+    assert.equal(res.summary.gain.n, 2)
+    assert.match(res.results_file, /demoX[\\/]sweep[\\/]Round1[\\/]top[\\/]results\.json$/)
     assert.equal(res.registered, true)
     assert.equal(res.task.id, 'task-a')
     assert.match(res.report_path, /demoX_report\.html$/)
@@ -152,17 +157,28 @@ test('inject: sim_report e2e — generates the report and registers it into the 
     assert.equal(store.tasks[0].reports[0].path, path.resolve(res.report_path))
     assert.equal(store.tasks[0].dashboard_selected, store.tasks[0].reports[0].id)
 
-    // no task param → plain generation, no registered field
-    const plain = await tool.execute({ project_dir: path.join(ws, 'demoX') })
+    // collect-only (no report) → no report fields, results.json still written
+    const top2 = path.join(ws, 'demoY', 'sweep', 'Round2', 'top')
+    await mkdir(path.join(top2, '00'), { recursive: true })
+    await writeFile(path.join(top2, '00', 'point_meta.json'), JSON.stringify({
+      point_index: 0, point_name: '00', status: 'success',
+      params: { x: 1 }, signals: { m: 5 },
+    }), 'utf8')
+    const plain = await tool.execute({ run_dir: top2 })
     assert.equal(plain.ok, true)
     assert.equal(plain.registered, undefined)
-    assert.match(plain.report_path, /demoX_report\.html$/)
+    assert.equal(plain.report_path, undefined)
 
-    // wrong task → report ok, registration refused with the task list
-    const bad = await tool.execute({ project_dir: path.join(ws, 'demoX'), task: 'ghost' })
+    // wrong task → analysis + report ok, registration refused with the task list
+    const bad = await tool.execute({ run_dir: top, report: true, task: 'ghost' })
     assert.equal(bad.ok, true)
     assert.equal(bad.registered, false)
     assert.match(bad.register_error, /task not found: "ghost" \(tasks: OTA 装配验证, R4 复现\)/)
+
+    // report=true + custom out → refused early (report reads the canonical location)
+    await assert.rejects(() => tool.execute({
+      run_dir: top, report: true, out: path.join(ws, 'elsewhere.json'),
+    }), /requires the default results\.json location/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

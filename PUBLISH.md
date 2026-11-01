@@ -20,8 +20,8 @@ Checklist (per package, run from the package directory):
    - `dsh-harnessams` (run in `src/`) must contain exactly: `index.js`, `client.js` (the
      browser half — combo-loaded classic script, single file), `server/` (host-half
      modules), `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 7 model tools:
-     `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_collect`/`sim_progress`/`sim_report`/
-     `sim_trash`), `cordis.patch.yml`, `assets/` (`plotly.min.js` about 4.6 MB + the vendored
+     `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_analysis`/`sim_progress`/
+     `safe_trash`), `cordis.patch.yml`, `assets/` (`plotly.min.js` about 4.6 MB + the vendored
      xterm bundle — `xterm.js`, `xterm.css`, `xterm-addon-fit.js`, `xterm-addon-search.js`
      — + `THIRD_PARTY_NOTICES.md`; the Plotly and xterm attributions travel with the
      assets), `scripts/common/` (4 `.py`: `common_collect_results.py`,
@@ -36,7 +36,7 @@ Checklist (per package, run from the package directory):
    - `npm publish` from the package directory.
 4. Post-publish verification
    - `dsh plugin --profile web add <package>`, restart the profile (`dsh --profile web`),
-     confirm the console routes / the 7 tools register (`--dump-config` shows the rows).
+     confirm the console routes / the 6 tools register (`--dump-config` shows the rows).
    - Verifying the remote-project routes additionally requires dsh-remote exact-pinned in
      the profile: `dsh plugin --profile web add --save-exact dsh-remote@0.8.66`.
 5. Suite last
