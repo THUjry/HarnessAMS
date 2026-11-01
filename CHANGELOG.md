@@ -5,6 +5,31 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — 2026-11-01 (check-failure diagnosis sessions, branch check-diagnose-session)
+
+- **Failed checks hand off to a newly created DSH session** (the private
+  replacement of the old copy-to-clipboard diagnose button): a run-level
+  「起会话分析」 button bundles every failed entry of the current run into
+  `POST /api/checks/analyze`; the host assembles an English prompt (context +
+  verbatim failed entries, READ-ONLY instructions) ending with an
+  answer-language line following the effective UI language
+  (`Answer in Chinese.` / `Answer in English.`), then drives the DSH session
+  controller (`ctx.get('sessionController')`, lazy-degrading like the
+  `sessions` service): `create({workspaceId})` attaches the session to the
+  target workspace, `prompt(request, signal)` delivers the first turn
+  (the signal argument is REQUIRED on 0.2.1-rc.2 — `signal.throwIfAborted()`
+  is unconditional), `rename` titles it `HarnessAMS diagnosis: …` (best
+  effort). Remote checks anchor the session to the machine's remote-project
+  workspace, so the diagnosis agent's cwd binds dsh-remote's rw_* tools to
+  that machine and it can verify on the cluster; local checks anchor to the
+  current project's workspace. **AUTO_ANALYZE_REMOTE** (constant, future
+  settings card): a REMOTE check that ends with failed entries fires the same
+  handoff automatically — local failures stay button-only. Deliberately
+  private: no ctx service key and no model tool is registered for it.
+  Verified live against 0.2.1-rc.2 (instance on :3197, node1): the diagnosis
+  agent reproduced `bjobs` on the machine, traced the cold-channel PATH root
+  cause and answered in Chinese per the directive.
+
 ### Added — 2026-11-01 (Dashboard auto-refresh, 方案B)
 
 - **The Dashboard sub-view auto-refreshes while visible** (session_04b668d1
