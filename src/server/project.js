@@ -119,8 +119,13 @@ export async function writeTasks(workspacePath, input) {
     })
   }
   const dir = path.join(workspacePath, TASKS_DIR)
+  const finalPath = tasksPath(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
-  await fsp.writeFile(tasksPath(workspacePath), JSON.stringify({ version: 1, tasks }, null, 2) + '\n', 'utf8')
+  // Atomic replace: the store now has two writers (this sidebar PUT channel and
+  // sim_report's report injection) — a torn read must never be observable.
+  const tmp = finalPath + '.tmp'
+  await fsp.writeFile(tmp, JSON.stringify({ version: 1, tasks }, null, 2) + '\n', 'utf8')
+  await fsp.rename(tmp, finalPath)
   return { tasks }
 }
 

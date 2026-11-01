@@ -438,7 +438,7 @@ window.__ModuleLoader__.load({
 .hams-tasktab .hams-x:hover { opacity: 1; color: #e05252; }
 .hams-addbtn { border: 1px dashed color-mix(in srgb, currentColor 35%, transparent); background: none;
   color: inherit; border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); }
-.hams-body { padding: 10px 12px; overflow: auto; }
+.hams-body { padding: 8px 10px; overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .hams-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.38); display: flex;
   align-items: center; justify-content: center; z-index: 90; }
 .hams-dialog { border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 9px;
@@ -450,18 +450,18 @@ window.__ModuleLoader__.load({
 .hams-field label { display: block; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); opacity: .7; margin-bottom: 3px; }
 .hams-taskdesc { margin-top: 8px; }
 .hams-subtabs { display: flex; gap: 2px; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
-  margin-bottom: 8px; }
+  margin-bottom: 6px; flex: none; }
 .hams-subtab { padding: 3px 10px; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); cursor: pointer; color: inherit; background: none;
   border: none; border-bottom: 2px solid transparent; opacity: .7; }
 .hams-subtab.active { opacity: 1; border-bottom-color: currentColor; font-weight: 600; }
 .hams-dash { margin-top: 12px; border: 1px dashed color-mix(in srgb, currentColor 25%, transparent);
   border-radius: 8px; padding: 14px; opacity: .75; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
 /* tier 3 Dashboard: report viewer (toolbar + iframe) and the add-report browser */
-.hams-dashview { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; min-height: 0; }
+.hams-dashview { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; min-height: 0; flex: 1; }
 .hams-dashtoolbar { margin: 0; flex-wrap: nowrap; }
 .hams-dashtoolbar .hams-select { flex: 1 1 120px; min-width: 60px; max-width: 100%; }
 .hams-btn { text-decoration: none; }
-.hams-dashframe { width: 100%; height: calc(100vh - 230px); min-height: 300px;
+.hams-dashframe { width: 100%; flex: 1; min-height: 300px;
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 8px; }
 .hams-list { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 6px;
   max-height: 240px; overflow: auto; display: flex; flex-direction: column; }
@@ -490,7 +490,7 @@ window.__ModuleLoader__.load({
 .hams-termstate.dead { background: #e05252; }
 .hams-termstate.busy { background: #d29922; }
 .hams-termwrap { position: relative; border: 1px solid color-mix(in srgb, currentColor 22%, transparent);
-  border-radius: 8px; padding: 4px; height: calc(100vh - 262px); min-height: 260px; overflow: hidden; }
+  border-radius: 8px; padding: 4px; flex: 1; min-height: 260px; overflow: hidden; }
 .hams-termhost { width: 100%; height: 100%; }
 .hams-termhost .terminal { width: 100%; height: 100%; }
 .hams-termsearch { display: flex; gap: 6px; align-items: center; margin: 0 0 4px;
@@ -851,6 +851,25 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [projectPath, sessionId, projectRemote])
 
+      // The Dashboard sub-view picks up external writes on activation: sim_report's
+      // report injection appends to tasks.json behind the sidebar's back, and
+      // switching to the tab is the natural moment to reload (skipped while a
+      // persist is in flight, so a just-applied optimistic update is never
+      // flashed over by a stale list).
+      useEffect(() => {
+        if (view !== 'dashboard' || !projectPath || !sessionId || projectRemote || persistingRef.current) return
+        let alive = true
+        fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId))
+          .then((d) => {
+            if (!alive) return
+            const fresh = d.tasks ?? []
+            setTasks(fresh)
+            setSelectedId((prev) => fresh.some((t) => t.id === prev) ? prev : (fresh[0]?.id ?? null))
+          })
+          .catch(() => { /* keep the current list */ })
+        return () => { alive = false }
+      }, [view, projectPath, sessionId, projectRemote])
+
       // Overview check surface (local projects: local environment + per-machine
       // remote checks); fetched independently so it never blocks the task list.
       useEffect(() => {
@@ -879,11 +898,19 @@ window.__ModuleLoader__.load({
         }
       }
 
-      // persist() returns the server-confirmed list (new tasks get their ids server-side),
-      // or null on failure (the optimistic update stays and the error shows inline).
-      const persist = async (next) => {
-        setTasks(next)
+      // persist(mutator) re-bases the change on the LATEST server list before the
+      // full-list PUT: the store has a second writer now (sim_report's report
+      // injection writes tasks.json behind the sidebar's back), so sending the
+      // mount-time snapshot would clobber injected reports — the rebase shrinks
+      // the clobber window to milliseconds. Returns the server-confirmed list,
+      // or null on failure (the optimistic update stays, error shows inline).
+      const persistingRef = useRef(false)
+      const persist = async (mutator) => {
+        persistingRef.current = true
         try {
+          const latest = await fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId)).catch(() => null)
+          const next = mutator(latest?.tasks ?? tasks)
+          setTasks(next)
           const r = await fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId),
             { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks: next }) })
           const saved = r.tasks ?? next
@@ -892,31 +919,32 @@ window.__ModuleLoader__.load({
         } catch (e) {
           setError(String(e.message ?? e))
           return null
+        } finally {
+          persistingRef.current = false
         }
       }
 
       const selected = tasks.find((t) => t.id === selectedId) ?? null
 
       const createTask = async (name, description) => {
-        const saved = await persist([...tasks, { name, description: description || '' }])
+        const saved = await persist((latest) => [...latest, { name, description: description || '' }])
         if (saved && saved.length) setSelectedId(saved[saved.length - 1].id)
       }
       const removeTask = (id) => {
         const t = tasks.find((x) => x.id === id)
         if (!t) return
         if (!window.confirm(tr('tasks.deleteConfirm', { name: t.name }))) return
-        const next = tasks.filter((x) => x.id !== id)
-        if (selectedId === id) setSelectedId(next[0]?.id ?? null)
-        persist(next)
+        if (selectedId === id) setSelectedId(tasks.filter((x) => x.id !== id)[0]?.id ?? null)
+        persist((latest) => latest.filter((x) => x.id !== id))
       }
       const saveDescription = () => {
         if (!selected || descDraft === null) return
-        persist(tasks.map((t) => t.id === selected.id ? { ...t, description: descDraft } : t))
+        persist((latest) => latest.map((t) => t.id === selected.id ? { ...t, description: descDraft } : t))
         setDescDraft(null)
       }
       // Dashboard sub-view mutator: applies fn to the selected task and persists
       // the whole list (same single-writer channel as description edits).
-      const updateTask = (fn) => persist(tasks.map((t) => t.id === selected.id ? fn(t) : t))
+      const updateTask = (fn) => persist((latest) => latest.map((t) => t.id === selected.id ? fn(t) : t))
 
       // Remote projects render nothing but the explanatory note — no tab strip, no
       // tasks, no checks. Their role is anchoring the connection; remote files go
@@ -952,7 +980,7 @@ window.__ModuleLoader__.load({
             tr('tasks.noTasks')),
           project && h('div', { className: 'hams-dim' },
             tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
-          selected && h('div', { style: { marginTop: '10px' } },
+          selected && h('div', { style: { marginTop: '8px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
             // lowest level: per-task sub navigation (overview / dashboard / sim settings)
             h('div', { className: 'hams-subtabs', role: 'tablist' },
               TASK_VIEWS.map((v) => h('button', {
@@ -1022,6 +1050,27 @@ window.__ModuleLoader__.load({
             h('button', { className: 'hams-btn', disabled: !valid, onClick: () => onCreate(name.trim(), description) }, tr('tasks.create')))))
     }
 
+    // Sidebar embed pass for the report iframe (same-origin by construction —
+    // the report is served from /harnessams/dash/): tighten the report's own
+    // page paddings and scale its content by the DSH font-size ratio, so a
+    // generated report tracks the user's font setting inside the narrow
+    // sidebar instead of showing its authored fixed layout. Best effort — a
+    // cross-origin or odd document just renders unmodified; the ↗ open-in-tab
+    // link bypasses this entirely (full fidelity).
+    function embedReportFrame(frame) {
+      try {
+        const doc = frame?.contentDocument
+        if (!doc || !doc.body || doc.documentElement?.dataset?.hamsEmbed) return
+        doc.documentElement.dataset.hamsEmbed = '1'
+        const style = doc.createElement('style')
+        style.textContent = 'body { padding: 10px 12px !important; margin: 0 !important; }'
+        ;(doc.head ?? doc.documentElement).appendChild(style)
+        const base = parseFloat(getComputedStyle(document.body).fontSize) || 14
+        const ratio = base / 14
+        if (ratio > 1.02 || ratio < 0.98) doc.body.style.zoom = String(ratio)
+      } catch { /* not same-origin / not ready: render as-is */ }
+    }
+
     // Dashboard sub-view: the task's registered local HTML reports. The report
     // list + current selection live in the task store (reports[] /
     // dashboard_selected); files are served read-only from
@@ -1077,6 +1126,7 @@ window.__ModuleLoader__.load({
               className: 'hams-dashframe',
               title: current.name,
               src: dashUrl + '?_r=' + nonce,
+              onLoad: (e) => embedReportFrame(e.target),
             })
           : h('div', { className: 'hams-dash' },
               tr('dash.empty'), ' ',
@@ -1455,7 +1505,7 @@ window.__ModuleLoader__.load({
         ? (active.username ? active.username + '@' : '') + (active.host ?? '') + ':' + (active.port ?? 22)
         : ''
 
-      return h('div', { style: { marginTop: 8 } },
+      return h('div', { style: { marginTop: 8, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
         h('div', { className: 'hams-termtabs', role: 'tablist' },
           machines.map((m) => h('button', {
             key: m.id,
@@ -1466,7 +1516,7 @@ window.__ModuleLoader__.load({
               : tr('term.noSession'),
             onClick: () => setActiveId(m.id),
           }, esc(m.name || m.host)))),
-        active && h('div', null,
+        active && h('div', { style: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
           h('div', { className: 'hams-termhead' },
             h('span', { className: 'hams-termstate ' + (st.status === 'live' ? 'live' : st.status === 'connecting' ? 'busy' : 'dead'),
               title: st.status }),

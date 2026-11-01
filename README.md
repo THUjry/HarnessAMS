@@ -74,7 +74,11 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    to add existing reports to the task, switch them in a dropdown, reload them on
    demand; reports are served read-only from `/harnessams/dash/<taskId>/<reportId>/…`
    with each report's own directory as root so their relative `data/*.js` references
-   keep working, **Terminal** as an interactive remote terminal per dsh-remote machine
+   keep working, the iframe fills the sidebar via a flex height chain and embeds the
+   report compact + scaled to the DSH font-size setting, SmartAnaSim's
+   `sim_report(task=…)` registers generated reports straight into a task, and the
+   sidebar re-bases its writes on a fresh GET so the two writers never clobber each
+   other, **Terminal** as an interactive remote terminal per dsh-remote machine
    (xterm.js over dsh-remote's own `/dsh-remote/term/*` polling PTY routes — no SSH
    layer of our own; a fresh session lands in the machine's remote project root, and
    targeting works by passing one of that machine's live remote-project sessions as

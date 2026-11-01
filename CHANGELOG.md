@@ -5,6 +5,26 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Dashboard report viewer + report-injection coordination (2026-10-30/11-01)**:
+  the task sidebar's Dashboard sub-view shows the task's registered local HTML
+  reports (browse-to-add via a one-level `/api/browse` picker or a manual
+  absolute path, dropdown switch persisted as `dashboard_selected`, `↻` hard
+  reload via the iframe key/nonce, `↗` open-in-tab, `×` unregister). Reports are
+  served read-only from `/harnessams/dash/<taskId>/<reportId>/…` with the
+  report's own directory as the boundary (`src/server/dashboard.js`; MIME by
+  extension — the old blanket `text/html` on `/reports/` silently killed report
+  data scripts). Sizing pass: the sidebar height chain is flex all the way down
+  (`.hams-body` → sub-view → iframe/terminal wrap), killing the
+  `calc(100vh - Npx)` dead zones; the iframe injects a compact style into the
+  same-origin report and scales it by the DSH font-size ratio so a report tracks
+  the user's font setting inside the sidebar. `sim_report(task=…)` (SmartAnaSim)
+  registers generated reports straight into a task's dashboard; to survive that
+  second writer the sidebar's full-list PUT is re-based on a fresh GET, the
+  Dashboard sub-view refetches on activation, and both writers now replace
+  `tasks.json` atomically (tmp + rename).
+
 ### Changed
 
 - **Sidebar localized to local projects + columned check results (2026-10-27)**:
