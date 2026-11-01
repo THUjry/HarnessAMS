@@ -1,6 +1,8 @@
 // HarnessAMS client half — the three-tier UI:
 //   tier 1: global console page ("HarnessAMS" entry in the left sidebar -> full panel):
-//           remote projects (dsh-remote machines + one-click remote-project creation),
+//           first-run guide (centered entry until seen, then a persistent guide button;
+//           five sections chaining the scattered hints into one read), remote projects
+//           (dsh-remote machines + one-click remote-project creation),
 //           digital assets (plotly status + report library), disk usage;
 //   tier 2: project = DSH workspace (a local folder) — no per-session data; every
 //           session of a workspace shares one task list; a workspace inside a
@@ -53,6 +55,22 @@ window.__ModuleLoader__.load({
         'console.infoFailed': 'info 读取失败：{msg}',
         'console.workspace': '工作区：{path}',
         'console.noWorkspace': '未找到 harnessams-workspace — 服务器检查需要 harnessams.json',
+        'guide.btn': '使用引导',
+        'guide.caption': '第一次使用 HarnessAMS？从工作方式、提交作业到报告查看，一条引导走完。',
+        'guide.title': '开始使用 HarnessAMS',
+        'guide.back': '返回',
+        'guide.done': '开始使用',
+        'guide.s1t': '工作方式：本地还是远程',
+        'guide.s1': '本地 — ngspice 本地闭环（装配 → 检查 → 仿真 → 解析 → 报告）；仓库自带 LocalDesignExample（clone 即用），先跑 python check_environment.py 自检。远程 — 先在 dsh-remote 添加机器并选择一次远程工作区（生成镜像），再到本页「远程项目」一键创建远程项目；远程文件的浏览与编辑直接用 dsh-remote 自带功能。',
+        'guide.s2t': '提交作业方式',
+        'guide.s2': '直接提交 — 仿真在本机前台运行（ngspice / spectre 本地扫掠）。bsub — 提交 LSF 队列（bsub_submit / bsub_poll / bsub_fetch，需该机远程项目有活会话）。',
+        'guide.s2slurm': 'slurm —— 暂不支持。',
+        'guide.s3t': '工作区位置',
+        'guide.s3': '本地 — harnessams.json 是唯一路径来源（workspace_root、ngspice、PDK、回收站、脚本目录）。远程 — 镜像目录 ~/.dsh/remote-workspaces/<host>-<user>-<port>/<ws>，插件工具在镜像上原样工作。',
+        'guide.s4t': '仿真插件套件',
+        'guide.s4': 'SmartAnaSim 单包安装即注册全部 14 个工具：ngspice（装配 / 扫掠）、spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、bsub（通用 LSF 提交 / 轮询 / 取回）、共享（收集 / 进度 / 报告 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
+        'guide.s5t': '日常入口速查',
+        'guide.s5': '任务侧栏「概览」— 本机环境检查 + 各机器四项检查（远程检查需该机远程项目有活会话）。「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）。「远程终端」— 机器标签绑定该机活会话。',
         'rproj.title': '远程项目',
         'rproj.dshremoteOk': 'dsh-remote：{n} 台机器',
         'rproj.dshremoteMissing': 'dsh-remote 不可用',
@@ -179,7 +197,7 @@ window.__ModuleLoader__.load({
         'tasks.headerPinOn': 'HarnessAMS 任务 — 已固定：随会话/工作区切换重开',
         'tasks.headerPinOff': 'HarnessAMS 任务 — 打开侧栏（固定以跟随会话切换）',
         'tasks.headerTasks': '任务',
-        'tasks.guideDesc': '项目任务',
+        'tasks.guideDesc': '任务、检查、报告与使用引导',
       },
       en: {
         'common.loading': 'Loading…',
@@ -191,6 +209,22 @@ window.__ModuleLoader__.load({
         'console.infoFailed': 'info failed: {msg}',
         'console.workspace': 'Workspace: {path}',
         'console.noWorkspace': 'harnessams-workspace not found — server checks need harnessams.json',
+        'guide.btn': 'Guide',
+        'guide.caption': 'First time here? One guided pass over working modes, job submission and reports.',
+        'guide.title': 'Get started with HarnessAMS',
+        'guide.back': 'Back',
+        'guide.done': 'Get started',
+        'guide.s1t': 'Working mode: local or remote',
+        'guide.s1': 'Local — the ngspice loop runs on this machine (assemble → check → simulate → parse → report); the repo ships LocalDesignExample (clone and run), starting with the python check_environment.py self-check. Remote — add a machine in dsh-remote and pick a remote workspace once (this creates the mirror), then create the remote project with one click under “Remote projects” on this page; browse and edit remote files with dsh-remote itself.',
+        'guide.s2t': 'Job submission',
+        'guide.s2': 'Direct — the simulation runs on this machine in the foreground (local ngspice / spectre sweeps). bsub — submit to an LSF queue (bsub_submit / bsub_poll / bsub_fetch; needs a live session in that machine’s remote project).',
+        'guide.s2slurm': 'slurm — not supported yet.',
+        'guide.s3t': 'Workspace location',
+        'guide.s3': 'Local — harnessams.json is the single source of paths (workspace_root, ngspice, PDK, trash, script dirs). Remote — the mirror at ~/.dsh/remote-workspaces/<host>-<user>-<port>/<ws>; plugin tools work on the mirror as-is.',
+        'guide.s4t': 'Simulation plugin suites',
+        'guide.s4': 'SmartAnaSim registers all 14 tools on install: ngspice (assemble / sweep), spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), bsub (generic LSF submit / poll / fetch), shared (collect / progress / report / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
+        'guide.s5t': 'Where things live',
+        'guide.s5': 'Task sidebar “Overview” — local environment checks plus four checks per machine (remote checks need a live session in that machine’s remote project). “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in). “Terminal” — machine tabs bind to that machine’s live session.',
         'rproj.title': 'Remote projects',
         'rproj.dshremoteOk': 'dsh-remote: {n} machine(s)',
         'rproj.dshremoteMissing': 'dsh-remote not available',
@@ -317,7 +351,7 @@ window.__ModuleLoader__.load({
         'tasks.headerPinOn': 'HarnessAMS tasks — pinned: reopens on session/workspace switch',
         'tasks.headerPinOff': 'HarnessAMS tasks — open the tab (pin it to follow session switches)',
         'tasks.headerTasks': 'Tasks',
-        'tasks.guideDesc': 'Project tasks',
+        'tasks.guideDesc': 'Tasks, checks, reports and a guide',
       },
     }
 
@@ -425,6 +459,10 @@ window.__ModuleLoader__.load({
 .hams-pre { font-size: calc(11.5px + var(--dsh-content-font-delta, 0px)); white-space: pre-wrap; margin: 4px 0; opacity: .8; overflow: auto; }
 .hams-link { color: inherit; }
 .hams-dim { opacity: .65; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
+/* tier 1 first-run guide: centered entry state + the sectioned guide page */
+.hams-guidecenter { min-height: 70vh; display: flex; align-items: center; justify-content: center; }
+.hams-guidecenter-box { display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; max-width: 560px; }
+.hams-guide-p { line-height: 1.55; margin: 0; }
 /* tier 3: task tab strip (modeled after dsh-ssh-ops' server tab strip) */
 .hams-tabstrip { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 6px 8px 0;
   border-bottom: 1px solid color-mix(in srgb, currentColor 18%, transparent); }
@@ -543,14 +581,38 @@ window.__ModuleLoader__.load({
 
     // ---------- tier 1: global console page ----------
 
+    // First-run flag for the console page guide (global, browser-local — the console
+    // page is not per-project). Same try/catch discipline as STICKY_KEY below.
+    const GUIDE_SEEN_KEY = 'hams-guide-seen'
+    function guideSeenRead() {
+      try { return localStorage.getItem(GUIDE_SEEN_KEY) === '1' } catch { return false }
+    }
+    function guideSeenMark() {
+      try { localStorage.setItem(GUIDE_SEEN_KEY, '1') } catch { /* private mode */ }
+    }
+
     function ConsolePage() {
       const [info, setInfo] = useState(null)
       const [infoErr, setInfoErr] = useState(null)
+      const [showGuide, setShowGuide] = useState(false)
+      const [guideSeen, setGuideSeen] = useState(guideSeenRead)
       useEffect(() => {
         fetchJson(API + '/info').then(setInfo).catch((e) => setInfoErr(String(e.message ?? e)))
       }, [])
+      const openGuide = () => { guideSeenMark(); setGuideSeen(true); setShowGuide(true) }
+      if (showGuide) return h(GuideView, { onClose: () => setShowGuide(false) })
+      // first run: only the centered guide entry — the console sections come after
+      if (!guideSeen) {
+        return h('div', { className: 'hams-page hams-guidecenter' },
+          h('div', { className: 'hams-guidecenter-box' },
+            h('div', { className: 'hams-h1' }, tr('guide.title')),
+            h('div', { className: 'hams-dim' }, tr('guide.caption')),
+            h('button', { className: 'hams-btn', onClick: openGuide }, tr('guide.btn'))))
+      }
       return h('div', { className: 'hams-page' },
-        h('h1', { className: 'hams-h1' }, tr('console.title')),
+        h('div', { className: 'hams-row', style: { margin: '0 0 4px' } },
+          h('h1', { className: 'hams-h1', style: { margin: 0 } }, tr('console.title')),
+          h('button', { className: 'hams-btn hams-btn-sm', style: { marginLeft: 'auto' }, title: tr('guide.title'), onClick: openGuide }, tr('guide.btn'))),
         h('div', { className: 'hams-meta' },
           infoErr ? h('span', { className: 'hams-bad' }, tr('console.infoFailed', { msg: infoErr }))
             : info ? (info.workspace
@@ -560,6 +622,27 @@ window.__ModuleLoader__.load({
         h(Boundary, null, h(RemoteProjectsSection, null)),
         h(Boundary, null, h(AssetsSection, null)),
         h(Boundary, null, h(DiskSection, null)),
+      )
+    }
+
+    // First-run guide (tier 1 console page): five short sections chaining the scattered
+    // per-feature hints into one read. Text only — no state, no requests.
+    function GuideView(props) {
+      const sec = (tk, k, extra) => h('section', { className: 'hams-section' },
+        h('h2', null, tr(tk)),
+        h('p', { className: 'hams-guide-p' }, tr(k)),
+        extra ?? null)
+      return h('div', { className: 'hams-page' },
+        h('div', { className: 'hams-row', style: { margin: '0 0 4px' } },
+          h('h1', { className: 'hams-h1', style: { margin: 0 } }, tr('guide.title')),
+          h('button', { className: 'hams-btn hams-btn-sm', style: { marginLeft: 'auto' }, onClick: props.onClose }, tr('guide.back'))),
+        sec('guide.s1t', 'guide.s1'),
+        sec('guide.s2t', 'guide.s2', h('div', { className: 'hams-faint' }, tr('guide.s2slurm'))),
+        sec('guide.s3t', 'guide.s3'),
+        sec('guide.s4t', 'guide.s4'),
+        sec('guide.s5t', 'guide.s5'),
+        h('div', { className: 'hams-row' },
+          h('button', { className: 'hams-btn', onClick: props.onClose }, tr('guide.done'))),
       )
     }
 
