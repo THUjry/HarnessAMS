@@ -102,9 +102,11 @@ window.__ModuleLoader__.load({
         'chk.colResult': '结果',
         'chk.colElapsed': '耗时',
         'chk.colStatus': '状态',
-        'chk.diagnose': '交给 agent 诊断',
-        'chk.promptCopied': '提示词已复制 — 请粘贴到 DSH 会话中。',
-        'chk.copyPrompt': '请将下面的提示词复制到 DSH 会话：',
+        'chk.analyze': '起会话分析',
+        'chk.analyzing': '正在创建分析会话…',
+        'chk.analyzeDone': '已创建分析会话，请到左侧会话树查看。',
+        'chk.analyzeAuto': '检查发现问题，已自动创建分析会话，请到左侧会话树查看。',
+        'chk.analyzeFail': '创建分析会话失败：',
         'chk.noneYet': '点击按钮运行一项检查。',
         'chk.truncated': '（列表已截断）',
         'chk.rootLegend': '$ROOT = {path}',
@@ -261,9 +263,11 @@ window.__ModuleLoader__.load({
         'chk.colResult': 'Result',
         'chk.colElapsed': 'Elapsed',
         'chk.colStatus': 'Status',
-        'chk.diagnose': 'Diagnose with agent',
-        'chk.promptCopied': 'Prompt copied — paste it into a DSH session.',
-        'chk.copyPrompt': 'Copy the prompt below into a DSH session:',
+        'chk.analyze': 'Analyze in new session',
+        'chk.analyzing': 'Creating the analysis session…',
+        'chk.analyzeDone': 'Analysis session created — see it in the session tree.',
+        'chk.analyzeAuto': 'Problems found — an analysis session was created automatically (see the session tree).',
+        'chk.analyzeFail': 'Failed to create the analysis session: ',
         'chk.noneYet': 'Click a button to run a check.',
         'chk.truncated': '(list truncated)',
         'chk.rootLegend': '$ROOT = {path}',
@@ -387,6 +391,20 @@ window.__ModuleLoader__.load({
       }
     }
     let tr = makeTr()
+    // The DSH-locale-bound translator, kept by wireLocale; effectiveLang() probes it
+    // to learn the language the UI is ACTUALLY rendered in (the DSH Language setting,
+    // not the browser default) — diagnosis sessions ask the agent to answer in it.
+    let boundLocaleTr = null
+    function effectiveLang() {
+      try {
+        if (boundLocaleTr) {
+          const probe = boundLocaleTr('common.sectionFailed')
+          if (probe === L.zh['common.sectionFailed']) return 'zh'
+          if (probe === L.en['common.sectionFailed']) return 'en'
+        }
+      } catch { /* fall back below */ }
+      return ACTIVE_LANG
+    }
     // Called from apply() once the real locale service is reachable; registers
     // both dictionaries and rebinds tr so the client's Language setting wins.
     function wireLocale(ctx) {
@@ -395,6 +413,7 @@ window.__ModuleLoader__.load({
         if (!locale || typeof locale.register !== 'function') return
         const dispose = locale.register(NS, { zh: L.zh, en: L.en })
         const bound = locale.bind(NS)
+        boundLocaleTr = bound
         tr = (key, params) => {
           let text = bound(key, params)
           if (text === key) {
@@ -802,6 +821,11 @@ window.__ModuleLoader__.load({
     // through that remote project's live session (borrowed server-side). Every button
     // runs independently; results replace whatever showed below.
     const REMOTE_CHECK_IDS = ['load', 'jobs', 'batches', 'scripts']
+    // Auto handoff policy (2026-11-01, user decision): remote check failures start a
+    // diagnosis session without a click; local failures only offer the button. A
+    // constant until the behavior gets its settings card — flip to false for
+    // button-only behavior.
+    const AUTO_ANALYZE_REMOTE = true
     const CHECK_TABLES = {
       load: { cols: ['chk.lc.load1', 'chk.lc.load5', 'chk.lc.load15', 'chk.lc.procs', 'chk.lc.cpus'] },
       jobs: { cols: ['chk.jc.jobid', 'chk.jc.stat', 'chk.jc.exec', 'chk.jc.name', 'chk.jc.submit'] },
@@ -839,11 +863,11 @@ window.__ModuleLoader__.load({
     // Results of one run: a local run keeps the classic Item/Result table; a remote
     // run renders one block per entry — head line + columned table (or plain text
     // fallback when the server could not parse rows) + warn/truncation notes.
-    function CheckResults({ run, machines, diagnose }) {
+    function CheckResults({ run, machines }) {
       if (!run.machineId) {
         return h('div', null,
           h('table', { className: 'hams-table' },
-            h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus'), ''].map((c) => h('th', { key: c }, c)))),
+            h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus')].map((c) => h('th', { key: c }, c)))),
             h('tbody', null, (run.results ?? []).map((x, i) => h('tr', { key: i, className: x.ok ? '' : 'hams-rowbad' },
               h('td', { title: x.cmd ?? '' }, esc(x.item)),
               h('td', null,
@@ -851,8 +875,7 @@ window.__ModuleLoader__.load({
                 x.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + esc(x.warn)) : null,
                 x.ok && x.detail ? h('div', { className: 'hams-pre' }, esc(x.detail)) : null),
               h('td', null, x.ms + ' ms'),
-              h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'),
-              h('td', null, x.ok ? null : h('button', { className: 'hams-btn hams-btn-sm', onClick: () => diagnose(x.item) }, tr('chk.diagnose'))))))),
+              h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'))))),
           run.channel && h('div', { className: 'hams-dim' }, esc(run.channel)))
       }
       const m = machines.find((x) => x.id === run.machineId)
@@ -862,8 +885,7 @@ window.__ModuleLoader__.load({
             h('b', null, esc(x.item)),
             h('span', { className: 'hams-dim' }, x.ms + ' ms'),
             h('span', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'),
-            x.warn ? h('span', { className: 'hams-warn' }, '⚠ ' + esc(x.warn)) : null,
-            !x.ok ? h('button', { className: 'hams-btn hams-btn-sm', onClick: () => diagnose(x.item) }, tr('chk.diagnose')) : null),
+            x.warn ? h('span', { className: 'hams-warn' }, '⚠ ' + esc(x.warn)) : null),
           !x.ok && x.detail ? h('div', { className: 'hams-pre' }, esc(x.detail)) : null,
           x.rows && x.rows.length ? h(CheckResultTable, { check: run.check, x })
             : h('div', { className: 'hams-dim' }, esc(x.result || x.detail || '-')),
@@ -898,16 +920,14 @@ window.__ModuleLoader__.load({
           }, running && machineRun && machineRun.id === m.id + ':' + id ? tr('chk.running') : tr('chk.btn.' + id)))))
     }
 
-    function CheckPanel({ info, run, onRun }) {
+    function CheckPanel({ info, run, onRun, analyze, onAnalyze }) {
       const running = run?.status === 'running'
-      const diagnose = (item) => {
-        const t = 'HarnessAMS health-check failure [' + item + '] — please diagnose: read the ' +
-          '/harnessams/api/checks/run results, reproduce the failing command with the rw_* tools ' +
-          "(dsh-remote) in this project's session, and report the conclusion."
-        if (navigator.clipboard?.writeText) navigator.clipboard.writeText(t).then(() => alert(tr('chk.promptCopied')), () => prompt(tr('chk.copyPrompt'), t))
-        else prompt(tr('chk.copyPrompt'), t)
-      }
       const machines = info?.machines ?? []
+      // The failed-entries handoff replaced the old copy-to-clipboard diagnose
+      // button: one run-level button bundles every failed entry of the current
+      // run into a newly created DSH session (analyzeRun in TaskSidebarBody).
+      const hasFailed = run?.status === 'done' && (run.results ?? []).some((x) => x && x.ok === false)
+      const analyzing = analyze?.status === 'running'
       return h('div', { style: { marginTop: '10px' } },
         h('div', { className: 'hams-dim' }, h('b', null, tr('chk.title'))),
         h('div', { className: 'hams-row' },
@@ -923,7 +943,16 @@ window.__ModuleLoader__.load({
           && h('div', { className: 'hams-dim' }, tr(info.machinesTotal ? 'chk.needRemoteProject' : 'rproj.empty')),
         machines.map((m) => h(MachineCheckBlock, { key: m.id, m, run, running, onRun })),
         run?.status === 'failed' && h('div', { className: 'hams-err' }, run.error),
-        run?.status === 'done' && h(CheckResults, { run, machines, diagnose }),
+        run?.status === 'done' && h(CheckResults, { run, machines }),
+        hasFailed && h('div', { className: 'hams-row' },
+          h('button', {
+            className: 'hams-btn hams-btn-sm',
+            disabled: analyzing,
+            title: tr('chk.analyze'),
+            onClick: () => onAnalyze(run, false),
+          }, analyzing ? tr('chk.analyzing') : tr('chk.analyze')),
+          analyze?.status === 'done' && h('span', { className: 'hams-dim' }, analyze.auto ? tr('chk.analyzeAuto') : tr('chk.analyzeDone')),
+          analyze?.status === 'failed' && h('span', { className: 'hams-err' }, tr('chk.analyzeFail') + esc(analyze.error ?? ''))),
         !run && h('div', { className: 'hams-dim' }, tr('chk.noneYet')),
       )
     }
@@ -940,6 +969,7 @@ window.__ModuleLoader__.load({
       const [descDraft, setDescDraft] = useState(null)
       const [checksInfo, setChecksInfo] = useState(null)
       const [checkRun, setCheckRun] = useState(null) // { id, status, results?, channel?, error? }
+      const [analyze, setAnalyze] = useState(null) // { status: 'running'|'done'|'failed', auto, sessionId?, error? }
 
       const projectPath = project?.path ?? null
       const projectRemote = !!project?.remote
@@ -1028,8 +1058,43 @@ window.__ModuleLoader__.load({
             + (mid ? '&machineId=' + encodeURIComponent(mid) : '')
           const r = await fetchJson(API + '/checks/run?' + q)
           setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'done', results: r.results, channel: r.channel })
+          // Auto handoff (path 2, user decision 2026-11-01): a REMOTE check that
+          // ends with failed entries immediately starts a diagnosis session, so
+          // cluster problems never need a manual copy-paste. Local check failures
+          // stay button-only (auto sessions for trivial failures would just burn
+          // tokens). Behavior switch is a constant for now — future: user setting.
+          if (AUTO_ANALYZE_REMOTE && mid && (r.results ?? []).some((x) => x && x.ok === false)) {
+            void analyzeRun({ machineId: mid, check: id, results: r.results }, true)
+          }
         } catch (e) {
           setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'failed', error: String(e.message ?? e), results: null })
+        }
+      }
+
+      // analyzeRun: create the diagnosis session via the host (POST /api/checks/analyze)
+      // with the run's failed entries verbatim; the server assembles the English prompt
+      // (answer-language line per the current UI language) and drives the DSH session
+      // controller. auto=true marks the automatic trigger for the result message.
+      const analyzeRun = async (run, auto) => {
+        const failed = (run.results ?? []).filter((x) => x && x.ok === false)
+        if (!failed.length || !sessionId) return
+        setAnalyze({ status: 'running', auto })
+        try {
+          const r = await fetchJson(API + '/checks/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId,
+              check: run.check,
+              machineId: run.machineId ?? null,
+              lang: effectiveLang(),
+              auto: !!auto,
+              failed,
+            }),
+          })
+          setAnalyze({ status: 'done', auto, sessionId: r.sessionId, title: r.title })
+        } catch (e) {
+          setAnalyze({ status: 'failed', auto, error: String(e.message ?? e) })
         }
       }
 
@@ -1129,7 +1194,7 @@ window.__ModuleLoader__.load({
               h('div', { className: 'hams-row' },
                 h('b', null, selected.name),
                 h('span', { className: 'hams-dim' }, selected.created_at ? selected.created_at.slice(0, 10) : '')),
-              checksInfo && h(CheckPanel, { info: checksInfo, run: checkRun, onRun: runCheck }),
+              checksInfo && h(CheckPanel, { info: checksInfo, run: checkRun, onRun: runCheck, analyze, onAnalyze: analyzeRun }),
               h('div', { className: 'hams-taskdesc' },
                 h('textarea', {
                   className: 'hams-textarea',
