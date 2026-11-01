@@ -79,6 +79,42 @@ test('assets: plotly status reflects the shipped file', async () => {
   assert.ok(st.plotly.bytes > 4_000_000)
 })
 
+test('assets: bounded workspace scan lists stray vendored copies', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'hams-assets-'))
+  try {
+    await mkdir(path.join(root, 'assets'), { recursive: true })
+    await mkdir(path.join(root, 'demo1', 'Analysis'), { recursive: true })
+    await mkdir(path.join(root, '.trash'), { recursive: true })
+    await mkdir(path.join(root, 'node_modules', 'pkg'), { recursive: true })
+    await mkdir(path.join(root, 'a', 'b', 'c', 'd', 'e', 'f', 'g'), { recursive: true })
+    const body = 'x'.repeat(1000)
+    await writeFile(path.join(root, 'assets', 'plotly.min.js'), body)
+    await writeFile(path.join(root, 'demo1', 'Analysis', 'xterm.js'), body)
+    await writeFile(path.join(root, '.trash', 'xterm.js'), body) // dot dir: skipped
+    await writeFile(path.join(root, 'node_modules', 'pkg', 'plotly.min.js'), body) // node_modules: skipped
+    await writeFile(path.join(root, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'plotly.min.js'), body) // beyond maxDepth: skipped
+    await writeFile(path.join(root, 'assets', 'not-an-asset.js'), body) // other names: ignored
+
+    const st = assetsStatus(root)
+    assert.equal(st.packages.length, 4, 'exactly the vendored .js set is listed')
+    const byFile = new Map(st.packages.map((p) => [p.file, p]))
+    assert.equal(byFile.get('plotly.min.js').copies.length, 1)
+    assert.ok(byFile.get('plotly.min.js').copies[0].path.endsWith(path.join('assets', 'plotly.min.js')))
+    assert.equal(byFile.get('plotly.min.js').copies[0].bytes, 1000)
+    assert.equal(byFile.get('xterm.js').copies.length, 1)
+    assert.ok(byFile.get('xterm.js').copies[0].path.includes(path.join('demo1', 'Analysis')))
+    assert.equal(byFile.get('xterm-addon-fit.js').copies.length, 0)
+    for (const p of st.packages) {
+      assert.equal(p.license, 'MIT')
+      assert.ok(p.pkg && p.pkg.bytes > 0, 'the package copy itself must be listed')
+      assert.equal(p.url, '/harnessams/assets/' + p.file)
+    }
+    // no workspace root: no scan, empty copy lists, no throw
+    const bare = assetsStatus()
+    assert.ok(bare.packages.every((p) => p.copies.length === 0))
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
+
 // ---- dsh-remote machine channel ----
 
 const RW_MACHINES_TEXT = [

@@ -2,8 +2,9 @@
 //   tier 1: global console page ("HarnessAMS" entry in the left sidebar -> full panel):
 //           first-run guide (centered entry until seen, then a persistent guide button;
 //           five sections chaining the scattered hints into one read), remote projects
-//           (dsh-remote machines + one-click remote-project creation),
-//           digital assets (plotly status + report library), disk usage;
+//           (dsh-remote machines + one-click remote-project creation), digital assets
+//           (vendored .js packages with licenses + package/workspace copy locations),
+//           disk usage;
 //   tier 2: project = DSH workspace (a local folder) — no per-session data; every
 //           session of a workspace shares one task list; a workspace inside a
 //           dsh-remote mirror is a REMOTE PROJECT and renders NO sidebar (connection
@@ -135,8 +136,13 @@ window.__ModuleLoader__.load({
         'assets.plotlyOk': 'plotly.min.js 已就绪 — {size}',
         'assets.plotlyMissing': '缺少 plotly 资产',
         'assets.openAsset': '打开资产',
-        'assets.sharedCopy': '离线报告渲染共用这一份副本（MIT，见 THIRD_PARTY_NOTICES.md）。',
-        'assets.sweepReports': '扫描报告：',
+        'assets.notices': '第三方声明',
+        'assets.colPkg': '包',
+        'assets.colLicense': '协议',
+        'assets.colPkgCopy': '随包副本',
+        'assets.colRoute': '服务路由',
+        'assets.colWsCopies': '工作区副本',
+        'assets.noCopies': '（工作区无副本）',
         'disk.title': '磁盘占用（本地工作区）',
         'disk.refresh': '刷新占用',
         'disk.colDir': '目录',
@@ -289,8 +295,13 @@ window.__ModuleLoader__.load({
         'assets.plotlyOk': 'plotly.min.js served — {size}',
         'assets.plotlyMissing': 'plotly asset missing',
         'assets.openAsset': 'open asset',
-        'assets.sharedCopy': 'Offline report rendering shares this single copy (MIT, see THIRD_PARTY_NOTICES.md).',
-        'assets.sweepReports': 'Sweep reports:',
+        'assets.notices': 'third-party notices',
+        'assets.colPkg': 'Package',
+        'assets.colLicense': 'License',
+        'assets.colPkgCopy': 'Package copy',
+        'assets.colRoute': 'Served at',
+        'assets.colWsCopies': 'Workspace copies',
+        'assets.noCopies': '(no workspace copies)',
         'disk.title': 'Disk usage (local workspace)',
         'disk.refresh': 'Refresh usage',
         'disk.colDir': 'Directory',
@@ -700,16 +711,15 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // Digital assets (tier 1): which .js packages the plugin vendors (with their
+    // licenses), the served package copy, and where stray copies live in the
+    // workspace. Reports are NOT listed here — they live in the task dashboard.
     function AssetsSection() {
       const [assets, setAssets] = useState(null)
-      const [dirs, setDirs] = useState(null)
       const [err, setErr] = useState(null)
       useEffect(() => {
         fetchJson(API + '/assets').then(setAssets).catch((e) => setErr(String(e.message ?? e)))
-        fetchJson(API + '/dirs').then(setDirs).catch((e) => setErr(String(e.message ?? e)))
       }, [])
-      const reports = []
-      for (const d of dirs?.demos ?? []) for (const f of d.reports ?? []) reports.push(d.name + '/Analysis/' + f)
       return h('section', { className: 'hams-section' },
         h('h2', null, tr('assets.title')),
         err && h('div', { className: 'hams-err' }, err),
@@ -717,14 +727,23 @@ window.__ModuleLoader__.load({
           assets?.plotly?.available
             ? h('span', { className: 'hams-badge hams-badge-good' }, tr('assets.plotlyOk', { size: fmtBytes(assets.plotly.bytes) }))
             : h('span', { className: 'hams-badge hams-badge-bad' }, tr('assets.plotlyMissing')),
-          assets?.plotly?.available && h('a', { className: 'hams-link', href: assets.plotly.url, target: '_blank' }, tr('assets.openAsset')),
+          h('a', { className: 'hams-link hams-dim', href: '/harnessams/assets/THIRD_PARTY_NOTICES.md', target: '_blank' }, tr('assets.notices')),
         ),
-        h('div', { className: 'hams-dim' }, tr('assets.sharedCopy')),
-        h('div', { style: { marginTop: '8px' } },
-          h('div', { className: 'hams-dim' }, tr('assets.sweepReports')),
-          reports.length === 0 && h('div', { className: 'hams-dim' }, tr('common.none')),
-          reports.map((r) => h('div', { key: r },
-            h('a', { className: 'hams-link', href: '/harnessams/reports/' + r.split('/').map(encodeURIComponent).join('/'), target: '_blank' }, r))),
+        assets?.packages?.length > 0 && h('table', { className: 'hams-table' },
+          h('thead', null, h('tr', null,
+            [tr('assets.colPkg'), tr('assets.colLicense'), tr('assets.colPkgCopy'), tr('assets.colRoute'), tr('assets.colWsCopies')].map((c) => h('th', null, c)))),
+          h('tbody', null, assets.packages.map((p) => h('tr', { key: p.file },
+            h('td', null, esc(p.file), h('div', { className: 'hams-dim' }, p.label)),
+            h('td', null, p.license),
+            h('td', null,
+              p.pkg
+                ? [esc(p.pkg.path), h('div', { className: 'hams-dim' }, fmtBytes(p.pkg.bytes))]
+                : h('span', { className: 'hams-warn' }, tr('assets.plotlyMissing'))),
+            h('td', null, h('a', { className: 'hams-link', href: p.url, target: '_blank' }, tr('assets.openAsset'))),
+            h('td', null,
+              !p.copies?.length
+                ? h('span', { className: 'hams-dim' }, tr('assets.noCopies'))
+                : p.copies.map((c) => h('div', { key: c.path, title: c.path }, esc(c.path), ' — ', fmtBytes(c.bytes))))))),
         ),
       )
     }
