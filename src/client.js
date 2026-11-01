@@ -851,23 +851,35 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [projectPath, sessionId, projectRemote])
 
-      // The Dashboard sub-view picks up external writes on activation: sim_report's
-      // report injection appends to tasks.json behind the sidebar's back, and
-      // switching to the tab is the natural moment to reload (skipped while a
-      // persist is in flight, so a just-applied optimistic update is never
-      // flashed over by a stale list).
+      // The Dashboard sub-view stays live while visible (auto-refresh, 2026-11-01
+      // 方案B): sim_analysis(report=true, task=…) appends to tasks.json behind the
+      // sidebar's back, so poll the store every 10 s while the sub-view is open
+      // and the tab visible; persist-in-flight ticks are skipped so a just-applied
+      // optimistic update is never flashed over by a stale list, and the list
+      // state is only touched when the server copy actually differs.
       useEffect(() => {
-        if (view !== 'dashboard' || !projectPath || !sessionId || projectRemote || persistingRef.current) return
+        if (view !== 'dashboard' || !projectPath || !sessionId || projectRemote) return
         let alive = true
-        fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId))
-          .then((d) => {
-            if (!alive) return
-            const fresh = d.tasks ?? []
-            setTasks(fresh)
-            setSelectedId((prev) => fresh.some((t) => t.id === prev) ? prev : (fresh[0]?.id ?? null))
-          })
-          .catch(() => { /* keep the current list */ })
-        return () => { alive = false }
+        const refetch = () => {
+          if (!alive || persistingRef.current) return
+          fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId))
+            .then((d) => {
+              if (!alive) return
+              const fresh = d.tasks ?? []
+              setTasks((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh))
+              setSelectedId((prev) => fresh.some((t) => t.id === prev) ? prev : (fresh[0]?.id ?? null))
+            })
+            .catch(() => { /* keep the current list */ })
+        }
+        const timer = setInterval(() => { if (!document.hidden) refetch() }, 10_000)
+        const onVisible = () => { if (!document.hidden) refetch() }
+        document.addEventListener('visibilitychange', onVisible)
+        refetch()
+        return () => {
+          alive = false
+          clearInterval(timer)
+          document.removeEventListener('visibilitychange', onVisible)
+        }
       }, [view, projectPath, sessionId, projectRemote])
 
       // Overview check surface (local projects: local environment + per-machine
@@ -1078,6 +1090,10 @@ window.__ModuleLoader__.load({
     // root, so the document's relative references (data/*.js, images) keep
     // working inside the iframe. Refresh remounts the iframe via the key/nonce
     // (a plain location.reload is unreliable across same-origin documents).
+    // Auto-refresh (2026-11-01 方案B): the sub-view polls the store (parent
+    // effect) and this component polls the current report's /api/report-stat —
+    // a regenerated document (mtime/size change) reloads through the nonce,
+    // so an externally re-run sim_analysis shows up without a manual ↻.
     function TaskDashboard({ task, updateTask }) {
       const [nonce, setNonce] = useState(0)
       const [dialogOpen, setDialogOpen] = useState(false)
@@ -1086,6 +1102,37 @@ window.__ModuleLoader__.load({
         ? task.dashboard_selected
         : (reports[0]?.id ?? null)
       const current = reports.find((r) => r.id === selectedId) ?? null
+
+      // Report-document freshness poll: 10 s while visible, paused when the
+      // tab is hidden (visibilitychange catches up on return). The first sample
+      // after a mount/report switch only records the baseline — a freshly
+      // loaded document is never reloaded.
+      const statRef = useRef(null)
+      useEffect(() => {
+        statRef.current = null
+        if (!current) return
+        let alive = true
+        const check = () => {
+          if (!alive || document.hidden) return
+          fetchJson(API + '/report-stat?taskId=' + encodeURIComponent(task.id)
+            + '&reportId=' + encodeURIComponent(current.id))
+            .then((r) => {
+              if (!alive) return
+              const token = r.mtime_ms + ':' + r.size
+              if (statRef.current != null && statRef.current !== token) setNonce((n) => n + 1)
+              statRef.current = token
+            })
+            .catch(() => { /* report removed / server busy: keep the current render */ })
+        }
+        const timer = setInterval(check, 10_000)
+        const onVisible = () => { if (!document.hidden) check() }
+        document.addEventListener('visibilitychange', onVisible)
+        return () => {
+          alive = false
+          clearInterval(timer)
+          document.removeEventListener('visibilitychange', onVisible)
+        }
+      }, [current?.id, task.id])
 
       const addReport = (absPath, name) => {
         // Client-generated id (same shape the server assigns) so adding +

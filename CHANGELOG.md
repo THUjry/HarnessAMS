@@ -5,6 +5,20 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — 2026-11-01 (Dashboard auto-refresh, 方案B)
+
+- **The Dashboard sub-view auto-refreshes while visible** (session_04b668d1
+  option B): the parent task view polls `/api/tasks` every 10 s while the
+  Dashboard sub-view is open (skipping persist-in-flight ticks, only touching
+  state on an actual diff, paused on `document.hidden` with a visibilitychange
+  catch-up), so externally registered reports (`sim_analysis(report=true,
+  task=…)`) appear in the dropdown — including a switched `dashboard_selected`.
+  `TaskDashboard` additionally polls the current report's new
+  `GET /api/report-stat?taskId&reportId` (`src/server/dashboard.js` resolution
+  + `fs.stat`; the generator rewrites the HTML every run, so mtime+size is a
+  sufficient freshness token) and reloads the iframe through the existing
+  key/nonce when it changes. Zero new UI strings; the manual ↻ stays.
+
 ### Changed — 2026-11-01 (analysis tool merge)
 
 - **`sim_collect` + `sim_report` merged into `sim_analysis`**; `sim_trash`

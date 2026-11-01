@@ -247,6 +247,21 @@ async function handle(req, res, ctx) {
     json(200, { ok: true, project, ...(await readTasks(project.path)) })
     return
   }
+  if (route === '/api/report-stat') {
+    // Change signal for the Dashboard auto-refresh poll (session_04b668d1 方案B):
+    // mtime + size of the report document. The generator rewrites the HTML on
+    // every run, so the document stat alone is a sufficient freshness token —
+    // no body fetch. Resolution mirrors /dash (opaque ids, no secrets).
+    const taskId = url.searchParams.get('taskId')
+    const reportId = url.searchParams.get('reportId')
+    if (!taskId || !reportId) { json(400, { error: 'taskId and reportId are required' }); return }
+    const hit = await resolveReportFile(ctx.workspaceRegistry, taskId, reportId, '')
+    if (hit.error) { json(hit.code ?? 404, { error: hit.error }); return }
+    const st = await fsp.stat(hit.abs).catch(() => null)
+    if (!st || !st.isFile()) { json(404, { error: 'not found' }); return }
+    json(200, { ok: true, mtime_ms: Math.round(st.mtimeMs), size: st.size })
+    return
+  }
   if (route.startsWith('/dash/')) {
     // Task-attached dashboard reports: /dash/<taskId>/<reportId>/<rel…> (empty
     // rel = the report document itself). rel resolves against the report's own

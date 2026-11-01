@@ -1,6 +1,7 @@
 // Unit tests for the Dashboard viewer surface: task-attached report store
 // (project.js reports[]/dashboard_selected), report file resolution + MIME
-// (dashboard.js), and the add-report directory browser.
+// (dashboard.js), the add-report directory browser, and the /api/report-stat
+// auto-refresh endpoint (route-level, through the apply()-registered handler).
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -9,6 +10,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { writeTasks, readTasks } from '../src/server/project.js'
 import { mimeFor, resolveReportFile, browseDir } from '../src/server/dashboard.js'
+import { apply } from '../src/index.js'
 
 test('dashboard: MIME by extension (a blanket text/html kills data/*.js scripts)', () => {
   assert.equal(mimeFor('r.html'), 'text/html; charset=utf-8')
@@ -85,6 +87,45 @@ test('dashboard: resolveReportFile finds the task store and bounds rel to the re
     assert.equal(miss.code, 404)
     const noRegistry = await resolveReportFile(null, 'task-r4', 'rep-1', '')
     assert.equal(noRegistry.code, 503)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('dashboard: /api/report-stat answers the report mtime+size for the auto-refresh poll', async () => {
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-dash-stat-'))
+  try {
+    const htmlPath = path.join(ws, 'demo', 'Analysis', 'r.html')
+    await mkdir(path.dirname(htmlPath), { recursive: true })
+    await writeFile(htmlPath, '<html></html>')
+    await writeTasks(ws, [{ id: 'task-stat', name: 's', reports: [{ id: 'rep-1', path: htmlPath }] }])
+
+    const routes = []
+    await apply({
+      effect: (fn) => { fn() },
+      webServer: { register: (r) => routes.push(r) },
+      workspaceRegistry: { list: () => [{ path: ws }] },
+      tools: { register: () => {} },
+    })
+    const handler = routes[0].handler
+
+    const call = async (query) => {
+      const res = { code: 0, body: '', writeHead(c) { this.code = c }, end(b) { this.body = b } }
+      handler({ method: 'GET', url: 'http://127.0.0.1/harnessams/api/report-stat' + query }, res)
+      // the route handler fire-and-forgets its async work — give it a macrotask
+      for (let i = 0; i < 50 && res.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
+      return { code: res.code, body: res.body ? JSON.parse(res.body) : null }
+    }
+
+    const ok = await call('?taskId=task-stat&reportId=rep-1')
+    assert.equal(ok.code, 200)
+    assert.equal(ok.body.ok, true)
+    assert.equal(typeof ok.body.mtime_ms, 'number')
+    assert.equal(ok.body.size, '<html></html>'.length)
+
+    // missing params / unknown ids keep the 4xx contract
+    assert.equal((await call('?taskId=task-stat')).code, 400)
+    assert.equal((await call('?taskId=task-stat&reportId=nope')).code, 404)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

@@ -77,4 +77,8 @@ test('client half: syntax valid and registers the three tiers', async () => {
   }
   assert.ok(src.includes("sidebarRightTabs"), 'client must register the right-sidebar tab')
   assert.ok(src.includes("sessionId"), 'task body must consume sessionId props')
+  // Dashboard auto-refresh (2026-11-01 方案B): store poll + report-stat poll
+  assert.ok(src.includes('/report-stat'), 'TaskDashboard must poll /api/report-stat')
+  assert.ok(src.includes('setInterval'), 'auto-refresh must poll on an interval')
+  assert.ok(src.includes('visibilitychange'), 'polling must pause/resume on tab visibility')
 })
