@@ -81,4 +81,9 @@ test('client half: syntax valid and registers the three tiers', async () => {
   assert.ok(src.includes('/report-stat'), 'TaskDashboard must poll /api/report-stat')
   assert.ok(src.includes('setInterval'), 'auto-refresh must poll on an interval')
   assert.ok(src.includes('visibilitychange'), 'polling must pause/resume on tab visibility')
+  // Sub-view persistence (2026-11-01): the DSH host remounts the sidebar slot
+  // body around agent tool cards, so the selection must live outside React state
+  assert.ok(src.includes('hams-task-view'), 'sub-view choice must persist via localStorage')
+  assert.ok(src.includes('rememberTaskView'), 'view switch must write the persisted choice')
+  assert.ok(src.includes('useState(readTaskView)'), 'TaskSidebarBody must restore the persisted view on mount')
 })
