@@ -6,7 +6,9 @@
 //            store at <workspace>/.harnessams/tasks.json; a workspace inside a
 //            dsh-remote mirror is a REMOTE PROJECT (remote.js) and gets NO sidebar;
 //   tier 3 (task sidebar, local projects only) — the task store API plus the Overview
-//            health-check buttons, consumed per active session.
+//            health-check buttons, consumed per active session; failed checks can be
+//            handed to a newly created diagnosis session (POST /api/checks/analyze,
+//            diagnose.js — private surface over the DSH session controller).
 // Routes are not token-gated by the DSH web server (verified 2026-10-25): only local
 // management reads/writes live here — no credentials, no remote-execution passthrough.
 // The Dashboard viewer is display-only: it serves task-registered local HTML reports
@@ -34,6 +36,7 @@ import { localDiskUsage, workspaceDirs } from './server/disk.js'
 import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty } from './server/project.js'
 import { remoteMachinesStatus, fetchMachines, sessionInMirror } from './server/machines.js'
 import { remoteProjectFor, checkMachinesForLocal, findRemoteProjectForMachine, createRemoteProject } from './server/remote.js'
+import { buildDiagnosisPrompt, createDiagnosisSession } from './server/diagnose.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { registerTools } from './tool.js'
@@ -122,7 +125,56 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, ...r })
       return
     }
-    json(405, { error: 'GET only (PUT /api/tasks, POST /api/remote-project)' })
+    if (req.method === 'POST' && route === '/api/checks/analyze') {
+      // Hand failed check entries to a newly created DSH session (the private
+      // replacement of the old copy-to-clipboard diagnose button). The client
+      // sends what it already rendered; nothing is re-run here. Remote checks
+      // anchor the session to the machine's remote-project workspace so the
+      // diagnosis agent's cwd binds dsh-remote's rw_* tools to that machine;
+      // local checks anchor to the current project's own workspace.
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const sessionId = body?.sessionId
+      const check = body?.check
+      const machineId = body?.machineId ?? null
+      const lang = body?.lang === 'zh' ? 'zh' : 'en'
+      if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
+      if (check !== 'local' && !REMOTE_CHECK_BUTTONS.some((b) => b.id === check)) {
+        json(400, { error: `unknown check: ${check} (buttons: ${REMOTE_CHECK_BUTTONS.map((b) => b.id).join(', ')}, local)` })
+        return
+      }
+      if (!Array.isArray(body?.failed) || !body.failed.length) { json(400, { error: 'missing or empty failed entries' }); return }
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      if (remoteProjectFor(project.path)) { json(400, { error: 'checks run from a local project — the sidebar is disabled inside remote projects' }); return }
+      let workspaceId, machine = null, remotePath, mirrorDir
+      if (machineId) {
+        const list = await fetchMachines(ctx.tools, req)
+        if (!list.ok) { json(503, { error: `dsh-remote machines unavailable: ${list.reason}` }); return }
+        machine = list.machines.find((m) => m.id === machineId || m.name === machineId)
+        if (!machine) { json(404, { error: `no such dsh-remote machine: ${machineId}` }); return }
+        const hit = findRemoteProjectForMachine(ctx, machine)
+        if (!hit) {
+          json(409, { error: `no remote project for machine ${machine.name ?? machine.host} — create one from the HarnessAMS console page first` })
+          return
+        }
+        workspaceId = hit.ws.id
+        remotePath = hit.rp.remotePath
+        mirrorDir = hit.rp.mirrorDir
+      } else {
+        const w = (typeof ctx.workspaceRegistry?.list === 'function' ? ctx.workspaceRegistry.list() : [])
+          .find((x) => x?.path === project.path)
+        if (!w?.id) { json(409, { error: 'the current project workspace is not registered in workspaceRegistry' }); return }
+        workspaceId = w.id
+      }
+      const prompt = buildDiagnosisPrompt({ check, machine, remotePath, mirrorDir, projectTitle: project.title, failed: body.failed, lang, auto: body?.auto === true })
+      const title = 'HarnessAMS diagnosis: ' + check + ' @ ' + (machine ? (machine.name || machine.host) : 'local')
+      const r = await createDiagnosisSession(ctx, { workspaceId, title, prompt })
+      if (r.error) { json(r.sessionId ? 502 : 503, { error: r.error, ...(r.sessionId ? { sessionId: r.sessionId } : {}) }); return }
+      json(200, { ok: true, sessionId: r.sessionId, title })
+      return
+    }
+    json(405, { error: 'GET only (PUT /api/tasks, POST /api/remote-project, POST /api/checks/analyze)' })
     return
   }
 
@@ -208,7 +260,8 @@ async function handle(req, res, ctx) {
     return
   }
   if (route === '/api/assets') {
-    json(200, { ok: true, ...assetsStatus() })
+    // the workspace root drives the bounded copy scan in the response
+    json(200, { ok: true, ...assetsStatus(ws ? ws.config.workspace_root : null) })
     return
   }
   if (route === '/api/disk') {
