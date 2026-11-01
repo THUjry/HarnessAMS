@@ -795,6 +795,27 @@ window.__ModuleLoader__.load({
       { id: 'sim', labelKey: 'tasks.viewSim' },
     ]
 
+    // The DSH host occasionally remounts the sidebar slot body mid-conversation
+    // (observed when agent tool cards render), which resets React state and used
+    // to snap the sub-view back to overview. Keep the last selection outside the
+    // component (module memory + localStorage) so a remount — or a page refresh
+    // — reopens the same sub-view.
+    const TASK_VIEW_KEY = 'hams-task-view'
+    const isValidTaskView = (v) => TASK_VIEWS.some((t) => t.id === v)
+    let taskViewMemory = null
+    function readTaskView() {
+      if (taskViewMemory) return taskViewMemory
+      try {
+        const v = localStorage.getItem(TASK_VIEW_KEY)
+        if (isValidTaskView(v)) { taskViewMemory = v; return v }
+      } catch { /* private mode */ }
+      return 'overview'
+    }
+    function rememberTaskView(v) {
+      taskViewMemory = v
+      try { localStorage.setItem(TASK_VIEW_KEY, v) } catch { /* private mode */ }
+    }
+
     // Overview health-check panel (LOCAL projects): one local-environment button plus
     // one block per machine that has a remote project — its four check buttons run
     // through that remote project's live session (borrowed server-side). Every button
@@ -942,7 +963,7 @@ window.__ModuleLoader__.load({
       const [reason, setReason] = useState(null)
       const [tasks, setTasks] = useState([])
       const [selectedId, setSelectedId] = useState(null)
-      const [view, setView] = useState('overview')
+      const [view, setView] = useState(readTaskView)
       const [error, setError] = useState(null)
       const [dialogOpen, setDialogOpen] = useState(false)
       const [descDraft, setDescDraft] = useState(null)
@@ -1167,7 +1188,7 @@ window.__ModuleLoader__.load({
                 className: 'hams-subtab' + (view === v.id ? ' active' : ''),
                 role: 'tab',
                 'aria-selected': view === v.id,
-                onClick: () => setView(v.id),
+                onClick: () => { rememberTaskView(v.id); setView(v.id) },
               }, tr(v.labelKey)))),
             view === 'overview' && h('div', null,
               h('div', { className: 'hams-row' },
