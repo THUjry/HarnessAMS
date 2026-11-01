@@ -8,8 +8,8 @@
 
 | Plugin | npm package | row id | Responsibility | Stage | Status |
 |---|---|---|---|---|---|
-| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (remote projects, digital assets, disk usage), project = DSH workspace, per-project task sidebar with health checks | stage 1 | implemented (this repo, `src/`) |
-| HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local ngspice channel, code-driven netlist assembly (hard PDK isolation), HTML reports | stage 1 | implemented (separate repo) |
+| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (remote projects, digital assets, disk usage), project = DSH workspace, per-project task sidebar with health checks; the generic remote batch channel (`bsub_*`, worker tree from the workspace `sim_scripts_dir`) and the simulator-agnostic analysis tools (`sim_collect`/`sim_progress`/`sim_report`/`sim_trash`) | stage 1 | implemented (this repo, `src/`) |
+| HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local ngspice and Spectre channels (code-driven netlist assembly with hard PDK isolation), PSF parsing, S-parameter reading/extraction — simulator-specific code only | stage 1 | implemented (separate repo) |
 | HarnessAMS-SmartPostLayout | (repo in stage 2) | `harnessams-smart-post-layout` | One-click post-layout simulation | stage 2 | not started |
 | HarnessAMS-aligner | (repo in stage 3) | `harnessams-aligner` | Multi-level alignment | stage 3 | not started |
 
@@ -17,10 +17,13 @@
 
 ```
 src/                     dsh-harnessams — console plugin package:
-                         index.js (host-half routes, plain JS, no build chain),
+                         index.js (host-half routes + model-tool registration, plain JS, no build chain),
                          server/ (host-half modules: workspace/checks/disk/project/machines/remote/assets),
+                         tools/ + tool.js/py.js/bsub.js/remote.js (generic batch + analysis model
+                         tools, moved from SmartAnaSim 2026-11-01),
                          client.js (browser half — single-file classic script on window.__ModuleLoader__),
-                         assets/ (plotly.min.js + the vendored xterm bundle + THIRD_PARTY_NOTICES), scripts/ (shipped developer utilities)
+                         assets/ (plotly.min.js + the vendored xterm bundle + THIRD_PARTY_NOTICES),
+                         scripts/ (generic analysis Python: collect/report/trash under common/)
 install_suite/           dsh-harnessams-suite — aggregate bundle (pure patch package)
 tests/                   unit tests (bare node --test, from the repo root)
 docs/                    plugin index, compatibility matrix
@@ -117,7 +120,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
 
 | Package | Ships beyond the entry JS | Deliberately NOT shipped |
 |---|---|---|
-| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/` (developer utilities shipped with the package — currently a placeholder README) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
+| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 7 model tools: `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_collect`/`sim_progress`/`sim_report`/`sim_trash`); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (4 `.py`: the analysis pipeline collect/report/trash + a byte-identical `common_workspace.py` copy) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
 The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite
@@ -134,8 +137,10 @@ external downloads:
 LocalDesignExample/
   ngspice-47-portable/   ngspice_con.exe + runtime DLLs (Windows x64; see its README)
   sky130/                fossi sky130_fd_pr minimal model closure (combined_models + cells) + LICENSE
-  tools/                 verbatim copies of the SmartAnaSim pipeline scripts (common/ + ngspice/;
-                         keep in sync with the plugin version)
+  tools/                 verbatim pipeline-script copies, dual-source since the 2026-11-01
+                         redistribution (common/ collect/report/trash/workspace from this repo's
+                         src/scripts/common/, common/ units/engine + ngspice/ from SmartAnaSim's
+                         scripts/; keep byte-identical with the sources)
   harnessams.json        workspace config with paths relative to this file (works from any clone location)
   check_environment.py   self-check: runs the bundled ngspice on a minimal sky130 netlist and audits the assets
   demo1/, demo2/         demo project placeholders (content lands with the demo milestones)
@@ -212,7 +217,7 @@ Everything ships as plain source: the plugin entries are plain-JS ESM loaded dir
 | Kind | Location | Edit takes effect |
 |---|---|---|
 | Per-project assembly/analysis scripts (yours to own) | workspace: `<workspace>/<demo>/script/analysis/*.py` (e.g. `gen_ota5t.py`) | next run |
-| Framework scripts shipped with the plugin | SmartAnaSim package dir, e.g. `~/.dsh/profiles/web/node_modules/dsh-harnessams-smart-ana-sim/scripts/` (`sweep_worker_ngspice.py`, `checks.py`, `collect_results.py`, `gen_sweep_report.py`, `trash.py`) | next run |
+| Framework scripts shipped with the plugins | simulator scripts: SmartAnaSim package dir `scripts/` (or the workspace `sim_scripts_dir`); analysis scripts (collect/report/trash): this package's `src/scripts/common/` | next run |
 | Bundled example copies | this repo: `LocalDesignExample/tools/{common,ngspice}/*.py` — verbatim copies of the plugin scripts above; re-sync when the plugin updates | next run |
 | Plugin JS entries (`src/index.js` + `src/client.js` here, `src/index.js` in SmartAnaSim) | dev-mount: the repo's own `src/` (your edit is the source); installed: `node_modules/<package>/src/` | after restarting that DSH instance |
 

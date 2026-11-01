@@ -19,11 +19,14 @@ Checklist (per package, run from the package directory):
 2. Package content check (must-contain AND must-not-contain)
    - `dsh-harnessams` (run in `src/`) must contain exactly: `index.js`, `client.js` (the
      browser half — combo-loaded classic script, single file), `server/` (host-half
-     modules), `cordis.patch.yml`, `assets/` (`plotly.min.js` about 4.6 MB + the vendored
+     modules), `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 7 model tools:
+     `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_collect`/`sim_progress`/`sim_report`/
+     `sim_trash`), `cordis.patch.yml`, `assets/` (`plotly.min.js` about 4.6 MB + the vendored
      xterm bundle — `xterm.js`, `xterm.css`, `xterm-addon-fit.js`, `xterm-addon-search.js`
      — + `THIRD_PARTY_NOTICES.md`; the Plotly and xterm attributions travel with the
-     assets), `scripts/` (currently a placeholder README only), plus `package.json` (npm
-     always includes it).
+     assets), `scripts/common/` (4 `.py`: `common_collect_results.py`,
+     `common_gen_sweep_report.py`, `common_trash.py` + a byte-identical
+     `common_workspace.py` copy), plus `package.json` (npm always includes it).
    - Must NOT contain: `LocalDesignExample/` (the ~21 MB vendored simulation environment —
      the biggest leak risk), `docs/`, `tests/`, `install_suite/`, `.gitattributes`, or the
      repo-root README/AGENTS/CHANGELOG (running from `src/` keeps them out).
@@ -33,7 +36,7 @@ Checklist (per package, run from the package directory):
    - `npm publish` from the package directory.
 4. Post-publish verification
    - `dsh plugin --profile web add <package>`, restart the profile (`dsh --profile web`),
-     confirm the console routes / tools register (`--dump-config` shows the rows).
+     confirm the console routes / the 7 tools register (`--dump-config` shows the rows).
    - Verifying the remote-project routes additionally requires dsh-remote exact-pinned in
      the profile: `dsh plugin --profile web add --save-exact dsh-remote@0.8.66`.
 5. Suite last
