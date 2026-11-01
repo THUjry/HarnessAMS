@@ -5,6 +5,49 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — 2026-11-01 (onboarding guide & digital assets, branch guide-onboarding)
+
+- **First-run onboarding on the console page (tier 1)**: an unseen
+  `hams-guide-seen` localStorage flag renders ConsolePage as a centered guide
+  entry (`.hams-guidecenter`); afterwards a persistent 使用引导/Guide button
+  sits at the title row. `GuideView` is a five-section plain-text view — how
+  local vs remote projects work, how to submit jobs (slurm explicitly not
+  supported yet), where the workspace lives, the SmartAnaSim 14-tool simulator
+  suite, and a daily-entry cheat sheet — fully bilingual (`guide.*` keys, zh/en
+  sets kept identical); the guide task-card description was upgraded to match.
+- **Digital-assets section reworked**: instead of the old scanned-report
+  listing, it now enumerates exactly the four bundled `.js` assets
+  (plotly/xterm/xterm-fit/xterm-search — MIT license, bundled copy path/size,
+  serving route, plus workspace-scattered copies) found by a bounded
+  `scanCopies` sweep in `assetsStatus(wsRoot)` (maxDepth 6 / maxDirs 4000 /
+  maxCopies 100, skipping dot directories and node_modules). The `/api/dirs`
+  route is kept but no longer consumed by the client.
+
+### Added — 2026-11-01 (check-failure diagnosis sessions, branch check-diagnose-session)
+
+- **Failed checks hand off to a newly created DSH session** (the private
+  replacement of the old copy-to-clipboard diagnose button): a run-level
+  「起会话分析」 button bundles every failed entry of the current run into
+  `POST /api/checks/analyze`; the host assembles an English prompt (context +
+  verbatim failed entries, READ-ONLY instructions) ending with an
+  answer-language line following the effective UI language
+  (`Answer in Chinese.` / `Answer in English.`), then drives the DSH session
+  controller (`ctx.get('sessionController')`, lazy-degrading like the
+  `sessions` service): `create({workspaceId})` attaches the session to the
+  target workspace, `prompt(request, signal)` delivers the first turn
+  (the signal argument is REQUIRED on 0.2.1-rc.2 — `signal.throwIfAborted()`
+  is unconditional), `rename` titles it `HarnessAMS diagnosis: …` (best
+  effort). Remote checks anchor the session to the machine's remote-project
+  workspace, so the diagnosis agent's cwd binds dsh-remote's rw_* tools to
+  that machine and it can verify on the cluster; local checks anchor to the
+  current project's workspace. **AUTO_ANALYZE_REMOTE** (constant, future
+  settings card): a REMOTE check that ends with failed entries fires the same
+  handoff automatically — local failures stay button-only. Deliberately
+  private: no ctx service key and no model tool is registered for it.
+  Verified live against 0.2.1-rc.2 (instance on :3197, node1): the diagnosis
+  agent reproduced `bjobs` on the machine, traced the cold-channel PATH root
+  cause and answered in Chinese per the directive.
+
 ### Fixed — 2026-11-01 (sub-view persistence)
 
 - **Task-sidebar sub-view survives host remounts**: the DSH host remounts the
