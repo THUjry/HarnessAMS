@@ -255,7 +255,7 @@ test('bsub_submit rejects a worker outside the scripts root with guidance', asyn
     const ctx = makeCtx({ mirror: env.mirror })
     await assert.rejects(() => tool(ctx, 'bsub_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
-      worker: 'ngspice/no_such_worker.py',
+      worker: 'spectre/no_such_worker.py',
     }, {}), /worker script not found under the workspace sim_scripts_dir/)
   } finally {
     restoreEnv()

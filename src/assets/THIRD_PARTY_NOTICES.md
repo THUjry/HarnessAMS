@@ -5,10 +5,9 @@
 - plotly.js v3.0.1, unmodified distribution bundle `plotly.min.js`
 - Copyright (c) 2012-2025 Plotly, Inc. — MIT License
 - Source: https://github.com/plotly/plotly.js
-- This is the **single shared copy** for the whole HarnessAMSproject tree: the SmartAnaSim
-  report generator (`scripts/gen_sweep_report.py`) and the LocalDesignExample pipeline copies
-  (`LocalDesignExample/tools/`) discover it by walking up from their own location (or via the
-  workspace `harnessams.json` `plotly_asset` field) and place a copy beside each generated
+- This is the **single shared copy** for the whole HarnessAMSproject tree: the sweep
+  report generator discovers it by walking up from its own location (or via the
+  workspace `harnessams.json` `plotly_asset` field) and places a copy beside each generated
   report so reports render fully offline. Do not add a second copy anywhere else.
 - License text (from the upstream repository):
 

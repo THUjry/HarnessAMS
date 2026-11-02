@@ -1,6 +1,6 @@
 # HarnessAMS
 
-> HarnessAMS top-level entry repo: plugin index + install guide + compatibility matrix; also hosts the aggregate bundle `dsh-harnessams-suite` and the bundled `LocalDesignExample` simulation environment.
+> HarnessAMS top-level entry repo: plugin index + install guide + compatibility matrix; also hosts the aggregate bundle `dsh-harnessams-suite`.
 > Mission: an open-source project doing AMS (analog/mixed-signal) design with an LLM harness, built on the DSH (`@deepseek-ai/dsh`) plugin system — "everything is a plugin".
 > **Current status**: stage 1 (core entry + pre-layout simulation) in development; plugins are implemented and smoke-tested but **not yet published** — the npm install commands below become usable after the v0.1.0 release; use the dev-mount until then.
 
@@ -9,7 +9,7 @@
 | Plugin | npm package | row id | Responsibility | Stage | Status |
 |---|---|---|---|---|---|
 | HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (remote projects, digital assets, disk usage), project = DSH workspace, per-project task sidebar with health checks; the generic remote batch channel (`bsub_*`, worker tree from the workspace `sim_scripts_dir`) and the simulator-agnostic analysis tools (`sim_analysis`/`sim_progress`/`safe_trash`) | stage 1 | implemented (this repo, `src/`) |
-| HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local ngspice and Spectre channels (code-driven netlist assembly with hard PDK isolation), PSF parsing, S-parameter reading/extraction — simulator-specific code only | stage 1 | implemented (separate repo) |
+| HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local Spectre channel (code-driven netlist assembly with hard PDK isolation), PSF parsing, S-parameter reading/extraction — simulator-specific code only | stage 1 | implemented (separate repo) |
 | HarnessAMS-SmartPostLayout | (repo in stage 2) | `harnessams-smart-post-layout` | One-click post-layout simulation | stage 2 | not started |
 | HarnessAMS-aligner | (repo in stage 3) | `harnessams-aligner` | Multi-level alignment | stage 3 | not started |
 
@@ -27,7 +27,6 @@ src/                     dsh-harnessams — console plugin package:
 install_suite/           dsh-harnessams-suite — aggregate bundle (pure patch package)
 tests/                   unit tests (bare node --test, from the repo root)
 docs/                    plugin index, compatibility matrix
-LocalDesignExample/      bundled local simulation environment (see below)
 CHANGELOG.md / SECURITY.md / PUBLISH.md
 ```
 
@@ -99,7 +98,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    remote sessions entirely.
 
    The **Overview health checks** live in the local project's sidebar, one button per
-   function. The **Local environment** button runs the local report (python / ngspice
+   function. The **Local environment** button runs the local report (python
    / sky130 PDK / disk / write probe). Below it, every dsh-remote machine that has a
    remote project gets its own block — machine identity (`user@host:port`, current
    marker, latency, last connection), the remote area path, and the live-session count
@@ -108,7 +107,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    carrying a `sweep_progress.json`, with their status/progress), and **Script sync**
    (md5 drift between the configured local `sim_scripts_dir` tree and the remote
    scripts root — `remote_scripts_dir` when the workspace config sets it, else the
-   remote workspace root; recursive over `scripts/{common,ngspice,spectre,snp}`,
+   remote workspace root; recursive over `scripts/{common,spectre,snp}`,
    report only, nothing is uploaded). A run borrows a live session of that
    machine's remote project as the `rw_exec` agent context (its cwd inside the mirror
    is what binds the machine — no global active-machine switching); with no live
@@ -122,46 +121,13 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
 
 | Package | Ships beyond the entry JS | Deliberately NOT shipped |
 |---|---|---|
-| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 6 model tools: `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (4 `.py`: the analysis pipeline collect/report/trash + a byte-identical `common_workspace.py` copy) | `LocalDesignExample/` (~21 MB vendored simulation environment), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
+| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 6 model tools: `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (4 `.py`: the analysis pipeline collect/report/trash + a byte-identical `common_workspace.py` copy) | `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
 The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite
 installs get offline reports: report generators seed a single workspace-level copy
 from it (see `docs/decisions.md`, D-001). `PUBLISH.md` holds the
 must-contain / must-not-contain checks that guard each tarball.
-
-## LocalDesignExample (bundled local simulation environment)
-
-A self-contained environment so a fresh clone can run sky130/ngspice simulations with zero
-external downloads:
-
-```
-LocalDesignExample/
-  ngspice-47-portable/   ngspice_con.exe + runtime DLLs (Windows x64; see its README)
-  sky130/                fossi sky130_fd_pr minimal model closure (combined_models + cells) + LICENSE
-  tools/                 verbatim pipeline-script copies, dual-source since the 2026-11-01
-                         redistribution (common/ collect/report/trash/workspace from this repo's
-                         src/scripts/common/, common/ units/engine + ngspice/ from SmartAnaSim's
-                         scripts/; keep byte-identical with the sources)
-  harnessams.json        workspace config with paths relative to this file (works from any clone location)
-  check_environment.py   self-check: runs the bundled ngspice on a minimal sky130 netlist and audits the assets
-  demo1/, demo2/         demo project placeholders (content lands with the demo milestones)
-```
-
-Offline report rendering uses a single workspace-level copy: the report generator seeds
-`<workspace_root>/assets/plotly.min.js` from the master `src/assets/plotly.min.js`
-(which ships inside the `dsh-harnessams` tarball and is found by walking up from its own
-location, via the workspace `harnessams.json` `plotly_asset` field, or from a sibling
-`dsh-harnessams` install under `node_modules/`), and every report references it with a
-workspace-relative `src`. The CDN is the last-resort fallback. See `docs/decisions.md`
-(D-001). The seeded workspace copy is a runtime artifact (gitignored under
-`LocalDesignExample/`).
-
-Run `python check_environment.py` from `LocalDesignExample/` after cloning. Non-Windows
-hosts: install ngspice yourself and point `ngspice_cmd` in `harnessams.json` at it (the
-bundled binary is Windows x64 only). With the DSH plugins installed, the directory also
-works as a regular workspace — the console and the pipeline discover `harnessams.json` by
-walking upward from wherever they run.
 
 ## Installation (available after the v0.1.0 release)
 
@@ -199,7 +165,7 @@ Note: with the npm-installed CLI, `--profile web` already names the profile — 
 - DSH: `npm i -g @deepseek-ai/dsh` then `dsh --profile web`; **verified version 0.2.1-rc.2** (developer preview — pin the version; before upgrading, check the upstream release notes and rerun the minimal regression);
 - dsh-remote: `dsh plugin --profile web add --save-exact dsh-remote@0.8.66` — required at runtime for remote projects/checks (consumed via the DSH tool shell, not a package dependency); **verified version 0.8.66** (2026-10-31, source-audited; before upgrading, check the upstream release notes and rerun the minimal regression);
 - Beware: npm hosts an unrelated same-name package `dsh`; remove it first with `npm rm -g dsh` if present;
-- Simulation environment (SmartAnaSim): ngspice-47 portable + sky130 fossi `combined_models` — a ready-to-run bundle of both ships in this repo under `LocalDesignExample/` (the full sky130/ngspice gotcha list lives in the SmartAnaSim repo).
+- Simulation environment (SmartAnaSim): a local Spectre install is required for the `spectre_*` tools (commercial software, not bundled). The former ngspice + sky130 bundle (`LocalDesignExample/`) was removed on 2026-11-02 — restore it from this repo's `ngspice` branch if needed.
 
 ## Documentation
 
@@ -210,7 +176,7 @@ Note: with the npm-installed CLI, `--profile web` already names the profile — 
 
 ## Workspace layout (runtime convention)
 
-Simulation runs against a **workspace** directory (created by the user, outside any repo — `LocalDesignExample/` being the checked-in exception) with a `harnessams.json` at its root providing fixed paths: `ngspice_cmd` (portable ngspice), `pdk_lib` (sky130 model-library entry), `trash_dir`. Relative values resolve against the config file's directory. Demo projects live as subdirectories (`<workspace>/<demo>/cells/<cell>/script/design_params.json`, `script/analysis/gen_*.py`, generated `sweep/Round*/top/`, reports in `Analysis/`). The console plugin and the Python scripts locate the workspace by walking upward for `harnessams.json` (bare form, or inside `harnessams-workspace/`).
+Simulation runs against a **workspace** directory (created by the user, outside any repo) with a `harnessams.json` at its root providing fixed paths: `pdk_lib` (model-library entry), `trash_dir`. Relative values resolve against the config file's directory. Demo projects live as subdirectories (`<workspace>/<demo>/cells/<cell>/script/design_params.json`, `script/analysis/gen_*.py`, generated `sweep/Round*/top/`, reports in `Analysis/`). The console plugin and the Python scripts locate the workspace by walking upward for `harnessams.json` (bare form, or inside `harnessams-workspace/`).
 
 ## Customizing the plugin code — no build chain, edit in place
 
@@ -220,7 +186,6 @@ Everything ships as plain source: the plugin entries are plain-JS ESM loaded dir
 |---|---|---|
 | Per-project assembly/analysis scripts (yours to own) | workspace: `<workspace>/<demo>/script/analysis/*.py` (e.g. `gen_ota5t.py`) | next run |
 | Framework scripts shipped with the plugins | simulator scripts: SmartAnaSim package dir `scripts/` (or the workspace `sim_scripts_dir`); analysis scripts (collect/report/trash): this package's `src/scripts/common/` | next run |
-| Bundled example copies | this repo: `LocalDesignExample/tools/{common,ngspice}/*.py` — verbatim copies of the plugin scripts above; re-sync when the plugin updates | next run |
 | Plugin JS entries (`src/index.js` + `src/client.js` here, `src/index.js` in SmartAnaSim) | dev-mount: the repo's own `src/` (your edit is the source); installed: `node_modules/<package>/src/` | after restarting that DSH instance |
 
 Why the difference: every tool invocation spawns a fresh `python <script>` process (system Python from `PATH`) that reads the file from disk again — no rebuild, no reinstall, no DSH restart (a sweep already in progress keeps the copy it loaded). The JS entry, in contrast, is loaded once via ESM at startup and cached by the module system, so it needs a restart of that instance; other instances are separate processes and keep running unaffected.

@@ -5,6 +5,18 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Removed — 2026-11-02 (ngspice channel)
+
+- **The bundled `LocalDesignExample/` environment was deleted** (user decision):
+  the portable ngspice-47 binary, the sky130 spice model closure (340 files),
+  the pipeline-script mirrors, the demo placeholders, `harnessams.json` and
+  `check_environment.py`. Its only purpose was the ngspice local closed loop;
+  sky130 runs in Spectre after model transcription and ngspice carried only
+  simple demo value. The `ngspice present` local check, the `ngspice_cmd`
+  workspace config key, the `.spi → ngspice` simulator inference and the
+  ngspice wording in the onboarding guide went with it. The pre-removal state
+  is preserved in this repo's `ngspice` branch (cut at ac50f0f).
+
 ### Added — 2026-11-01 (onboarding guide & digital assets, branch guide-onboarding)
 
 - **First-run onboarding on the console page (tier 1)**: an unseen

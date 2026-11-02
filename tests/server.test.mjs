@@ -498,10 +498,10 @@ test('checks: runRemoteCheckButton batches lists progress files with $ROOT paths
 test('checks: runRemoteCheckButton scripts compares the nested local tree against the remote scripts root', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-scripts-'))
   try {
-    await mkdir(path.join(dir, 'ngspice'))
     await mkdir(path.join(dir, 'spectre'))
-    await writeFile(path.join(dir, 'ngspice', 'a.py'), 'AAA', 'utf8')
-    await writeFile(path.join(dir, 'spectre', 'b.py'), 'BBB', 'utf8')
+    await mkdir(path.join(dir, 'snp'))
+    await writeFile(path.join(dir, 'spectre', 'a.py'), 'AAA', 'utf8')
+    await writeFile(path.join(dir, 'snp', 'b.py'), 'BBB', 'utf8')
     await writeFile(path.join(dir, '__pycache__'), '', 'utf8').catch(() => {})
     const md5 = (s) => crypto.createHash('md5').update(s).digest('hex')
     const inputs = []
@@ -510,9 +510,9 @@ test('checks: runRemoteCheckButton scripts compares the nested local tree agains
       execute: async (input) => {
         inputs.push(input)
         return { isError: false, value: { text:
-          md5('AAA') + '  ngspice/a.py\n'
-          + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  spectre/b.py\n'
-          + '__REMOTE_PY__\nngspice/a.py\nspectre/b.py\nsnp/c.py\n[exit code: 0]',
+          md5('AAA') + '  spectre/a.py\n'
+          + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  snp/b.py\n'
+          + '__REMOTE_PY__\nspectre/a.py\nsnp/b.py\ncommon/c.py\n[exit code: 0]',
         }, content: [] }
       },
     }
@@ -522,17 +522,17 @@ test('checks: runRemoteCheckButton scripts compares the nested local tree agains
     assert.ok(e.ok, e.detail)
     assert.match(e.result, /1 in sync, 1 differ, 0 only local, 1 only remote/)
     assert.deepEqual(e.rows, [
-      ['ngspice/a.py', 'in-sync'],
-      ['spectre/b.py', 'differs'],
-      ['snp/c.py', 'only-remote'],
+      ['snp/b.py', 'differs'],
+      ['spectre/a.py', 'in-sync'],
+      ['common/c.py', 'only-remote'],
     ])
     assert.equal(e.truncated, false)
     assert.match(e.warn, /drift/)
-    assert.match(e.detail, /spectre\/b\.py — differs/)
-    assert.match(e.detail, /snp\/c\.py — only-remote/)
+    assert.match(e.detail, /snp\/b\.py — differs/)
+    assert.match(e.detail, /common\/c\.py — only-remote/)
     // relative POSIX paths, recursive remote listing, default root = remote workspace
     assert.match(inputs[0].arguments.command,
-      /cd "\/home\/op\/sim" && md5sum "ngspice\/a\.py" "spectre\/b\.py"/)
+      /cd "\/home\/op\/sim" && md5sum "snp\/b\.py" "spectre\/a\.py"/)
     assert.match(inputs[0].arguments.command, /find \. -maxdepth 4 -name '\*\.py'/)
     assertValidShell(inputs[0].arguments.command)
 
