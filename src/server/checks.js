@@ -33,13 +33,6 @@ export async function runLocalChecks(ws) {
     const { stdout } = await execFileAsync('python', ['--version'], { timeout: 15000 })
     return { result: stdout.trim() }
   })
-  await t('ngspice present', async () => {
-    const cmd = ws?.config?.ngspice_cmd
-    if (!cmd || !fs.existsSync(cmd)) throw new Error(`missing or not configured: ${cmd ?? '(none)'}`)
-    const { stdout } = await execFileAsync(cmd, ['-v'], { timeout: 20000 })
-    const line = stdout.split(/\r?\n/).find((l) => /version|ngspice/i.test(l) && /\d/.test(l))
-    return { result: (line || stdout.split(/\r?\n/)[0] || 'ngspice').trim().slice(0, 80) }
-  })
   await t('sky130 PDK present', async () => {
     const lib = ws?.config?.pdk_lib
     if (!lib || !fs.existsSync(lib)) throw new Error(`missing or not configured: ${lib ?? '(none)'}`)
@@ -166,7 +159,7 @@ function shq(s) {
 
 // Recursively hash a local pipeline-scripts tree: relative POSIX path -> md5.
 // Bounded (50 files, skips __pycache__/*.pyc) because the remote listing is capped
-// the same way; the pipeline keeps the scripts/{common,ngspice,spectre,snp} layout.
+// the same way; the pipeline keeps the scripts/{common,spectre,snp} layout.
 function collectScriptFiles(dir, limit = 50) {
   const out = new Map()
   const walk = (d, prefix) => {
@@ -256,7 +249,7 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
   if (id === 'scripts') {
     // Drift check between the configured local pipeline-scripts directory and the
     // remote scripts root, by md5 — report only, nothing is uploaded. The local
-    // tree is walked recursively (scripts/{common,ngspice,spectre,snp}) and keys are
+    // tree is walked recursively (scripts/{common,spectre,snp}) and keys are
     // relative POSIX paths; the remote root comes from the optional
     // harnessams.json `remote_scripts_dir` (a remote absolute path, never resolved
     // locally) and falls back to the remote workspace root for flat layouts.

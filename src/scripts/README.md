@@ -11,7 +11,7 @@ plugin's model tools via `src/py.js` (`runPython`, fresh system-Python process p
 - `common/common_trash.py` — workspace trash (list/trash/restore/purge; safe_trash backend)
 - `common/common_workspace.py` — harnessams.json discovery + atomic JSON helpers; a
   byte-identical copy also ships with SmartAnaSim (`scripts/common/` there — the sweep
-  workers import it) and in `LocalDesignExample/tools/common/`. Keep all copies identical.
+  workers import it). Keep all copies identical.
 
 These scripts never run remotely: `bsub_submit` uploads the WORKER tree from the workspace
 `sim_scripts_dir` (the SmartAnaSim plugin's `scripts/`), not this directory. Anything placed

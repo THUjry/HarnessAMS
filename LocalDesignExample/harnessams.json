@@ -1,9 +1,0 @@
-{
-  "_comment": "LocalDesignExample workspace config. Paths are relative to this file's directory and resolve against it (both plugins and the Python pipeline support this). On non-Windows hosts, point ngspice_cmd at your own ngspice.",
-  "workspace_root": ".",
-  "ngspice_cmd": "./ngspice-47-portable/ngspice_con.exe",
-  "pdk_lib": "./sky130/combined_models/sky130.lib.spice",
-  "pdk_name": "sky130_fd_pr (fossi-foundation, combined_models continuous)",
-  "trash_dir": "./.trash",
-  "sim_scripts_dir": "./tools"
-}

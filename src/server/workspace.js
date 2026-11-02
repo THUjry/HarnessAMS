@@ -28,7 +28,7 @@ export function findWorkspaceConfig() {
       // example workspace works from any clone location. `remote_scripts_dir` is a REMOTE
       // absolute path and deliberately stays opaque (never resolved against a local base).
       const base = path.dirname(c)
-      for (const k of ['workspace_root', 'ngspice_cmd', 'pdk_lib', 'trash_dir', 'sim_scripts_dir']) {
+      for (const k of ['workspace_root', 'pdk_lib', 'trash_dir', 'sim_scripts_dir']) {
         const v = config[k]
         if (typeof v === 'string' && v && !path.isAbsolute(v)) config[k] = path.resolve(base, v)
       }

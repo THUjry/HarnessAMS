@@ -3,12 +3,12 @@
 (per-point metrics plus summary statistics).
 
 The simulator label comes from --simulator, else <work-dir>/.simulator (written
-by either sweep worker), else the netlist template extension (.spi -> ngspice,
-.scs -> spectre). It is stored as results.json.simulator for the report label.
+by the sweep worker), else the netlist template extension (.scs -> spectre).
+It is stored as results.json.simulator for the report label.
 
 Usage:
   python <plugin scripts>/common/common_collect_results.py --work-dir sweep/Round1/top
-         [--out results.json] [--simulator ngspice|spectre]
+         [--out results.json] [--simulator spectre]
 Default output: <work-dir>/results.json. Exit code: 0 when success/partial points
 exist, else 1.
 """
@@ -72,7 +72,7 @@ def detect_simulator(work_dir, override=None):
                 return name
         except OSError:
             pass
-    for template, simulator in (("template.scs", "spectre"), ("template.spi", "ngspice")):
+    for template, simulator in (("template.scs", "spectre"),):
         if os.path.isfile(os.path.join(work_dir, template)):
             return simulator
     return None

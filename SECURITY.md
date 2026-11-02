@@ -22,9 +22,6 @@
   forwarded, then a local workspaceRegistry registration.
 - The `/reports/*` route is read-only static file serving with a whitelist root (the
   configured workspace root) plus traversal checks.
-- `LocalDesignExample/` vendors third-party binaries (ngspice) and model files (sky130);
-  they are used unmodified and their licenses apply (see `LocalDesignExample/THIRD_PARTY_NOTICES.md`).
-  Only run binaries from a clone you trust.
 
 ## Reporting a vulnerability
 

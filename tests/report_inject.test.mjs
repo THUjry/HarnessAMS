@@ -130,7 +130,7 @@ test('inject: sim_analysis e2e — collects, generates the report and registers 
     const top = path.join(ws, 'demoX', 'sweep', 'Round1', 'top')
     await mkdir(path.join(top, '00'), { recursive: true })
     await mkdir(path.join(top, '01'), { recursive: true })
-    await writeFile(path.join(top, '.simulator'), 'ngspice\n', 'utf8')
+    await writeFile(path.join(top, '.simulator'), 'spectre\n', 'utf8')
     await writeFile(path.join(top, '00', 'point_meta.json'), JSON.stringify({
       point_index: 0, point_name: '00', status: 'success',
       params: { vgs: 0.6 }, signals: { gain: 60.0 },
@@ -143,7 +143,7 @@ test('inject: sim_analysis e2e — collects, generates the report and registers 
     const tool = makeTool(sharedTools().find((d) => d.name === 'sim_analysis'))
     const res = await tool.execute({ run_dir: top, report: true, task: 'OTA 装配验证' })
     assert.equal(res.ok, true)
-    assert.equal(res.simulator, 'ngspice')
+    assert.equal(res.simulator, 'spectre')
     assert.equal(res.summary.gain.n, 2)
     assert.match(res.results_file, /demoX[\\/]sweep[\\/]Round1[\\/]top[\\/]results\.json$/)
     assert.equal(res.registered, true)

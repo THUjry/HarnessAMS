@@ -110,7 +110,7 @@ export function sharedTools() {
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Run directory (sweep/RoundN/top) holding NN/point_meta.json' },
         out: { type: 'string', description: 'Output results.json path (default: <run_dir>/results.json; must stay at the default when report=true)' },
-        simulator: { type: 'string', enum: ['ngspice', 'spectre'], description: 'Override the detected simulator label' },
+        simulator: { type: 'string', enum: ['spectre'], description: 'Override the detected simulator label' },
         report: { type: 'boolean', description: 'Also generate the HTML dashboard for the project (default false)' },
         round: { type: 'string', description: 'report only: round name to render (e.g. Round1; default: all Round*)' },
         task: { type: 'string', description: 'report only: register the generated report into this task\'s dashboard '
