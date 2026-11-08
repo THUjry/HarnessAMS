@@ -21,6 +21,7 @@
     "bsub.js",
     "remote.js",
     "cordis.patch.yml",
+    "selfcheck/",
     "assets/",
     "locale/",
     "scripts/",
