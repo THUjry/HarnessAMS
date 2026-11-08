@@ -71,7 +71,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': 'SmartAnaSim 单包安装即注册全部 11 个工具：spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、bsub（通用 LSF 提交 / 轮询 / 取回）、共享（分析 / 进度 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': '任务侧栏「概览」— 本机环境检查 + 各机器四项检查（远程检查需该机远程项目有活会话）。「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）。「远程终端」— 机器标签绑定该机活会话。',
+        'guide.s5': '任务侧栏「概览」— 本机环境检查 + 各机器四项检查（远程检查需该机远程项目有活会话）+ 项目设置表与一键项目自检。「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）。「远程终端」— 机器标签绑定该机活会话。',
         'rproj.title': '远程项目',
         'rproj.dshremoteOk': 'dsh-remote：{n} 台机器',
         'rproj.dshremoteMissing': 'dsh-remote 不可用',
@@ -206,6 +206,47 @@ window.__ModuleLoader__.load({
         'tasks.headerPinOff': 'HarnessAMS 任务 — 打开侧栏（固定以跟随会话切换）',
         'tasks.headerTasks': '任务',
         'tasks.guideDesc': '任务、检查、报告与使用引导',
+        'pset.title': '项目设置',
+        'pset.dirLabel': '工作目录',
+        'pset.dirLocalHint': '本地模式：自检产物写入本地工作区 selfcheck/ 目录',
+        'pset.dirRemoteRel': '相对路径按 $ROOT/ 解析',
+        'pset.browse': '浏览',
+        'pset.browseTitle': '选择远程目录（浏览该机本地镜像）',
+        'pset.browseNoMirror': '所选机器没有本地镜像——请先在 dsh-remote 选择一次远程工作区，或直接手输完整目录。',
+        'pset.browseUp': '上一级',
+        'pset.browseHere': '选此目录',
+        'pset.currentMirrorDir': '当前镜像目录',
+        'pset.pickSubdir': '进入子目录',
+        'pset.colMode': '工作模式',
+        'pset.colMachine': '远程机器',
+        'pset.colSched': '调度器',
+        'pset.colSim': '仿真器',
+        'pset.colCompLocal': '本地计算',
+        'pset.colCompRemote': '远端计算',
+        'pset.mode.local': '本地',
+        'pset.mode.remote': '远程',
+        'pset.sched.lsf': 'LSF 队列',
+        'pset.sched.none': '直接运行',
+        'pset.sim.spectre': 'spectre',
+        'pset.sim.none': 'none（免仿真）',
+        'pset.comp.python': 'python',
+        'pset.comp.js': 'js（node）',
+        'pset.noMachine': '（选择机器）',
+        'pset.saveFailed': '保存失败：{msg}',
+        'selfchk.title': '项目自检',
+        'selfchk.desc': '按当前设置全链路验证机器、连接、环境、权限与计算（RC 理想元件 3×3；仿真器 none 用随包 golden 数据免仿真；核验为逐点误差 ≤1%）',
+        'selfchk.run': '一键自检',
+        'selfchk.running': '自检运行中…',
+        'selfchk.startFailed': '启动失败：{msg}',
+        'selfchk.scopeLocal': '本地链路',
+        'selfchk.scopeRemote': '远程链路（{machine}）',
+        'selfchk.noneYet': '尚未运行自检。',
+        'selfchk.skipped': '跳过',
+        'selfchk.summaryOk': '自检通过',
+        'selfchk.summaryFallback': '通过（远程经直接运行回退）',
+        'selfchk.summaryFail': '自检失败',
+        'selfchk.diagDone': '已创建诊断会话 {id} — 请到左侧会话树查看。',
+        'selfchk.diagFail': '创建诊断会话失败：{err}',
       },
       en: {
         'common.loading': 'Loading…',
@@ -232,7 +273,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'SmartAnaSim registers all 11 tools on install: spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), bsub (generic LSF submit / poll / fetch), shared (analysis / progress / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'Task sidebar “Overview” — local environment checks plus four checks per machine (remote checks need a live session in that machine’s remote project). “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in). “Terminal” — machine tabs bind to that machine’s live session.',
+        'guide.s5': 'Task sidebar “Overview” — local environment checks plus four checks per machine (remote checks need a live session in that machine’s remote project), plus the project-settings table and the one-click project self-check. “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in). “Terminal” — machine tabs bind to that machine’s live session.',
         'rproj.title': 'Remote projects',
         'rproj.dshremoteOk': 'dsh-remote: {n} machine(s)',
         'rproj.dshremoteMissing': 'dsh-remote not available',
@@ -367,6 +408,47 @@ window.__ModuleLoader__.load({
         'tasks.headerPinOff': 'HarnessAMS tasks — open the tab (pin it to follow session switches)',
         'tasks.headerTasks': 'Tasks',
         'tasks.guideDesc': 'Tasks, checks, reports and a guide',
+        'pset.title': 'Project settings',
+        'pset.dirLabel': 'Working directory',
+        'pset.dirLocalHint': 'local mode: self-check artifacts go under the local workspace\'s selfcheck/ directory',
+        'pset.dirRemoteRel': 'relative paths resolve under $ROOT/',
+        'pset.browse': 'Browse',
+        'pset.browseTitle': 'Pick a remote directory (browsing the machine\'s local mirror)',
+        'pset.browseNoMirror': 'The selected machine has no local mirror — pick its remote workspace once in dsh-remote, or type the full directory by hand.',
+        'pset.browseUp': 'Parent directory',
+        'pset.browseHere': 'Choose this directory',
+        'pset.currentMirrorDir': 'Current mirror directory',
+        'pset.pickSubdir': 'Enter subdirectory',
+        'pset.colMode': 'Mode',
+        'pset.colMachine': 'Machine',
+        'pset.colSched': 'Scheduler',
+        'pset.colSim': 'Simulator',
+        'pset.colCompLocal': 'Local compute',
+        'pset.colCompRemote': 'Remote compute',
+        'pset.mode.local': 'local',
+        'pset.mode.remote': 'remote',
+        'pset.sched.lsf': 'LSF queue',
+        'pset.sched.none': 'direct',
+        'pset.sim.spectre': 'spectre',
+        'pset.sim.none': 'none (no simulation)',
+        'pset.comp.python': 'python',
+        'pset.comp.js': 'js (node)',
+        'pset.noMachine': '(pick a machine)',
+        'pset.saveFailed': 'save failed: {msg}',
+        'selfchk.title': 'Project self-check',
+        'selfchk.desc': 'Walks the full pipeline under the current settings to verify machine, connection, environment, permissions and compute (ideal RC 3×3; simulator "none" replays bundled golden data without simulation; pointwise tolerance 1%).',
+        'selfchk.run': 'Run self-check',
+        'selfchk.running': 'Self-check running…',
+        'selfchk.startFailed': 'failed to start: {msg}',
+        'selfchk.scopeLocal': 'Local pipeline',
+        'selfchk.scopeRemote': 'Remote pipeline ({machine})',
+        'selfchk.noneYet': 'No self-check yet.',
+        'selfchk.skipped': 'skipped',
+        'selfchk.summaryOk': 'self-check passed',
+        'selfchk.summaryFallback': 'passed (remote fell back to the direct run)',
+        'selfchk.summaryFail': 'self-check failed',
+        'selfchk.diagDone': 'Diagnosis session {id} created — see the session tree.',
+        'selfchk.diagFail': 'Failed to create a diagnosis session: {err}',
       },
     }
 
@@ -957,6 +1039,276 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // ---------- tier 3 Overview: project settings + one-click project self-check ----------
+    // The settings table is COLUMN-per-setting with two rows: row 1 = the live
+    // setting (dropdown cells, PUT on every change), row 2 = that setting's
+    // self-check verdict (aggregated from the run's steps server-tagged with a
+    // settingColumn). Column visibility cascades off the mode/simulator choices
+    // (a local project hides the machine/scheduler/remote-compute columns).
+    const SETTING_COLS = [
+      { id: 'run_mode', labelKey: 'pset.colMode', column: 'run_mode',
+        options: [['local', 'pset.mode.local'], ['remote', 'pset.mode.remote']] },
+      { id: 'machine_id', labelKey: 'pset.colMachine', column: 'machine', kind: 'machine',
+        visible: (s) => s.run_mode === 'remote' },
+      { id: 'scheduler', labelKey: 'pset.colSched', column: 'scheduler',
+        visible: (s) => s.run_mode === 'remote' && s.simulator === 'spectre',
+        options: [['lsf', 'pset.sched.lsf'], ['none', 'pset.sched.none']] },
+      { id: 'simulator', labelKey: 'pset.colSim', column: 'simulator',
+        options: [['spectre', 'pset.sim.spectre'], ['none', 'pset.sim.none']] },
+      { id: 'compute_script_local', labelKey: 'pset.colCompLocal', column: 'compute_local',
+        options: [['python', 'pset.comp.python'], ['js', 'pset.comp.js']] },
+      { id: 'compute_script_remote', labelKey: 'pset.colCompRemote', column: 'compute_remote',
+        visible: (s) => s.run_mode === 'remote',
+        options: [['python', 'pset.comp.python'], ['js', 'pset.comp.js']] },
+    ]
+
+    // Aggregate one settings column from the run's step stream: any failure →
+    // bad, else any warn (e.g. the LSF→direct fallback) → warn, all-skip → skip.
+    function selfcheckColumnResult(run, column) {
+      if (!run) return null
+      const steps = (run.steps ?? []).filter((s) => s && s.settingColumn === column && s.ms != null)
+      if (!steps.length) return null
+      const title = steps.map((s) => `${s.section}/${s.item}: ${s.ok === false ? 'FAIL' : s.ok === null ? 'skip' : 'ok'} ${s.result ?? ''}`).join('\n')
+      const failed = steps.filter((s) => s.ok === false)
+      if (failed.length) return { state: 'bad', text: failed[0].result || 'failed', title }
+      if (steps.some((s) => s.warn)) return { state: 'warn', text: steps[steps.length - 1].result, title }
+      if (steps.every((s) => s.ok === null)) return { state: 'skip', text: tr('selfchk.skipped'), title: steps[0].skipReason ?? title }
+      return { state: 'ok', text: steps[steps.length - 1].result, title }
+    }
+
+    function SettingsTable({ settings, machines, run, onChange }) {
+      const cols = SETTING_COLS.filter((c) => !c.visible || c.visible(settings))
+      const settingCell = (c) => {
+        if (c.kind === 'machine') {
+          const known = machines.some((m) => m.id === settings.machine_id)
+          return h('select', { className: 'hams-select', value: settings.machine_id ?? '',
+            onChange: (e) => onChange('machine_id', e.target.value || null) },
+            h('option', { value: '' }, tr('pset.noMachine')),
+            (known ? [] : settings.machine_id
+              ? [h('option', { key: 'kept', value: settings.machine_id }, esc(settings.machine_id) + ' ?')] : []),
+            machines.map((m) => h('option', { key: m.id, value: m.id },
+              esc(m.name || m.host) + (m.host && m.host !== m.name ? ' · ' + esc(m.host) : ''))))
+        }
+        return h('select', { className: 'hams-select', value: settings[c.id] ?? '',
+          onChange: (e) => onChange(c.id, e.target.value) },
+          c.options.map(([v, k]) => h('option', { key: v, value: v }, tr(k))))
+      }
+      const resultCell = (c) => {
+        const agg = selfcheckColumnResult(run, c.column)
+          ?? (c.column === 'run_mode' && run?.summary
+            ? { state: run.summary.ok ? 'ok' : 'bad', text: tr(run.summary.ok ? 'selfchk.summaryOk' : 'selfchk.summaryFail'), title: '' }
+            : null)
+        if (!agg) return h('td', { key: c.id, className: 'hams-faint' }, '—')
+        const cls = agg.state === 'ok' ? 'hams-good' : agg.state === 'warn' ? 'hams-warn' : agg.state === 'skip' ? 'hams-faint' : 'hams-bad'
+        const icon = agg.state === 'ok' ? '✅' : agg.state === 'warn' ? '⚠' : agg.state === 'skip' ? '⏭' : '✗'
+        return h('td', { key: c.id, className: cls, title: agg.title || agg.text }, icon + ' ' + esc(agg.text))
+      }
+      return h('table', { className: 'hams-table' },
+        h('thead', null, h('tr', null, cols.map((c) => h('th', { key: c.id }, tr(c.labelKey))))),
+        h('tbody', null,
+          h('tr', null, cols.map((c) => h('td', { key: c.id }, settingCell(c)))),
+          h('tr', null, cols.map((c) => resultCell(c)))))
+    }
+
+    // Remote-dir picker: browses the machine's LOCAL MIRROR with the standard
+    // /api/browse listing (navigation bounded inside the mirror) and converts
+    // the picked path back to a full remote directory via the mirror metadata.
+    function RemoteDirBrowse({ mirrorDir, remotePath, onCancel, onPick }) {
+      const [cwd, setCwd] = useState(mirrorDir)
+      const [listing, setListing] = useState(null)
+      const [error, setError] = useState(null)
+      useEffect(() => {
+        let alive = true
+        setError(null); setListing(null)
+        fetchJson(API + '/browse?path=' + encodeURIComponent(cwd))
+          .then((r) => { if (alive) setListing(r) })
+          .catch((e) => { if (alive) setError(String(e.message ?? e)) })
+        return () => { alive = false }
+      }, [cwd])
+      const norm = (p) => String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+      const atRoot = listing ? norm(listing.path) === norm(mirrorDir) : true
+      const toRemote = (localPath) => {
+        const rel = String(localPath).slice(mirrorDir.length).replace(/\\/g, '/').replace(/^\/+/, '')
+        return String(remotePath).replace(/\/+$/, '') + (rel ? '/' + rel : '')
+      }
+      return h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) onCancel() } },
+        h('div', { className: 'hams-dialog hams-browse-dialog' },
+          h('h3', null, tr('pset.browseTitle')),
+          h('div', { className: 'hams-field' },
+            h('label', null, tr('pset.currentMirrorDir')),
+            h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+              h('button', { className: 'hams-btn hams-btn-sm', title: tr('pset.browseUp'),
+                disabled: !listing?.parent || atRoot, onClick: () => setCwd(listing.parent) }, '↑'),
+              h('span', { className: 'hams-dim',
+                style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                esc(listing ? listing.path : '…')))),
+          h('div', { className: 'hams-field' },
+            h('label', null, tr('pset.pickSubdir')),
+            h('div', { className: 'hams-list' },
+              error && h('div', { className: 'hams-err' }, error),
+              listing && !error && h('div', null,
+                listing.dirs.map((d) => h('button', { key: 'd:' + d, className: 'hams-listitem',
+                  onClick: () => setCwd(listing.path + '/' + d) },
+                  h('span', { className: 'hams-name' }, '📁 ' + esc(d)))),
+                !listing.dirs.length && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('dash.emptyDir'))))),
+          h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
+            h('button', { className: 'hams-btn', disabled: !listing, onClick: () => onPick(toRemote(listing.path)) }, tr('pset.browseHere')),
+            h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')))))
+    }
+
+    // Step-detail table under the settings table: local/remote section headers +
+    // the classic Item/Result/Elapsed/Status rows (skipped steps show ⏭ with the
+    // skip reason as the tooltip).
+    function SelfcheckSteps({ run }) {
+      if (!run || !(run.steps ?? []).length) {
+        return h('div', { className: 'hams-dim' }, tr('selfchk.noneYet'))
+      }
+      const rows = []
+      let lastSection = null
+      for (const s of run.steps) {
+        if (s.section !== lastSection) {
+          lastSection = s.section
+          rows.push(h('tr', { key: 'sec:' + rows.length },
+            h('td', { colSpan: 4, className: 'hams-faint', style: { fontWeight: 600 } },
+              tr(s.section === 'remote' ? 'selfchk.scopeRemote' : 'selfchk.scopeLocal',
+                { machine: run.scope?.machine?.name ?? run.scope?.machine?.host ?? '' }))))
+        }
+        const icon = s.ok === true ? '✅' : s.ok === false ? '✗' : '⏭'
+        const cls = s.ok === true ? 'hams-good' : s.ok === false ? 'hams-bad' : 'hams-faint'
+        rows.push(h('tr', { key: rows.length, className: s.ok === false ? 'hams-rowbad' : '' },
+          h('td', { title: s.skipReason ?? '' }, esc(s.item),
+            s.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + esc(s.warn)) : null),
+          h('td', { title: s.detail || '' },
+            esc(s.result || (s.skipReason ? tr('selfchk.skipped') + ' — ' + s.skipReason : '-')),
+            s.ok !== false && s.detail ? h('div', { className: 'hams-pre' }, esc(s.detail)) : null),
+          h('td', null, s.ms != null ? s.ms + ' ms' : ''),
+          h('td', { className: cls }, icon)))
+      }
+      return h('table', { className: 'hams-table' },
+        h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus')]
+          .map((c) => h('th', { key: c }, c)))),
+        h('tbody', null, rows))
+    }
+
+    function ProjectSelfcheck({ sessionId, info }) {
+      const [settings, setSettings] = useState(null)
+      const [settingsError, setSettingsError] = useState(null)
+      const [dirDraft, setDirDraft] = useState(null)
+      const [run, setRun] = useState(null)
+      const [startError, setStartError] = useState(null)
+      const [browseOpen, setBrowseOpen] = useState(false)
+      const machines = info?.machines ?? []
+
+      useEffect(() => {
+        let alive = true
+        setSettings(null); setSettingsError(null); setRun(null); setStartError(null)
+        if (!sessionId) return
+        fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId))
+          .then((r) => { if (alive) setSettings(r.settings) })
+          .catch((e) => { if (alive) setSettingsError(String(e.message ?? e)) })
+        // restore the latest run (memory or disk) so a remount/reload keeps the table
+        fetchJson(API + '/selfcheck')
+          .then((r) => { if (alive && r?.run) setRun(r.run) })
+          .catch(() => { /* no run yet */ })
+        return () => { alive = false }
+      }, [sessionId])
+
+      const runId = run?.id ?? null
+      const runStatus = run?.status ?? null
+      useEffect(() => {
+        if (runStatus !== 'running') return
+        let alive = true
+        const refetch = () => {
+          fetchJson(API + '/selfcheck?id=' + encodeURIComponent(runId))
+            .then((r) => { if (alive && r?.run?.id === runId) setRun(r.run) })
+            .catch(() => { /* keep the last snapshot */ })
+        }
+        const timer = setInterval(() => { if (!document.hidden) refetch() }, 3_000)
+        const onVisible = () => { if (!document.hidden) refetch() }
+        document.addEventListener('visibilitychange', onVisible)
+        return () => {
+          alive = false
+          clearInterval(timer)
+          document.removeEventListener('visibilitychange', onVisible)
+        }
+      }, [runId, runStatus])
+
+      const updateSetting = async (key, value) => {
+        const prev = settings
+        const next = { ...prev, [key]: value }
+        setSettings(next); setSettingsError(null)
+        try {
+          const r = await fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId),
+            { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) })
+          setSettings(r.settings ?? next)
+        } catch (e) {
+          setSettings(prev) // revert the optimistic cell
+          setSettingsError(tr('pset.saveFailed', { msg: String(e.message ?? e) }))
+        }
+      }
+
+      const startRun = async () => {
+        setStartError(null)
+        try {
+          const r = await fetchJson(API + '/selfcheck', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId, lang: effectiveLang() }),
+          })
+          setRun({ id: r.runId, status: 'running', steps: [], diagnoses: [], scope: null })
+        } catch (e) {
+          setStartError(tr('selfchk.startFailed', { msg: String(e.message ?? e) }))
+        }
+      }
+
+      const remote = settings?.run_mode === 'remote'
+      const machine = machines.find((m) => m.id === settings?.machine_id) ?? null
+      const dirValue = dirDraft ?? settings?.remote_dir ?? ''
+      const dirPreview = String(settings?.remote_dir ?? '').startsWith('/')
+        ? settings.remote_dir
+        : (machine?.remotePath ? String(machine.remotePath).replace(/\/+$/, '') + '/' + settings?.remote_dir : '$ROOT/' + (settings?.remote_dir ?? ''))
+      const running = run?.status === 'running'
+
+      return h('div', { style: { marginTop: '10px' } },
+        h('div', { className: 'hams-dim' }, h('b', null, tr('pset.title')), ' · ', tr('selfchk.title')),
+        settingsError && h('div', { className: 'hams-err' }, esc(settingsError)),
+        !settings && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
+        settings && h('div', null,
+          // working directory: always visible — "local" read-only, or the bound
+          // remote directory (full-path preview + mirror browse + manual input)
+          h('div', { className: 'hams-row', style: { flexWrap: 'nowrap' } },
+            h('b', { style: { flexShrink: 0 } }, tr('pset.dirLabel')),
+            remote
+              ? h('input', { className: 'hams-input', value: dirValue, title: dirPreview,
+                  onChange: (e) => setDirDraft(e.target.value),
+                  onBlur: () => { const v = (dirDraft ?? '').trim(); setDirDraft(null); if (v && v !== settings.remote_dir) void updateSetting('remote_dir', v) },
+                  onKeyDown: (e) => { if (e.key === 'Enter') e.target.blur() } })
+              : h('span', { className: 'hams-dim' }, 'local · ' + tr('pset.dirLocalHint')),
+            remote && h('button', { className: 'hams-btn hams-btn-sm', disabled: !machine?.mirrorDir,
+                title: machine?.mirrorDir ? tr('pset.browseTitle') : tr('pset.browseNoMirror'),
+                onClick: () => setBrowseOpen(true) }, tr('pset.browse'))),
+          remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
+            '→ ', esc(dirPreview), ' · ', tr('pset.dirRemoteRel')),
+          h(SettingsTable, { settings, machines, run, onChange: updateSetting }),
+          h('div', { className: 'hams-row' },
+            h('button', { className: 'hams-btn hams-btn-sm', disabled: running || !sessionId, onClick: startRun },
+              running ? tr('selfchk.running') : tr('selfchk.run')),
+            h('span', { className: 'hams-dim' }, tr('selfchk.desc'))),
+          startError && h('div', { className: 'hams-err' }, esc(startError)),
+          h(SelfcheckSteps, { run }),
+          run?.summary && h('div', { className: 'hams-row' },
+            h('span', { className: run.summary.ok ? 'hams-good' : 'hams-bad', style: { fontWeight: 600 } },
+              tr(run.summary.ok ? (run.summary.fallback ? 'selfchk.summaryFallback' : 'selfchk.summaryOk') : 'selfchk.summaryFail'))),
+          (run?.diagnoses ?? []).map((d, i) => h('div', { key: i, className: d.status === 'done' ? 'hams-dim' : 'hams-err' },
+            d.status === 'done' ? tr('selfchk.diagDone', { id: d.sessionId ?? '' }) : tr('selfchk.diagFail', { err: d.error ?? '' })))),
+        browseOpen && machine?.mirrorDir && h(RemoteDirBrowse, {
+          mirrorDir: machine.mirrorDir,
+          remotePath: machine.remotePath,
+          onCancel: () => setBrowseOpen(false),
+          onPick: (v) => { setBrowseOpen(false); void updateSetting('remote_dir', v) },
+        }))
+    }
+
     function TaskSidebarBody(props) {
       const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
       const [project, setProject] = useState(undefined) // undefined=loading, null=none
@@ -1195,6 +1547,7 @@ window.__ModuleLoader__.load({
                 h('b', null, selected.name),
                 h('span', { className: 'hams-dim' }, selected.created_at ? selected.created_at.slice(0, 10) : '')),
               checksInfo && h(CheckPanel, { info: checksInfo, run: checkRun, onRun: runCheck, analyze, onAnalyze: analyzeRun }),
+              sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo }),
               h('div', { className: 'hams-taskdesc' },
                 h('textarea', {
                   className: 'hams-textarea',
