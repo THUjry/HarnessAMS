@@ -1,2 +1,4 @@
 # Vendored third-party assets: keep byte-exact, no line-ending conversion
 src/assets/plotly.min.js -text
+# Self-check golden dataset: the regen test compares bytes
+src/selfcheck/golden/** -text
