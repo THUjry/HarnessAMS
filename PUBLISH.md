@@ -26,7 +26,11 @@ Checklist (per package, run from the package directory):
      — + `THIRD_PARTY_NOTICES.md`; the Plotly and xterm attributions travel with the
      assets), `scripts/common/` (4 `.py`: `common_collect_results.py`,
      `common_gen_sweep_report.py`, `common_trash.py` + a byte-identical
-     `common_workspace.py` copy), plus `package.json` (npm always includes it).
+     `common_workspace.py` copy), `scripts/selfcheck/` (2 files:
+     `selfcheck_verify.py` + `selfcheck_verify.mjs` — the self-check compute twins),
+     `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` +
+     `golden/` — 36 files, about 386 KB, the analytic 3×3 psfascii golden dataset),
+     plus `package.json` (npm always includes it).
    - Must NOT contain: any vendored simulator binaries or PDK model files (the former
      `LocalDesignExample/` bundle was removed from the repo on 2026-11-02 — it must not
      reappear in the tarball), `docs/`, `tests/`, `install_suite/`, `.gitattributes`, or the

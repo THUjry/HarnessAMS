@@ -5,6 +5,47 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — 2026-11-08 (project settings + one-click project self-check)
+
+- **Per-project settings** at `<workspace>/.harnessams/project_settings.json`
+  (`run_mode` local/remote, `machine_id`, `remote_dir`, `scheduler` lsf/none,
+  `simulator` spectre/none, `compute_script_local`/`compute_script_remote`
+  python/js; `src/server/settings.js` validates and persists atomically;
+  `GET`/`PUT /api/project-settings`). The Overview renders them as a two-row
+  table — row 1 = the live settings (dropdown cells, PUT on every change), row 2
+  = that setting's self-check verdict — with columns cascading off the
+  mode/simulator choices (local hides machine/scheduler/remote-compute;
+  simulator=none hides the scheduler) and a working-directory line above the
+  table that always shows `local` or the bound remote directory (browse-picked
+  through the machine's local mirror via `/api/browse`, converted back to a
+  remote path; manual input accepted).
+- **Project self-check** (`POST`/`GET /api/selfcheck`, orchestrator in
+  `src/server/selfcheck.js`): one button walks the whole pipeline under the
+  CURRENT settings to verify machine, connection, environment, permissions,
+  tools and compute — plain server code, no LLM in the flow. With
+  `simulator=spectre` it runs the ideal-component RC low-pass/high-pass
+  testbench (3×3 r×c grid, no PDK; `spectre_assemble` → `spectre_run_sweep` →
+  `spectre_parse` → pointwise verify; remotely via `bsub_submit`/`bsub_poll` →
+  remote parse+verify → `bsub_fetch` + local cross-check, an LSF failure is
+  diagnosed immediately and retried once with `scheduler=none`, verdict
+  `ok-via-fallback`). With `simulator=none` no simulation runs: the bundled
+  analytic golden dataset (`src/selfcheck/golden/`, 36 psfascii files,
+  regenerable byte-identically by `tests/golden_gen.py`) replays parse + compute
+  locally, or upload → remote compute → download + cross-check remotely.
+  Verification is pointwise (every frequency sample vs the analytic RC response,
+  1% tolerance) implemented twice with one contract — `selfcheck_verify.py` and
+  `selfcheck_verify.mjs` (the local js channel imports it in-process; the remote
+  js channel needs `node` on the remote host, `remote_node` workspace key).
+  Verdicts are artifact-driven (sweep_progress.json / psf_index.json /
+  .bsub_job.json), each step tagged with a `settingColumn` that feeds the
+  settings table's result row, and failures start diagnosis sessions
+  automatically (the scheduler cluster immediately, the rest at run end).
+- Tests: `tests/selfcheck.test.mjs` (18 cases — settings, gen/golden/verify
+  assets incl. a byte-stability regen and a three-channel parity check, all four
+  mode quadrants as flows against a mocked dsh-remote tool shell with real bsub
+  tools and real python/js verify, fallback + diagnosis coverage, route guards,
+  client static contracts).
+
 ### Removed — 2026-11-02 (ngspice channel)
 
 - **The bundled `LocalDesignExample/` environment was deleted** (user decision):
