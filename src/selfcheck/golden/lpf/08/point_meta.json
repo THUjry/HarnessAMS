@@ -1,0 +1,10 @@
+{
+  "point_index": 8,
+  "point_name": "08",
+  "simulator": "spectre",
+  "params": {
+    "r_val": "5k",
+    "c_val": "5n"
+  },
+  "status": "success"
+}

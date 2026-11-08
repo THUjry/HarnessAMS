@@ -37,6 +37,8 @@ import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty } from './serv
 import { remoteMachinesStatus, fetchMachines, sessionInMirror } from './server/machines.js'
 import { remoteProjectFor, checkMachinesForLocal, findRemoteProjectForMachine, createRemoteProject } from './server/remote.js'
 import { buildDiagnosisPrompt, createDiagnosisSession } from './server/diagnose.js'
+import { readSettings, validateSettings, writeSettings } from './server/settings.js'
+import { startSelfcheck, getSelfcheck } from './server/selfcheck.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { registerTools } from './tool.js'
@@ -125,6 +127,39 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, ...r })
       return
     }
+    if (req.method === 'PUT' && route === '/api/project-settings') {
+      // Per-project settings (project_settings.json): the Overview settings table
+      // PUTs the full object on every dropdown change. Local projects only.
+      const sessionId = url.searchParams.get('sessionId')
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      if (remoteProjectFor(project.path)) { json(400, { error: 'project settings run from a local project — the sidebar is disabled inside remote projects' }); return }
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const v = validateSettings(body)
+      if (v.error) { json(400, { error: v.error }); return }
+      await writeSettings(project.path, v.settings)
+      json(200, { ok: true, settings: v.settings })
+      return
+    }
+    if (req.method === 'POST' && route === '/api/selfcheck') {
+      // One-click project self-check under the CURRENT settings: the server
+      // reads project_settings.json itself (single source of truth) and runs the
+      // orchestration in the background; the client polls GET /api/selfcheck.
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const sessionId = body?.sessionId
+      if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
+      const lang = body?.lang === 'zh' ? 'zh' : 'en'
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      if (remoteProjectFor(project.path)) { json(400, { error: 'self-check runs from a local project — the sidebar is disabled inside remote projects' }); return }
+      if (!ws) { json(503, { error: 'harnessams-workspace/harnessams.json not found' }); return }
+      const r = await startSelfcheck(ctx, { sessionId, project, lang, ws, req })
+      if (r.error) { json(r.code ?? 400, { error: r.error }); return }
+      json(200, { ok: true, runId: r.runId })
+      return
+    }
     if (req.method === 'POST' && route === '/api/checks/analyze') {
       // Hand failed check entries to a newly created DSH session (the private
       // replacement of the old copy-to-clipboard diagnose button). The client
@@ -174,7 +209,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, sessionId: r.sessionId, title })
       return
     }
-    json(405, { error: 'GET only (PUT /api/tasks, POST /api/remote-project, POST /api/checks/analyze)' })
+    json(405, { error: 'GET only (PUT /api/tasks, PUT /api/project-settings, POST /api/remote-project, POST /api/selfcheck, POST /api/checks/analyze)' })
     return
   }
 
@@ -251,6 +286,26 @@ async function handle(req, res, ctx) {
       const r = await runRemoteCheckButton(ctx.tools, check, { ...agent, remotePath: hit.rp.remotePath, ws })
       json(200, { ok: true, type: 'remote', channel: r.channel, results: r.results })
     } catch (e) { json(502, { error: String(e?.message ?? e) }) }
+    return
+  }
+
+  // ---- tier 3 Overview: project settings + self-check (local projects) ----
+  if (route === '/api/project-settings') {
+    const sessionId = url.searchParams.get('sessionId')
+    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+    if (remoteProjectFor(project.path)) { json(400, { error: 'project settings run from a local project — the sidebar is disabled inside remote projects' }); return }
+    let settings
+    try { ({ settings } = await readSettings(project.path)) } catch (e) { json(500, { error: `project_settings.json unreadable: ${e.message}` }); return }
+    json(200, { ok: true, settings })
+    return
+  }
+  if (route === '/api/selfcheck') {
+    // id pins one run; without id the latest run serves (memory, then the newest
+    // selfcheck_run.json on disk) so the sidebar restores state after a reload.
+    const run = getSelfcheck(url.searchParams.get('id'), ws)
+    if (!run) { json(404, { error: 'no self-check run yet' }); return }
+    json(200, { ok: true, run })
     return
   }
 

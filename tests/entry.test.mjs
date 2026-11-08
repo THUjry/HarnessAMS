@@ -60,7 +60,7 @@ test('packaging contract: client half declared and whitelisted', async () => {
     assert.ok(pkg.peerDependencies?.[dep], `peer dependency missing for client inject: ${dep}`)
     assert.ok(pkg.devDependencies?.[dep], `dev dependency missing for client inject: ${dep}`)
   }
-  for (const f of ['index.js', 'client.js', 'server/', 'tools/', 'scripts/', 'cordis.patch.yml', 'assets/']) {
+  for (const f of ['index.js', 'client.js', 'server/', 'tools/', 'scripts/', 'selfcheck/', 'cordis.patch.yml', 'assets/']) {
     assert.ok(pkg.files.includes(f), `files whitelist must include ${f}`)
   }
   const st = await stat(new URL('../src/assets/plotly.min.js', import.meta.url))
