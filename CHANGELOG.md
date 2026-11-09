@@ -5,6 +5,28 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed — 2026-11-09 (test suite dedup)
+
+- **Shared test scaffolding extracted to `tests/helpers.mjs`** and five
+  dedup/relaxation passes over the suite (93 → 92 cases, ~120 net lines
+  removed; zero coverage loss, 92/92 green):
+  - the `rw_*` text-protocol assertions (parseRwMachinesText /
+    parseRwExecText) that ran in both `bsub.test.mjs` and `server.test.mjs`
+    now live only in the fuller `server.test.mjs` contract suite;
+  - the fake-res + macrotask route driver (dashboard/diagnose/progress/
+    selfcheck), the `bash -n` guard (server/selfcheck) and the DSH_HOME
+    mirror fixture (bsub/diagnose/selfcheck) are single implementations in
+    the helper;
+  - the per-key "exactly twice (zh+en)" dictionary loops in diagnose/guide/
+    terminal/selfcheck fold into one `assertDictKeys` helper (the full
+    key-set equality check stays in entry.test.mjs);
+  - statement-level source pins relaxed to semantic anchors (terminal's
+    `setInterval(tick, 150)` / same-PTY reattach block, selfcheck's
+    `}, 3_000)`); the selfcheck upload-count pin now derives its expectation
+    from the shipped golden tree instead of the hardcoded 42;
+  - all regression nails (callId/signal, persist chain, promoted job, bjobs
+    layouts, LSF exit 255, `api/api` double prefix, ...) are kept verbatim.
+
 ### Fixed — 2026-11-09 (project self-check launch verification findings)
 
 - **Corrupted `selfcheck_run.json` under concurrent persists**

@@ -6,11 +6,11 @@
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { sanitizeFailed, buildDiagnosisPrompt, createDiagnosisSession } from '../src/server/diagnose.js'
-import { apply } from '../src/index.js'
+import { registerRoutes, callRoute, callPost, makeMirrorHome, setDSHHome, clientSrc, assertDictKeys } from './helpers.mjs'
 
 test('diagnose: sanitizeFailed caps entries and text, drops unknown fields', () => {
   const big = 'x'.repeat(5000)
@@ -105,52 +105,26 @@ test('diagnose: createDiagnosisSession drives create→prompt→rename and degra
 
 // ---- route level: POST /api/checks/analyze through the apply()-registered handler ----
 
-function postHandler(routes) {
-  return async (body) => {
-    const res = { code: 0, body: '', writeHead(c) { this.code = c }, end(b) { this.body = b } }
-    const data = Buffer.from(JSON.stringify(body))
-    const req = {
-      method: 'POST',
-      url: 'http://127.0.0.1/harnessams/api/checks/analyze',
-      headers: {},
-      async *[Symbol.asyncIterator]() { yield data },
-    }
-    routes[0].handler(req, res)
-    for (let i = 0; i < 100 && res.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
-    return { code: res.code, body: res.body ? JSON.parse(res.body) : null }
-  }
-}
+const ANALYZE = 'http://127.0.0.1/harnessams/api/checks/analyze'
 
 // rw_machines text listing in the dsh-remote 0.8.54 shape (parseRwMachinesText contract).
 const MACHINES_TEXT = '- m1  "node1"  [native]  user@10.0.0.1:22\n    auth: key:xx + agent  workspace=/home/user/sim\nconnect with rw_connect(...)\n'
 
 test('diagnose route: 400 contract (bad JSON shape, unknown check, empty failed)', async () => {
-  const routes = []
-  await apply({
-    effect: (fn) => { fn() },
-    webServer: { register: (r) => routes.push(r) },
-    workspaceRegistry: { list: () => [] },
-    tools: { register: () => {} },
-    get: () => null,
-  })
-  const call = postHandler(routes)
-  const bad = { code: 0, body: '', writeHead(c) { this.code = c }, end(b) { this.body = b } }
-  routes[0].handler({ method: 'POST', url: 'http://127.0.0.1/harnessams/api/checks/analyze', headers: {}, async *[Symbol.asyncIterator]() { yield Buffer.from('{oops') } }, bad)
-  for (let i = 0; i < 50 && bad.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
+  const handler = await registerRoutes({ workspaceRegistry: { list: () => [] }, get: () => null })
+  const bad = await callPost(handler, ANALYZE, '{oops')
   assert.equal(bad.code, 400)
-  assert.match(bad.body, /bad JSON body/)
+  assert.match(bad.body.error, /bad JSON body/)
 
-  assert.equal((await call({ check: 'jobs', failed: [{ item: 'x' }] })).code, 400) // missing sessionId
-  assert.equal((await call({ sessionId: 's1', check: 'nope', failed: [{ item: 'x' }] })).code, 400)
-  assert.equal((await call({ sessionId: 's1', check: 'jobs' })).code, 400) // missing failed
-  assert.equal((await call({ sessionId: 's1', check: 'jobs', failed: [] })).code, 400)
-  assert.equal((await call({ sessionId: 's1', check: 'jobs', failed: [{ item: 'x' }] })).code, 404) // session in no workspace
+  assert.equal((await callPost(handler, ANALYZE, { check: 'jobs', failed: [{ item: 'x' }] })).code, 400) // missing sessionId
+  assert.equal((await callPost(handler, ANALYZE, { sessionId: 's1', check: 'nope', failed: [{ item: 'x' }] })).code, 400)
+  assert.equal((await callPost(handler, ANALYZE, { sessionId: 's1', check: 'jobs' })).code, 400) // missing failed
+  assert.equal((await callPost(handler, ANALYZE, { sessionId: 's1', check: 'jobs', failed: [] })).code, 400)
+  assert.equal((await callPost(handler, ANALYZE, { sessionId: 's1', check: 'jobs', failed: [{ item: 'x' }] })).code, 404) // session in no workspace
   // GET still rejected; the 405 hint names the new route
-  const res = { code: 0, body: '', writeHead(c) { this.code = c }, end(b) { this.body = b } }
-  routes[0].handler({ method: 'POST', url: 'http://127.0.0.1/harnessams/api/other' }, res)
-  for (let i = 0; i < 50 && res.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
+  const res = await callRoute(handler, { method: 'POST', url: 'http://127.0.0.1/harnessams/api/other', headers: {} })
   assert.equal(res.code, 405)
-  assert.ok(res.body.includes('/api/checks/analyze'))
+  assert.ok(String(res.body && res.body.error).includes('/api/checks/analyze'))
 })
 
 test('diagnose route: local check anchors the current project workspace and creates the session', async () => {
@@ -162,15 +136,11 @@ test('diagnose route: local check anchors the current project workspace and crea
       prompt: async (req) => { calls.push(['prompt', req]) },
       rename: async (req) => { calls.push(['rename', req]) },
     }
-    const routes = []
-    await apply({
-      effect: (fn) => { fn() },
-      webServer: { register: (r) => routes.push(r) },
+    const handler = await registerRoutes({
       workspaceRegistry: { list: () => [{ id: 'ws-local', path: ws, title: 'harnessams-workspace', sessionIds: ['sess-local'] }] },
-      tools: { register: () => {} },
       get: (n) => (n === 'sessionController' ? sc : null),
     })
-    const call = postHandler(routes)
+    const call = (body) => callPost(handler, ANALYZE, body)
     const r = await call({
       sessionId: 'sess-local', check: 'local', machineId: null, lang: 'zh', auto: false,
       failed: [{ item: 'Node', detail: 'node missing', ok: false, ms: 3 }],
@@ -195,14 +165,12 @@ test('diagnose route: local check anchors the current project workspace and crea
 
 test('diagnose route: remote check anchors the machine remote-project workspace; 404/409/503 paths', async () => {
   const tmp = await mkdtemp(path.join(tmpdir(), 'hams-diag-remote-'))
-  const oldDSH = process.env.DSH_HOME
-  process.env.DSH_HOME = tmp // remoteWorkspacesRoot() resolves mirrors under $DSH_HOME/remote-workspaces
+  const { home, mirror } = makeMirrorHome({
+    host: '10.0.0.1', port: 22, user: 'user', remotePath: '/home/user/sim',
+    segments: ['n1', '2222', 'user', 'ws1'],
+  })
+  const restoreHome = setDSHHome(home) // remoteWorkspacesRoot() resolves mirrors under $DSH_HOME/remote-workspaces
   try {
-    const mirror = path.join(tmp, 'remote-workspaces', 'n1', '2222', 'user', 'ws1')
-    await mkdir(mirror, { recursive: true })
-    await writeFile(path.join(mirror, '.dsh-remote-meta.json'),
-      JSON.stringify({ host: '10.0.0.1', port: 22, username: 'user', remotePath: '/home/user/sim' }))
-
     const calls = []
     const sc = {
       create: async (req) => { calls.push(['create', req]); return { sessionId: 'sess-r' } },
@@ -215,8 +183,6 @@ test('diagnose route: remote check anchors the machine remote-project workspace;
     await mkdir(localWs, { recursive: true })
     const ws = mirror // the remote-project workspace IS the mirror ws1 dir
     const makeCtx = (controller, registryList) => ({
-      effect: (fn) => { fn() },
-      webServer: { register: (r) => routes.push(r) },
       workspaceRegistry: { list: () => registryList ?? [
         { id: 'ws-local', path: localWs, title: 'harnessams-workspace', sessionIds: ['sess-local'] },
         { id: 'ws-remote', path: ws, title: 'node1 (remote)' },
@@ -228,9 +194,8 @@ test('diagnose route: remote check anchors the machine remote-project workspace;
       },
       get: (n) => (n === 'sessionController' ? controller : null),
     })
-    let routes = []
-    await apply(makeCtx(sc))
-    const call = postHandler(routes)
+    let handler = await registerRoutes(makeCtx(sc))
+    const call = (body) => callPost(handler, ANALYZE, body)
 
     const ok = await call({
       sessionId: 'sess-local', check: 'jobs', machineId: 'm1', lang: 'en', auto: true,
@@ -248,38 +213,28 @@ test('diagnose route: remote check anchors the machine remote-project workspace;
     // unknown machine → 404
     assert.equal((await call({ sessionId: 'sess-local', check: 'load', machineId: 'ghost', failed: [{ item: 'x' }] })).code, 404)
     // machine without a remote project (registry holds only the local workspace) → 409
-    routes = []
-    await apply(makeCtx(sc, [{ id: 'ws-local', path: localWs, title: 'harnessams-workspace', sessionIds: ['sess-local'] }]))
-    const call2 = postHandler(routes)
-    const noRp = await call2({ sessionId: 'sess-local', check: 'load', machineId: 'm1', failed: [{ item: 'x' }] })
+    handler = await registerRoutes(makeCtx(sc, [{ id: 'ws-local', path: localWs, title: 'harnessams-workspace', sessionIds: ['sess-local'] }]))
+    const noRp = await call({ sessionId: 'sess-local', check: 'load', machineId: 'm1', failed: [{ item: 'x' }] })
     assert.equal(noRp.code, 409)
     assert.match(noRp.body.error, /no remote project for machine/)
     // controller missing → 503
-    routes = []
-    await apply(makeCtx(null))
-    const call3 = postHandler(routes)
-    const noSc = await call3({ sessionId: 'sess-local', check: 'jobs', machineId: 'm1', failed: [{ item: 'x' }] })
+    handler = await registerRoutes(makeCtx(null))
+    const noSc = await call({ sessionId: 'sess-local', check: 'jobs', machineId: 'm1', failed: [{ item: 'x' }] })
     assert.equal(noSc.code, 503)
     assert.match(noSc.body.error, /sessionController/)
   } finally {
-    if (oldDSH === undefined) delete process.env.DSH_HOME
-    else process.env.DSH_HOME = oldDSH
+    restoreHome()
     await rm(tmp, { recursive: true, force: true })
+    await rm(home, { recursive: true, force: true })
   }
 })
 
 // ---- client static contract (classic script: asserted against the source text) ----
 
-const src = await (async () => {
-  const { readFile } = await import('node:fs/promises')
-  return readFile(new URL('../src/client.js', import.meta.url), 'utf8')
-})()
+const src = await clientSrc()
 
 test('diagnose client: analyze keys exist in both languages, clipboard keys are gone', () => {
-  for (const key of ['chk.analyze', 'chk.analyzing', 'chk.analyzeDone', 'chk.analyzeAuto', 'chk.analyzeFail']) {
-    const hits = src.split(`'${key}':`).length - 1
-    assert.equal(hits, 2, `dictionary key ${key} must exist exactly twice (zh + en), found ${hits}`)
-  }
+  assertDictKeys(src, ['chk.analyze', 'chk.analyzing', 'chk.analyzeDone', 'chk.analyzeAuto', 'chk.analyzeFail'])
   assert.ok(!src.includes('chk.diagnose'), 'the clipboard diagnose flow must be fully removed')
   assert.ok(!src.includes('chk.promptCopied') && !src.includes('chk.copyPrompt'), 'clipboard prompt keys must be gone')
 })

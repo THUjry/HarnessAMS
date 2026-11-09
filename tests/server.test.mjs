@@ -7,17 +7,7 @@ import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { execFileSync } from 'node:child_process'
-
-// The generated one-liners must be valid shell — a misplaced quote shipped once and
-// only failed live (bash: -c: syntax error), so every built command is syntax-checked
-// when bash is available (the Windows CI runner may not have Git Bash on PATH).
-let bashAvailable = true
-try { execFileSync('bash', ['--version'], { stdio: 'pipe' }) } catch { bashAvailable = false }
-function assertValidShell(cmd) {
-  if (!bashAvailable) return
-  execFileSync('bash', ['-n', '-c', cmd], { stdio: 'pipe' })
-}
+import { assertValidShell } from './helpers.mjs'
 import { sessionProject, readTasks, writeTasks, tasksPath } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { resultText, parseRwMachinesText, fetchMachines, findMirrorForMachine, sessionInMirror } from '../src/server/machines.js'

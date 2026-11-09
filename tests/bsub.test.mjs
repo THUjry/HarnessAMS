@@ -4,6 +4,8 @@
 // The worker-script upload tree comes from the workspace sim_scripts_dir; tests
 // point HARNESSAMS_SIM_SCRIPTS_DIR at a self-built fixture so they never depend
 // on the real SmartAnaSim checkout.
+// The rw_* text protocols (parseRwMachinesText / parseRwExecText) are covered by
+// the fuller contract suite in server.test.mjs.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
@@ -13,8 +15,9 @@ import os from 'node:os'
 import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { parseRwExecText, parseRwMachinesText, resolveTarget } from '../src/remote.js'
+import { resolveTarget } from '../src/remote.js'
 import { parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/bsub.js'
+import { makeMirrorHome } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
 const OLD_DSH_HOME = process.env.DSH_HOME
@@ -43,12 +46,10 @@ const SCRIPTS_ROOT = makeScriptsRoot()
 process.env.HARNESSAMS_SIM_SCRIPTS_DIR = SCRIPTS_ROOT
 
 function setupMirror() {
-  const home = tmp('hams-dsh-')
-  const mirror = path.join(home, 'remote-workspaces', 'node1-192.0.2.11-22', 'sim')
-  fs.mkdirSync(mirror, { recursive: true })
-  fs.writeFileSync(path.join(mirror, '.dsh-remote-meta.json'), JSON.stringify({
-    host: '192.0.2.11', port: 22, username: 'op', remotePath: '/home/op/sim',
-  }))
+  const { home, mirror } = makeMirrorHome({
+    host: '192.0.2.11', port: 22, user: 'op', remotePath: '/home/op/sim',
+    segments: ['node1-192.0.2.11-22', 'sim'],
+  })
   process.env.DSH_HOME = home
   return { home, mirror }
 }
@@ -172,27 +173,6 @@ test('worker scripts root: env override resolves, bad values and pluginScripts l
   for (const s of pluginScripts(SCRIPTS_ROOT)) {
     assert.equal(s.local, path.join(SCRIPTS_ROOT, ...s.rel.split('/')))
   }
-})
-
-test('dsh-remote text contracts: machines listing and rw_exec markers', () => {
-  const machines = parseRwMachinesText(MACHINES_TEXT)
-  assert.equal(machines.length, 1)
-  assert.equal(machines[0].id, 'node1')
-  assert.equal(machines[0].host, '192.0.2.11')
-  assert.equal(machines[0].port, 22)
-  assert.equal(machines[0].workspace, '/home/op/sim')
-  assert.equal(machines[0].current, true)
-
-  const ok = parseRwExecText('hello\n[exit code: 0]')
-  assert.equal(ok.stdout, 'hello')
-  assert.equal(ok.exitCode, 0)
-  const bad = parseRwExecText('oops\n-- stderr --\nbroken\n[exit code: 2]')
-  assert.equal(bad.exitCode, 2)
-  assert.match(bad.stderr, /broken/)
-  const promoted = parseRwExecText('[still running after 20000ms; moved to background job job-9]')
-  assert.equal(promoted.promotedJob, 'job-9')
-  const timed = parseRwExecText('x\n[command timed out after 20000ms]')
-  assert.equal(timed.timedOut, true)
 })
 
 test('path guards and poll parsing', () => {

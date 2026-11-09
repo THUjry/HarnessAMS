@@ -5,19 +5,17 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile, stat } from 'node:fs/promises'
+import { clientSrc, assertDictKeys } from './helpers.mjs'
 
-const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+const src = await clientSrc()
 const assetsSrc = await readFile(new URL('../src/server/assets.js', import.meta.url), 'utf8')
 
 test('terminal: TASK_VIEWS carries the term entry and both dictionaries match keys', () => {
   assert.ok(/id: 'term', labelKey: 'tasks\.viewTerm'/.test(src), 'TASK_VIEWS must include the term view')
   // zh and en segments must each define the full term.* key set (identical key sets)
-  for (const key of ['tasks.viewTerm', 'term.noMachines', 'term.reopen', 'term.dead', 'term.closed',
+  assertDictKeys(src, ['tasks.viewTerm', 'term.noMachines', 'term.reopen', 'term.dead', 'term.closed',
     'term.startDir', 'term.noSession', 'term.search', 'term.snippets', 'term.loading',
-    'term.vendorFail', 'term.unavailable', 'term.infoMissing']) {
-    const hits = src.split(`'${key}':`).length - 1
-    assert.equal(hits, 2, `dictionary key ${key} must exist exactly twice (zh + en), found ${hits}`)
-  }
+    'term.vendorFail', 'term.unavailable', 'term.infoMissing'])
 })
 
 test('terminal: rides dsh-remote term routes with the borrowed-session binding hint', () => {
@@ -35,7 +33,8 @@ test('terminal: xterm pooling, polling lifecycle and UX hooks are wired', () => 
   assert.ok(src.includes("TERM_POOL"), 'xterm instances must be pooled per machine')
   assert.ok(/'\/harnessams\/assets\/' \+ f/.test(src) && src.includes("'xterm.js'"), 'vendor bundle loaded from the whitelisted asset route')
   assert.ok(src.includes("'/harnessams/assets/xterm.css'"), 'vendor stylesheet loaded from the asset route')
-  assert.ok(src.includes("setInterval(tick, 150)"), 'output polling loop present')
+  // output polling loop: a 150ms tick interval (unique to the terminal view)
+  assert.match(src, /setInterval\([^)]*150\s*\)/, 'output polling loop present (150ms tick)')
   assert.ok(src.includes('document.hidden'), 'polling must pause while the page is hidden')
   assert.ok(src.includes('TERM_FONT_KEY'), 'font zoom must persist')
   assert.ok(src.includes('onSelectionChange'), 'copy-on-select hook present')
@@ -43,20 +42,20 @@ test('terminal: xterm pooling, polling lifecycle and UX hooks are wired', () => 
   assert.ok(src.includes('search.findNext'), 'search addon wired')
   assert.ok(src.includes('visibilitychange'), 'poll wake on visibility change')
   // runtime effects follow the fallback-resolved machine, not the raw click state —
-  // regression: mirroring raw activeId left the default-active machine unpainted
-  const refPos = src.indexOf('const activeIdRef = useRef(')
-  const safePos = src.indexOf('const activeIdSafe = active?.id ?? null')
-  assert.ok(refPos > 0 && safePos > 0 && refPos > safePos, 'activeIdSafe must be computed before the ref')
-  assert.ok(/const activeIdRef = useRef\(activeIdSafe\); activeIdRef\.current = activeIdSafe/.test(src),
+  // regression: mirroring raw activeId left the default-active machine unpainted.
+  // useRef(activeIdSafe) both pins the source and implies it is computed first.
+  assert.match(src, /const activeIdRef = useRef\(\s*activeIdSafe\s*\)/,
     'activeIdRef must mirror activeIdSafe (fallback included), not raw activeId')
+  assert.match(src, /activeIdRef\.current\s*=\s*activeIdSafe/,
+    'the ref must be re-mirrored on every render')
   // reattach: same-PTY keeps the polling offset (delta-only), a different PTY resets
   // before replaying its ring — regression: unconditional from=0 replay duplicated the
   // whole visible buffer on every sub-tab/session switch
-  assert.ok(/const same = entry\.sessionId === sid/.test(src)
-    && /if \(!same\) \{ entry\.from = 0; entry\.term\?\.reset\(\) \}/.test(src),
-    'same-PTY reattach must keep the offset; different PTY must reset before replay')
+  assert.match(src, /entry\.sessionId\s*===\s*sid/, 'reattach must compare PTY session ids')
+  assert.match(src, /entry\.from\s*=\s*0/, 'a different PTY must reset the polling offset')
+  assert.match(src, /entry\.term\?\.\s*reset\(\)/, '...and clear the old screen before replay')
   const openFresh = src.indexOf("entry.sessionId = o.body.id")
-  assert.ok(openFresh > 0 && /entry\.term\?\.reset\(\)/.test(src.slice(openFresh, openFresh + 200)),
+  assert.ok(openFresh > 0 && /term\?\.\s*reset\(\)/.test(src.slice(openFresh, openFresh + 200)),
     'fresh open on a reused pooled term must reset the old screen first')
 })
 

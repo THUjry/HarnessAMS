@@ -8,25 +8,12 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { apply } from '../src/index.js'
+import { registerRoutes, callGet } from './helpers.mjs'
 import { projectRootOf, readRunProgress, summarizeProject } from '../src/server/progress.js'
 
 async function makeHandler() {
-  const routes = []
-  await apply({
-    effect: (fn) => { fn() },
-    webServer: { register: (r) => routes.push(r) },
-    workspaceRegistry: { list: () => [] },
-    tools: { register: () => {} },
-  })
-  const handler = routes[0].handler
-  return async (route) => {
-    const res = { code: 0, body: '', writeHead(c) { this.code = c }, end(b) { this.body = b } }
-    handler({ method: 'GET', url: 'http://127.0.0.1/harnessams' + route }, res)
-    // the route handler fire-and-forgets its async work — give it a macrotask
-    for (let i = 0; i < 50 && res.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
-    return { code: res.code, body: res.body ? JSON.parse(res.body) : null }
-  }
+  const handler = await registerRoutes({ workspaceRegistry: { list: () => [] } })
+  return (route) => callGet(handler, 'http://127.0.0.1/harnessams' + route)
 }
 
 test('progress: projectRootOf derives the root from run-dir shapes', () => {
