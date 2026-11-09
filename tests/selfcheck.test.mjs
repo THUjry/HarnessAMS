@@ -600,8 +600,8 @@ test('routes: project-settings GET/PUT happy path + guards', async () => {
   const noSession = await driveRoute(routes, getReq('/harnessams/api/project-settings?sessionId=zzz'))
   assert.equal(noSession.code, 404)
 
-  const noRun = await driveRoute(routes, getReq('/harnessams/api/selfcheck'))
-  assert.equal(noRun.code, 404) // no run anywhere (temp registry, no workspace discovery)
+  const noRun = await driveRoute(routes, getReq('/harnessams/api/selfcheck?id=ghost-run'))
+  assert.equal(noRun.code, 404) // unknown run id: 404 regardless of real runs on disk (hermetic)
 })
 
 test('route: selfcheck POST rejects unknown session / remote project', async () => {
