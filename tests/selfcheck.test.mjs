@@ -941,4 +941,9 @@ test('client static contract: keys bilingual, endpoints wired, two-row table, po
   assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo })'), 'mounted in the Overview')
   assert.ok(src.includes('}, 3_000)'), '3s poll while running')
   assert.ok(src.includes("'local'"), 'local dir display branch')
+  // remote-switch auto-pick: the machine column only renders in remote mode, so
+  // without this the mode switch PUT-400s and rolls back — remote unreachable
+  assert.ok(src.includes("value === 'remote' && !next.machine_id && machines.length"),
+    'remote switch must auto-pick a machine when none is set')
+  assert.ok(src.includes('next.machine_id = machines[0].id'), 'auto-pick assigns machines[0].id')
 })

@@ -18,6 +18,13 @@ All notable changes are documented here. The format follows
   flight; a failed write cannot stall the queue. Regression test: a golden run
   is hammered with reads while it executes and every published snapshot must
   parse, plus the drained final file must match the run verdict.
+- **Settings table could not reach remote mode** (`src/client.js`
+  `updateSetting`): the machine column only renders when `run_mode=remote`, so
+  switching to remote with no machine selected PUT-400'd
+  (`run_mode=remote requires machine_id`) and rolled straight back to local —
+  a deadlock that made remote unreachable from the UI. Switching to remote now
+  auto-picks the first machine (`machines[0].id`) into the same PUT when
+  `machine_id` is unset; the client static contract test pins the guard.
 
 ### Added — 2026-11-09 (simulation progress tool cards)
 

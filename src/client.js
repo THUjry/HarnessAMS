@@ -1703,6 +1703,12 @@ window.__ModuleLoader__.load({
       const updateSetting = async (key, value) => {
         const prev = settings
         const next = { ...prev, [key]: value }
+        // The machine column only renders in remote mode, so a remote switch with
+        // machine_id unset would PUT-400 and roll straight back to local — the UI
+        // could never reach remote. Auto-pick the first machine on the way in.
+        if (key === 'run_mode' && value === 'remote' && !next.machine_id && machines.length) {
+          next.machine_id = machines[0].id
+        }
         setSettings(next); setSettingsError(null)
         try {
           const r = await fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId),
