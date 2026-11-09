@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "HarnessAMS",
-    "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-project task sidebar) plus remote projects over dsh-remote, per-project health checks, disk usage, digital assets, the generic remote batch channel (bsub_submit/bsub_poll/bsub_fetch) and the simulator-agnostic analysis tools (collect/progress/report/trash)"
+    "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-project task sidebar) plus remote projects over dsh-remote, per-project health checks, disk usage, digital assets, the generic remote batch channel (batch_submit/batch_poll/batch_fetch) and the simulator-agnostic analysis tools (collect/progress/report/trash)"
   }
 }

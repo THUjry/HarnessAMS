@@ -101,7 +101,7 @@ function remoteVerifyJson(topo) {
   }
 }
 
-// A poll output the real bsub_poll parser accepts as "completed".
+// A poll output the real batch_poll parser accepts as "completed".
 function pollText() {
   return '__BJOB__\n4242 DONE node5\n__META__\n9\n__DIRS__\n9\n__PROG__\n'
     + JSON.stringify({ status: 'completed', total_points: 9, succeeded: 9, failed: 0 })
@@ -120,9 +120,9 @@ function makeHarness({ scenario = {} }) {
   let hangResolve = null
 
   const ctx = {} // filled below (toolDefinitions(ctx) needs ctx first for closures)
-  const bsubTools = new Map()
+  const batchTools = new Map()
   for (const def of toolDefinitions(ctx)) {
-    if (def.name.startsWith('bsub_')) bsubTools.set(def.name, makeTool(def))
+    if (def.name.startsWith('batch_')) batchTools.set(def.name, makeTool(def))
   }
 
   let hangStarted = false
@@ -234,7 +234,7 @@ function makeHarness({ scenario = {} }) {
     register: () => {},
     get: (name) => {
       if (name.startsWith('rw_')) return { name }
-      if (bsubTools.has(name)) return bsubTools.get(name)
+      if (batchTools.has(name)) return batchTools.get(name)
       if (spectre[name]) return { name }
       return undefined
     },
@@ -267,9 +267,9 @@ function makeHarness({ scenario = {} }) {
           return { isError: true, value: { text: String(e?.message ?? e) } }
         }
       }
-      if (bsubTools.has(name)) {
+      if (batchTools.has(name)) {
         try {
-          const result = await bsubTools.get(name).execute(args, {})
+          const result = await batchTools.get(name).execute(args, {})
           return { isError: false, value: { text: JSON.stringify(result) } }
         } catch (e) {
           return { isError: true, value: { text: String(e?.message ?? e) } }
@@ -401,11 +401,12 @@ test('settings: defaults, validation, persistence', async () => {
   })
   // valid full object round-trips
   const v = validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1',
-    remote_dir: '/abs/path', scheduler: 'none', compute_script_remote: 'js' })
+    remote_dir: '/abs/path', scheduler: 'direct', compute_script_remote: 'js' })
   assert.ok(!v.error, v.error)
   assert.equal(v.settings.compute_script_remote, 'js')
   // enum + mode coupling guards
   assert.match(validateSettings({ ...defaultSettings(), simulator: 'ngspice' }).error, /simulator must be one of/)
+  assert.match(validateSettings({ ...defaultSettings(), scheduler: 'none' }).error, /scheduler must be one of/)
   assert.match(validateSettings({ ...defaultSettings(), run_mode: 'remote' }).error, /run_mode=remote requires machine_id/)
   assert.match(validateSettings({ ...defaultSettings(), remote_dir: 'a/../b' }).error, /must not contain/)
 
@@ -425,6 +426,10 @@ test('settings: defaults, validation, persistence', async () => {
   const dirty = await readSettings(tmp)
   assert.equal(dirty.settings.run_mode, 'local')
   assert.equal(dirty.settings.machine_id, 'x')
+  // legacy scheduler=none (settings file from before the direct rename) migrates on read
+  await fsp.writeFile(settingsPath(tmp), '{"scheduler":"none"}', 'utf8')
+  const legacy = await readSettings(tmp)
+  assert.equal(legacy.settings.scheduler, 'direct')
 })
 
 // ---------------------------------------------------------------------------
@@ -586,6 +591,11 @@ test('routes: project-settings GET/PUT happy path + guards', async () => {
   const noSession = await driveRoute(routes, getReq('/harnessams/api/project-settings?sessionId=zzz'))
   assert.equal(noSession.code, 404)
 
+  // restore-latest is gone (2026-11-09): a global "latest" run bled verdicts
+  // across projects, so an id-less GET is now a hard 400
+  const noId = await driveRoute(routes, getReq('/harnessams/api/selfcheck'))
+  assert.equal(noId.code, 400)
+
   const noRun = await driveRoute(routes, getReq('/harnessams/api/selfcheck?id=ghost-run'))
   assert.equal(noRun.code, 404) // unknown run id: 404 regardless of real runs on disk (hermetic)
 })
@@ -674,7 +684,7 @@ test('flow: simulator=spectre + local', async () => {
   } finally { f.restoreAll() }
 })
 
-test('flow: spectre + remote — LSF fails → diagnosis + fallback(none) passes', async () => {
+test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) passes', async () => {
   const f = await startFlow({
     settings: { run_mode: 'remote', machine_id: 'm1', scheduler: 'lsf', compute_script_remote: 'js' },
     scenario: { lsfSubmitFail: true },
@@ -689,7 +699,7 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(none) passes
 
     // scheduler column: primary failed, fallback passed with a warn note
     const schedSteps = run.steps.filter((s) => s.settingColumn === 'scheduler')
-    assert.equal(schedSteps.length, 4) // submit+poll × (lsf, none fallback)
+    assert.equal(schedSteps.length, 4) // submit+poll × (lsf, direct fallback)
     assert.ok(schedSteps[0].ok === false)
     assert.ok(schedSteps.some((s) => s.warn && /fallback/.test(s.warn)))
     const compRemote = run.steps.filter((s) => s.settingColumn === 'compute_remote')
@@ -700,7 +710,7 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(none) passes
     const prompt = f.ctx.__scCalls.prompt[0].content[0].text
     assert.match(prompt, /project self-check/)
     assert.match(prompt, /scheduler=lsf/)
-    assert.match(prompt, /bsub_submit/)
+    assert.match(prompt, /batch_submit/)
     assert.match(prompt, /Answer in English\./)
     assert.equal(f.ctx.__scCalls.rename[0].title, 'HarnessAMS diagnosis: selfcheck @ node1')
 
@@ -719,6 +729,28 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(none) passes
 
     // R4 cross-check ran the local python verify on fetched artifacts
     assert.ok(f.ctx.__downloads.some((d) => /_psf\.csv$/.test(d.path)))
+  } finally { f.restoreAll() }
+})
+
+test('flow: spectre + remote — scheduler=direct fails → verdict fails (nothing forgives a primary failure)', async () => {
+  // Regression (2026-11-09): with scheduler=direct there is no fallback, and
+  // finalize used to forgive primary-attempt failures unconditionally — a
+  // broken direct submit still reported remote:'ok' / summary.ok:true.
+  const f = await startFlow({
+    settings: { run_mode: 'remote', machine_id: 'm1', scheduler: 'direct' },
+    scenario: { directRunFail: true },
+    remote: true,
+  })
+  try {
+    assert.ok(f.start.runId, f.start.error)
+    await waitDone(f.start.runId, f.ws)
+    const run = await waitDiagnoses(f.start.runId, f.ws, 1)
+    assert.equal(run.summary.remote, 'failed')
+    assert.equal(run.summary.ok, false)
+    assert.equal(run.summary.fallback, undefined)
+    const schedSteps = run.steps.filter((s) => s.settingColumn === 'scheduler')
+    assert.equal(schedSteps.length, 2) // submit+poll only — no fallback attempt exists
+    assert.ok(schedSteps.every((s) => s.ok === false))
   } finally { f.restoreAll() }
 })
 
@@ -914,14 +946,14 @@ test('client static contract: keys bilingual, endpoints wired, two-row table, po
     'pset.browseTitle', 'pset.browseNoMirror', 'pset.browseUp', 'pset.browseHere',
     'pset.currentMirrorDir', 'pset.pickSubdir', 'pset.colMode', 'pset.colMachine', 'pset.colSched',
     'pset.colSim', 'pset.colCompLocal', 'pset.colCompRemote', 'pset.mode.local', 'pset.mode.remote',
-    'pset.sched.lsf', 'pset.sched.none', 'pset.sim.spectre', 'pset.sim.none', 'pset.comp.python',
+    'pset.sched.lsf', 'pset.sched.direct', 'pset.sim.spectre', 'pset.sim.none', 'pset.comp.python',
     'pset.comp.js', 'pset.noMachine', 'pset.saveFailed',
     'selfchk.title', 'selfchk.desc', 'selfchk.run', 'selfchk.running', 'selfchk.startFailed',
     'selfchk.scopeLocal', 'selfchk.scopeRemote', 'selfchk.noneYet', 'selfchk.skipped',
     'selfchk.summaryOk', 'selfchk.summaryFallback', 'selfchk.summaryFail', 'selfchk.diagDone', 'selfchk.diagFail',
   ])
   assert.ok(src.includes("API + '/project-settings?"), 'client must call /api/project-settings')
-  assert.ok(src.includes("API + '/selfcheck'"), 'client must call /api/selfcheck')
+  assert.ok(src.includes("API + '/selfcheck?id='"), 'client must poll /api/selfcheck by run id')
   assert.ok(src.includes('function ProjectSelfcheck('))
   assert.ok(src.includes('function SettingsTable('))
   assert.ok(src.includes('function RemoteDirBrowse('))

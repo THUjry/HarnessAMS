@@ -24,7 +24,7 @@
 // and serves the vendored xterm.js bundle under /assets/. Remote file browsing/editing
 // is NOT proxied here — dsh-remote's own tools and web surface do it.
 // Model tools (moved from SmartAnaSim 2026-11-01, keeping that plugin simulator-only):
-// the generic remote batch channel (bsub_submit/bsub_poll/bsub_fetch; worker scripts
+// the generic remote batch channel (batch_submit/batch_poll/batch_fetch; worker scripts
 // come from the workspace sim_scripts_dir) and the simulator-agnostic analysis/ops
 // tools (sim_analysis/sim_progress/safe_trash; analysis Python under scripts/).
 // The session tool cards read two extra read-only endpoints (/api/progress and
@@ -46,7 +46,7 @@ import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { progressPayload, progressSummaryPayload } from './server/progress.js'
 import { registerTools } from './tool.js'
-import { bsubTools } from './tools/bsub.js'
+import { batchTools } from './tools/bsub.js'
 import { sharedTools } from './tools/shared.js'
 
 export const name = 'dsh-harnessams'
@@ -55,7 +55,7 @@ export const name = 'dsh-harnessams'
 export const inject = ['webServer', 'workspaceRegistry', 'tools']
 
 export function toolDefinitions(ctx = {}) {
-  return [...bsubTools(ctx), ...sharedTools(ctx)]
+  return [...batchTools(ctx), ...sharedTools(ctx)]
 }
 // Current shared surface: sim_analysis (collect + optional report dashboard),
 // sim_progress (local progress-file window), safe_trash.
@@ -305,10 +305,13 @@ async function handle(req, res, ctx) {
     return
   }
   if (route === '/api/selfcheck') {
-    // id pins one run; without id the latest run serves (memory, then the newest
-    // selfcheck_run.json on disk) so the sidebar restores state after a reload.
-    const run = getSelfcheck(url.searchParams.get('id'), ws)
-    if (!run) { json(404, { error: 'no self-check run yet' }); return }
+    // id pins one run (the restore-latest surface was removed 2026-11-09: a
+    // global "latest" run bled verdicts across projects). The client only ever
+    // polls a run it started itself.
+    const id = url.searchParams.get('id')
+    if (!id) { json(400, { error: 'id is required (the runId returned by POST /api/selfcheck)' }); return }
+    const run = getSelfcheck(id, ws)
+    if (!run) { json(404, { error: 'no such self-check run' }); return }
     json(200, { ok: true, run })
     return
   }

@@ -5,9 +5,9 @@
 //
 //   simulator=spectre  full simulation path: spectre_assemble -> run_sweep ->
 //                      spectre_parse -> pointwise verify (local), or
-//                      bsub_submit/poll -> remote parse+verify -> fetch +
+//                      batch_submit/poll -> remote parse+verify -> fetch +
 //                      cross-check (remote; an LSF failure is diagnosed and
-//                      retried once with scheduler=none).
+//                      retried once with scheduler=direct).
 //   simulator=none     no simulation: the bundled golden dataset (src/selfcheck/
 //                      golden, analytic RC AC responses in psfascii form) replays
 //                      parse + compute locally, or upload -> remote compute ->
@@ -318,18 +318,15 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
   return { runId }
 }
 
+// A run is only reachable by its id (POST returns the runId; the client polls
+// GET /api/selfcheck?id=...). The former restore-latest surface was removed
+// (2026-11-09): a global "latest" run bled verdicts across projects — the
+// Overview of project B happily displayed (and live-polled) project A's run.
 export function getSelfcheck(id, ws) {
-  if (id) {
-    const mem = store.get(id)
-    if (mem) return runView(mem)
-    return runView(readRunFromDisk(id, ws))
-  }
-  let best = null
-  for (const run of store.values()) {
-    if (!best || run.startedAt > best.startedAt) best = run
-  }
-  if (best) return runView(best)
-  return runView(latestRunFromDisk(ws))
+  if (!id) return null
+  const mem = store.get(id)
+  if (mem) return runView(mem)
+  return runView(readRunFromDisk(id, ws))
 }
 
 function readRunFromDisk(id, ws) {
@@ -337,23 +334,6 @@ function readRunFromDisk(id, ws) {
   try {
     return JSON.parse(fs.readFileSync(path.join(ws.config.workspace_root, 'selfcheck', id, 'selfcheck_run.json'), 'utf8'))
   } catch { return null }
-}
-
-function latestRunFromDisk(ws) {
-  if (!ws) return null
-  const root = path.join(ws.config.workspace_root, 'selfcheck')
-  let entries = []
-  try { entries = fs.readdirSync(root, { withFileTypes: true }) } catch { return null }
-  let best = null
-  for (const ent of entries.slice(0, 30)) {
-    if (!ent.isDirectory()) continue
-    try {
-      const p = path.join(root, ent.name, 'selfcheck_run.json')
-      const run = JSON.parse(fs.readFileSync(p, 'utf8'))
-      if (!best || (run.startedAt ?? '') > (best.startedAt ?? '')) best = run
-    } catch { /* skip unreadable */ }
-  }
-  return best
 }
 
 // ---------------------------------------------------------------------------
@@ -549,10 +529,10 @@ function skipRestForUnprepared(run, mode, sim, reason) {
     skipStep(run, { item: sim === 'spectre' ? 'spectre_parse (LPF+HPF)' : 'spectre_parse (golden)', settingColumn: 'simulator' }, reason)
     skipStep(run, { item: `pointwise verify (${run._priv.settings.compute_script_local}, LPF+HPF)`, settingColumn: 'compute_local' }, reason)
   } else if (sim === 'spectre') {
-    skipStep(run, { section, item: 'bsub_submit (LPF+HPF)', settingColumn: 'scheduler' }, reason)
-    skipStep(run, { section, item: 'bsub_poll → completed', settingColumn: 'scheduler' }, reason)
+    skipStep(run, { section, item: 'batch_submit (LPF+HPF)', settingColumn: 'scheduler' }, reason)
+    skipStep(run, { section, item: 'batch_poll → completed', settingColumn: 'scheduler' }, reason)
     skipStep(run, { section, item: `remote parse + verify (${run._priv.settings.compute_script_remote})`, settingColumn: 'compute_remote' }, reason)
-    skipStep(run, { section, item: 'bsub_fetch + local cross-check', settingColumn: 'compute_remote' }, reason)
+    skipStep(run, { section, item: 'batch_fetch + local cross-check', settingColumn: 'compute_remote' }, reason)
   } else {
     skipStep(run, { section, item: 'golden upload (rw_upload)', settingColumn: 'machine' }, reason)
     skipStep(run, { section, item: `remote parse + verify (${run._priv.settings.compute_script_remote})`, settingColumn: 'compute_remote' }, reason)
@@ -656,13 +636,13 @@ async function runVerifyStep(run, prerequisiteOk) {
 
 function remoteDirFor(run, topo, scheduler) {
   // Per-attempt subdirectories keep the LSF retry from colliding with the
-  // failed batch (bsub_submit refuses clobbering existing point_meta files).
+  // failed batch (batch_submit refuses clobbering existing point_meta files).
   return remoteJoin(run._priv.remoteBase, run.id, `${topo}_${scheduler}`)
 }
 
 async function remoteSpectreChain(run) {
   const { ctx, settings } = run._priv
-  const primary = settings.scheduler === 'none' ? 'none' : 'lsf'
+  const primary = settings.scheduler === 'direct' ? 'direct' : 'lsf'
 
   // staging: template + sweep_config + both verify flavors ride along (the
   // compute language can be switched without re-staging)
@@ -675,7 +655,7 @@ async function remoteSpectreChain(run) {
   }
 
   const submitStep = (scheduler, label, fallback) => timedStep(run, {
-    section: 'remote', item: `bsub_submit (LPF+HPF, ${label})`, settingColumn: 'scheduler',
+    section: 'remote', item: `batch_submit (LPF+HPF, ${label})`, settingColumn: 'scheduler',
     attempt: fallback ? 'fallback' : 'primary',
     ...(fallback ? { warn: 'fallback attempt after scheduler failure' } : {}),
   }, async () => {
@@ -684,13 +664,13 @@ async function remoteSpectreChain(run) {
     let ok = true
     for (const topo of TOPOS) {
       const staging = path.join(run.runDir, 'remote', topo)
-      const r = await callTool(ctx, 'bsub_submit', {
+      const r = await callTool(ctx, 'batch_submit', {
         run_dir: staging,
         remote_dir: remoteDirFor(run, topo, scheduler),
         worker: 'spectre/spectre_sweep_worker.py',
         machine_id: settings.machine_id,
         scheduler,
-      }, { timeoutMs: scheduler === 'none' ? 660_000 : 900_000 })
+      }, { timeoutMs: scheduler === 'direct' ? 660_000 : 900_000 })
       const job = readJob(staging)
       if (r.isError || !job) ok = false
       details.push(`${topo}: ${job ? `${job.scheduler}/${job.job_id} -> ${job.remote_dir}` : (r.text || 'no job file').slice(0, 300)}`)
@@ -699,7 +679,7 @@ async function remoteSpectreChain(run) {
   })
 
   const pollStep = (scheduler, submitOk) => timedStep(run, {
-    section: 'remote', item: 'bsub_poll → completed', settingColumn: 'scheduler',
+    section: 'remote', item: 'batch_poll → completed', settingColumn: 'scheduler',
     attempt: scheduler === primary ? 'primary' : 'fallback',
   }, async () => {
     if (!submitOk) return { ok: false, result: 'skipped (submit failed)', detail: '' }
@@ -712,13 +692,13 @@ async function remoteSpectreChain(run) {
       let state = null
       let last = null
       while (Date.now() < budget) {
-        const r = await callTool(ctx, 'bsub_poll', { run_dir: staging, machine_id: settings.machine_id },
+        const r = await callTool(ctx, 'batch_poll', { run_dir: staging, machine_id: settings.machine_id },
           { timeoutMs: 60_000 })
         last = r
         const parsed = extractStateJson(r.text)
         state = parsed?.state ?? null
         if (state === 'completed' || state === 'failed' || r.isError) break
-        if (scheduler === 'none') break // direct runs finish inside submit
+        if (scheduler === 'direct') break // direct runs finish inside submit
         await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
       }
       const prog = await fsp.readFile(path.join(staging, 'sweep_progress.json'), 'utf8')
@@ -735,13 +715,13 @@ async function remoteSpectreChain(run) {
   const p1 = await pollStep(primary, s1.ok === true)
   let good = { scheduler: primary, ok: s1.ok === true && p1.ok === true }
 
-  if (!good.ok && primary !== 'none') {
+  if (!good.ok && primary !== 'direct') {
     // Immediate diagnosis of the scheduler cluster, then retry direct.
     await diagnoseSteps(run, [s1, p1], 'remote-scheduler')
-    const s2 = await submitStep('none', 'direct', true)
-    const p2 = await pollStep('none', s2.ok === true)
+    const s2 = await submitStep('direct', 'direct', true)
+    const p2 = await pollStep('direct', s2.ok === true)
     if (s2.ok === true && p2.ok === true) {
-      good = { scheduler: 'none', ok: true, viaFallback: true }
+      good = { scheduler: 'direct', ok: true, viaFallback: true }
       p2.warn = (p2.warn ? p2.warn + ' · ' : '') + 'completed via fallback (direct run)'
       void persistRun(run)
     }
@@ -749,7 +729,7 @@ async function remoteSpectreChain(run) {
 
   if (!good.ok) {
     skipStep(run, { section: 'remote', item: `remote parse + verify (${settings.compute_script_remote})`, settingColumn: 'compute_remote' }, 'batch failed')
-    skipStep(run, { section: 'remote', item: 'bsub_fetch + local cross-check', settingColumn: 'compute_remote' }, 'batch failed')
+    skipStep(run, { section: 'remote', item: 'batch_fetch + local cross-check', settingColumn: 'compute_remote' }, 'batch failed')
     return
   }
   run._priv.usedScheduler = good.scheduler
@@ -794,13 +774,13 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
   })
 
   if (verifyStep.ok !== true) {
-    skipStep(run, { section: 'remote', item: parserFromScriptsDir ? 'bsub_fetch + local cross-check' : 'artifact download + local cross-check', settingColumn: 'compute_remote' }, 'remote verify failed')
+    skipStep(run, { section: 'remote', item: parserFromScriptsDir ? 'batch_fetch + local cross-check' : 'artifact download + local cross-check', settingColumn: 'compute_remote' }, 'remote verify failed')
     return
   }
 
   // R4 / RN3 — fetch artifacts + local cross-check in the selected LOCAL language
   await timedStep(run, {
-    section: 'remote', item: parserFromScriptsDir ? 'bsub_fetch + local cross-check' : 'artifact download + local cross-check',
+    section: 'remote', item: parserFromScriptsDir ? 'batch_fetch + local cross-check' : 'artifact download + local cross-check',
     settingColumn: 'compute_remote',
   }, async () => {
     checkBudget(run)
@@ -810,7 +790,7 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
     for (const topo of TOPOS) {
       const staging = path.join(run.runDir, 'remote', topo)
       if (parserFromScriptsDir) {
-        const r = await callTool(ctx, 'bsub_fetch',
+        const r = await callTool(ctx, 'batch_fetch',
           { run_dir: staging, machine_id: settings.machine_id, includes: FETCH_INCLUDES },
           { timeoutMs: 300_000 })
         if (r.isError) {
@@ -819,7 +799,7 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
           continue
         }
       } else {
-        // none-mode: plain rw_download of the psf CSVs the remote parse produced
+        // golden/direct mode: plain rw_download of the psf CSVs the remote parse produced
         const dir = remoteJoin(run._priv.remoteBase, run.id, topo)
         await fsp.mkdir(path.join(staging, 'psf'), { recursive: true })
         let got = 0
@@ -916,8 +896,11 @@ function finalize(run) {
     const remoteSteps = run.steps.filter((s) => s.section === 'remote' && s.ms != null && s.ok !== null)
     // The PRIMARY submit/poll pair fails on purpose when the scheduler breaks and
     // the fallback attempt takes over — those failures must not sink the verdict
-    // once the fallback completed the chain.
-    const hardFailed = remoteSteps.some((s) => s.ok === false && s.attempt !== 'primary')
+    // once the fallback completed the chain. Without a SUCCESSFUL fallback there
+    // is nothing to forgive: with scheduler=direct there is no fallback at all,
+    // so a primary failure must fail the verdict (it used to report remote:'ok').
+    const hardFailed = remoteSteps.some((s) => s.ok === false
+      && (s.attempt !== 'primary' || !run._priv.viaFallback))
     if (hardFailed) remote = 'failed'
     else if (run._priv.viaFallback) remote = 'ok-via-fallback'
     else remote = remoteSteps.length ? 'ok' : 'failed'

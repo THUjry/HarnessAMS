@@ -1,5 +1,5 @@
 // Generic remote batch channel: submit a worker through LSF (bsub), or run the
-// same worker directly on the remote login host (scheduler=none, node-local
+// same worker directly on the remote login host (scheduler=direct, node-local
 // foreground). Both paths upload one run directory plus the suite's worker
 // scripts and record the same job file for poll/fetch.
 //
@@ -162,7 +162,7 @@ export function buildSubmitCommand({ remoteDir, queue, jobName, python, workerPa
   return parts.join(' ')
 }
 
-// scheduler=none: run the SAME worker directly on the remote host (the
+// scheduler=direct: run the SAME worker directly on the remote host (the
 // node-local foreground mode — no LSF involvement). The command is executed
 // synchronously through rw_exec, so a short batch returns its own progress.
 export function buildDirectCommand({ remoteDir, python, workerPath, workerArgs }) {
@@ -182,8 +182,8 @@ export function postSubmitCommand(remoteDir, jobId) {
 }
 
 export function pollCommand({ remoteDir, jobId, scheduler }) {
-  const bjob = scheduler === 'none'
-    ? 'echo __BJOB__; echo "(scheduler=none)"'
+  const bjob = scheduler === 'direct'
+    ? 'echo __BJOB__; echo "(scheduler=direct)"'
     : `echo __BJOB__; bjobs -noheader -o 'jobid stat exec_host' ${shq(jobId)} 2>&1`
   return `cd ${shq(remoteDir)} || exit 9; ${bjob}; `
     + `echo __META__; ls -1 ${shq(normalizeRemoteRoot(remoteDir))}/*/point_meta.json 2>/dev/null | wc -l; `

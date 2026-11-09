@@ -29,7 +29,7 @@ test('apply registers the /harnessams prefix route and the model tools', async (
   assert.equal(routes[0].path, '/harnessams')
   assert.equal(typeof routes[0].handler, 'function')
   assert.deepEqual(registered.sort(), [
-    'bsub_fetch', 'bsub_poll', 'bsub_submit',
+    'batch_fetch', 'batch_poll', 'batch_submit',
     'safe_trash', 'sim_analysis', 'sim_progress',
   ])
 })
@@ -101,7 +101,7 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   const m = /const SIM_CARD_TOOLS = \[([^\]]+)\]/.exec(src)
   assert.ok(m, 'SIM_CARD_TOOLS list must exist')
   const cardTools = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean)
-  assert.deepEqual(cardTools.sort(), ['bsub_fetch', 'bsub_poll', 'bsub_submit', 'sim_analysis',
+  assert.deepEqual(cardTools.sort(), ['batch_fetch', 'batch_poll', 'batch_submit', 'sim_analysis',
     'sim_progress', 'spectre_assemble', 'spectre_parse', 'spectre_run_sweep'])
   assert.ok(src.includes('hams-toolview'), 'card display toggle must persist via localStorage')
   assert.ok(src.includes('TOOLVIEW_EVENT'), 'mounted cards must flip without a reload')

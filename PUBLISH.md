@@ -19,13 +19,13 @@ Checklist (per package, run from the package directory):
 2. Package content check (must-contain AND must-not-contain)
    - `dsh-harnessams` (run in `src/`) must contain exactly: `index.js`, `client.js` (the
      browser half — combo-loaded classic script, single file), `server/` (host-half
-     modules), `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 6 model tools:
-     `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_analysis`/`sim_progress`/
+     modules), `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js`/`trash.js` (the 6 model
+     tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/
      `safe_trash`), `cordis.patch.yml`, `assets/` (`plotly.min.js` about 4.6 MB + the vendored
      xterm bundle — `xterm.js`, `xterm.css`, `xterm-addon-fit.js`, `xterm-addon-search.js`
      — + `THIRD_PARTY_NOTICES.md`; the Plotly and xterm attributions travel with the
-     assets), `scripts/common/` (4 `.py`: `common_collect_results.py`,
-     `common_gen_sweep_report.py`, `common_trash.py` + a byte-identical
+     assets), `scripts/common/` (3 `.py`: `common_collect_results.py`,
+     `common_gen_sweep_report.py` + a byte-identical
      `common_workspace.py` copy), `scripts/selfcheck/` (2 files:
      `selfcheck_verify.py` + `selfcheck_verify.mjs` — the self-check compute twins),
      `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` +

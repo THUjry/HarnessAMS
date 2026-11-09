@@ -122,7 +122,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    The **project settings + project self-check** block sits under the check panel
    (local projects). Per-project settings live in
    `<workspace>/.harnessams/project_settings.json` (`run_mode` local/remote,
-   `machine_id`, `remote_dir`, `scheduler` lsf/none, `simulator` spectre/none,
+   `machine_id`, `remote_dir`, `scheduler` lsf/direct, `simulator` spectre/none,
    `compute_script_local`/`compute_script_remote` python/js) and render as a
    two-row table — row 1 = the live settings (dropdown cells, PUT on every
    change), row 2 = that setting's self-check verdict. Columns cascade off the
@@ -134,9 +134,9 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    machine, connection, environment, permissions, tools and compute — with ideal
    RC low-pass/high-pass testbenches (3×3 parameter grid, no PDK):
    `simulator=spectre` runs assemble → run_sweep → parse → pointwise verify
-   (locally), or bsub submit/poll → remote parse+verify → fetch + cross-check
+   (locally), or batch submit/poll → remote parse+verify → fetch + cross-check
    (remotely; an LSF failure is diagnosed immediately and retried once with
-   `scheduler=none`); `simulator=none` skips the simulator entirely and replays a
+   `scheduler=direct`); `simulator=none` skips the simulator entirely and replays a
    bundled analytic golden dataset through parse + compute (locally, or
    upload → remote compute → download + cross-check). Verification compares every
    frequency point against the analytic RC response (1% tolerance) in the selected
@@ -145,7 +145,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    automatically (same private session-controller channel as the check buttons).
 4. **Session tool cards (conversation)** — DSH renders a generic JSON card for
    every model tool call; HarnessAMS registers the `tool.call.toolview` slot for
-   the eight simulation tools (`bsub_submit`/`bsub_poll`/`bsub_fetch`,
+   the eight simulation tools (`batch_submit`/`batch_poll`/`batch_fetch`,
    `sim_progress`/`sim_analysis`, `spectre_assemble`/`spectre_run_sweep`/
    `spectre_parse` — keyed by exact wire tool name, one renderer covers both
    plugins; SmartAnaSim ships no client half). A card shows a status badge, a
@@ -154,7 +154,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    sweep in flight polls `/api/progress` live (3 s, paused while the tab is
    hidden) so the bar grows while the tool call blocks, and settled cards fetch
    the cross-batch summary once from `/api/progress-summary` (a local view —
-   remote batches surface after `bsub_fetch` brings the progress files back,
+   remote batches surface after `batch_fetch` brings the progress files back,
    the same dual-window semantics as the `sim_progress` tool). An expandable
    details section keeps the raw args/result JSON; the console-page display
    settings toggle turns the cards off (browser-local preference; the off state
@@ -165,7 +165,7 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
 
 | Package | Ships beyond the entry JS | Deliberately NOT shipped |
 |---|---|---|
-| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js` (the 6 model tools: `bsub_submit`/`bsub_poll`/`bsub_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (4 `.py`: the analysis pipeline collect/report/trash + a byte-identical `common_workspace.py` copy); `scripts/selfcheck/` (`selfcheck_verify.py` + `selfcheck_verify.mjs`, the self-check compute twins — same JSON contract); `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` + `golden/`, a 36-file analytic 3×3 psfascii dataset that replays the pipeline without a simulator) | `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
+| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js`/`trash.js` (the 6 model tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`; trash is a JS module since 2026-11-09); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (3 `.py`: the analysis pipeline collect/report + a byte-identical `common_workspace.py` copy); `scripts/selfcheck/` (`selfcheck_verify.py` + `selfcheck_verify.mjs`, the self-check compute twins — same JSON contract); `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` + `golden/`, a 36-file analytic 3×3 psfascii dataset that replays the pipeline without a simulator) | `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
 The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite

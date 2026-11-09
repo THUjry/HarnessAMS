@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "HarnessAMS",
-    "description": "HarnessAMS 顶层插件：三层界面（/harnessams API 之上的全局控制台页、项目=DSH 工作区、项目任务侧栏），附远程项目（dsh-remote）、健康检查、磁盘占用、数字资产、通用远程批量通道（bsub_submit/bsub_poll/bsub_fetch）与仿真器无关的分析工具（collect/progress/report/trash）"
+    "description": "HarnessAMS 顶层插件：三层界面（/harnessams API 之上的全局控制台页、项目=DSH 工作区、项目任务侧栏），附远程项目（dsh-remote）、健康检查、磁盘占用、数字资产、通用远程批量通道（batch_submit/batch_poll/batch_fetch）与仿真器无关的分析工具（collect/progress/report/trash）"
   }
 }

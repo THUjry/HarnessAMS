@@ -7,7 +7,7 @@
 // tool arguments the card already shows).
 //
 // Paths may be remote-shaped POSIX strings (a mirror path only syncs progress
-// files after bsub_fetch); anything not present on this host answers
+// files after batch_fetch); anything not present on this host answers
 // { local: false } and the client silently omits the progress/aggregate block.
 import fs from 'node:fs'
 import path from 'node:path'
