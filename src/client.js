@@ -247,6 +247,60 @@ window.__ModuleLoader__.load({
         'selfchk.summaryFail': '自检失败',
         'selfchk.diagDone': '已创建诊断会话 {id} — 请到左侧会话树查看。',
         'selfchk.diagFail': '创建诊断会话失败：{err}',
+        'guide.s6t': '仿真进度卡片',
+        'guide.s6': '会话里的仿真工具调用（bsub 提交/轮询/取回、进度、分析、spectre 装配/扫掠/解析）渲染为专属进度卡片：实时显示已完成几批、多少个仿真、待完成多少；本地扫批运行中卡片自动刷新。不需要时可在控制台页「显示设置」关闭（默认开启）。',
+        'set.title': '显示设置',
+        'set.toolview': '会话内仿真进度卡片',
+        'set.toolviewHint': '关闭后这些工具调用回退为原始 JSON 显示。浏览器本地偏好，对本机所有会话生效。',
+        'card.title.bsub_submit': '远程批提交',
+        'card.title.bsub_poll': '远程批轮询',
+        'card.title.bsub_fetch': '远程批取回',
+        'card.title.sim_progress': '仿真进度',
+        'card.title.sim_analysis': '仿真分析',
+        'card.title.spectre_assemble': 'Spectre 装配',
+        'card.title.spectre_run_sweep': 'Spectre 扫批',
+        'card.title.spectre_parse': 'PSF 解析',
+        'card.preparing': '等待参数…',
+        'card.waitProgress': '等待首个进度文件（启动后约 30 秒出现）…',
+        'card.interrupted': '已中断',
+        'card.error': '调用失败',
+        'card.status.completed': '已完成',
+        'card.status.running': '运行中',
+        'card.status.failed': '失败',
+        'card.status.pending': '待运行',
+        'card.status.submitted': '已提交',
+        'card.status.queued': '排队中',
+        'card.status.partial': '部分完成',
+        'card.status.unknown': '未知',
+        'card.label.progress': '已完成 {n}/{m}',
+        'card.label.succeeded': '成功',
+        'card.label.failed': '失败',
+        'card.label.pending': '待完成',
+        'card.label.node': '计算节点',
+        'card.label.updated': '更新于',
+        'card.label.job': '作业',
+        'card.label.jobState': 'LSF 状态',
+        'card.label.scheduler': '调度器',
+        'card.label.remoteDir': '远端目录',
+        'card.label.runDir': '运行目录',
+        'card.label.projectDir': '项目目录',
+        'card.label.planned': '本批计划 {n} 个仿真',
+        'card.label.fetched': '取回 {n} 点 / {m} 个 sp 文件',
+        'card.label.mode': '取回方式',
+        'card.label.archive': '归档',
+        'card.label.simulator': '仿真器',
+        'card.label.results': '结果文件',
+        'card.label.report': '报告',
+        'card.label.metrics': '{n} 项指标',
+        'card.label.registered': '已登记进任务仪表盘',
+        'card.label.registerFailed': '仪表盘登记失败',
+        'card.label.points': '解析 {n} 个点',
+        'card.label.warnings': '警告',
+        'card.label.details': '详情',
+        'card.agg.title': '项目批次',
+        'card.agg.line': '已完成 {done}/{batches} 批 · 仿真 {comp}/{total} · 待完成 {pending}',
+        'card.agg.unplanned': '（另有 {n} 批未计划）',
+        'card.agg.round': '批次',
       },
       en: {
         'common.loading': 'Loading…',
@@ -449,6 +503,64 @@ window.__ModuleLoader__.load({
         'selfchk.summaryFail': 'self-check failed',
         'selfchk.diagDone': 'Diagnosis session {id} created — see the session tree.',
         'selfchk.diagFail': 'Failed to create a diagnosis session: {err}',
+        'guide.s6t': 'Simulation progress cards',
+        'guide.s6': 'Simulation tool calls in a conversation (bsub submit/poll/fetch, progress, analysis, '
+          + 'spectre assemble/sweep/parse) render as dedicated progress cards: live batches done, simulations '
+          + 'finished and pending; a local sweep in flight refreshes the card automatically. Toggle them off in '
+          + 'the console page display settings (on by default).',
+        'set.title': 'Display settings',
+        'set.toolview': 'Simulation progress cards in conversations',
+        'set.toolviewHint': 'When off, these tool calls fall back to the raw JSON view. Browser-local preference, '
+          + 'applies to every session on this machine.',
+        'card.title.bsub_submit': 'Remote batch submit',
+        'card.title.bsub_poll': 'Remote batch poll',
+        'card.title.bsub_fetch': 'Remote batch fetch',
+        'card.title.sim_progress': 'Simulation progress',
+        'card.title.sim_analysis': 'Simulation analysis',
+        'card.title.spectre_assemble': 'Spectre assemble',
+        'card.title.spectre_run_sweep': 'Spectre sweep',
+        'card.title.spectre_parse': 'PSF parse',
+        'card.preparing': 'Waiting for arguments…',
+        'card.waitProgress': 'Waiting for the first progress file (appears ~30 s after start)…',
+        'card.interrupted': 'Interrupted',
+        'card.error': 'Call failed',
+        'card.status.completed': 'Completed',
+        'card.status.running': 'Running',
+        'card.status.failed': 'Failed',
+        'card.status.pending': 'Pending',
+        'card.status.submitted': 'Submitted',
+        'card.status.queued': 'Queued',
+        'card.status.partial': 'Partial',
+        'card.status.unknown': 'Unknown',
+        'card.label.progress': 'Done {n}/{m}',
+        'card.label.succeeded': 'Succeeded',
+        'card.label.failed': 'Failed',
+        'card.label.pending': 'Pending',
+        'card.label.node': 'Compute node',
+        'card.label.updated': 'Updated',
+        'card.label.job': 'Job',
+        'card.label.jobState': 'LSF state',
+        'card.label.scheduler': 'Scheduler',
+        'card.label.remoteDir': 'Remote dir',
+        'card.label.runDir': 'Run dir',
+        'card.label.projectDir': 'Project dir',
+        'card.label.planned': 'This batch plans {n} simulations',
+        'card.label.fetched': 'Fetched {n} points / {m} sp files',
+        'card.label.mode': 'Fetch mode',
+        'card.label.archive': 'Archive',
+        'card.label.simulator': 'Simulator',
+        'card.label.results': 'Results file',
+        'card.label.report': 'Report',
+        'card.label.metrics': '{n} metrics',
+        'card.label.registered': 'Registered into the task dashboard',
+        'card.label.registerFailed': 'Dashboard registration failed',
+        'card.label.points': 'Parsed {n} points',
+        'card.label.warnings': 'Warnings',
+        'card.label.details': 'Details',
+        'card.agg.title': 'Project batches',
+        'card.agg.line': '{done}/{batches} batches done · {comp}/{total} sims · {pending} pending',
+        'card.agg.unplanned': '(+{n} unplanned batches)',
+        'card.agg.round': 'Batch',
       },
     }
 
@@ -648,6 +760,24 @@ window.__ModuleLoader__.load({
 .hams-termsnip { display: flex; gap: 4px; flex-wrap: wrap; align-items: center;
   margin: 4px 0 0; font-size: calc(11.5px + var(--dsh-content-font-delta, 0px)); }
 .hams-termsnip .hams-btn-sm { opacity: .85; }
+/* session tool cards (tool.call.toolview): simulation progress renderers */
+.hams-tc { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 8px;
+  padding: 8px 12px; margin: 4px 0; font-size: var(--dsh-content-font-size, 14px); max-width: 680px; }
+.hams-tc-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.hams-tc-title { font-weight: 600; }
+.hams-tc-badge { display: inline-block; padding: 0 8px; border-radius: 10px;
+  font-size: calc(12px + var(--dsh-content-font-delta, 0px));
+  border: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
+.hams-tc-kv { display: flex; gap: 2px 14px; flex-wrap: wrap; margin: 4px 0 0;
+  font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
+.hams-tc-kv .hams-tc-k { opacity: .6; }
+.hams-tc-bar { height: 6px; border-radius: 4px; overflow: hidden; margin: 6px 0 2px; max-width: 420px;
+  background: color-mix(in srgb, currentColor 12%, transparent); }
+.hams-tc-fill { height: 100%; border-radius: 4px; background: #3fb950; transition: width .4s ease; }
+.hams-tc-fill.run { background: #d29922; }
+.hams-tc-fill.bad { background: #e05252; }
+.hams-tc-agg { margin-top: 4px; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); opacity: .85; }
+.hams-tc-details { margin-top: 6px; }
 `
       document.head.append(el)
     }
@@ -734,10 +864,11 @@ window.__ModuleLoader__.load({
         h(Boundary, null, h(RemoteProjectsSection, null)),
         h(Boundary, null, h(AssetsSection, null)),
         h(Boundary, null, h(DiskSection, null)),
+        h(Boundary, null, h(DisplaySettingsSection, null)),
       )
     }
 
-    // First-run guide (tier 1 console page): five short sections chaining the scattered
+    // First-run guide (tier 1 console page): six short sections chaining the scattered
     // per-feature hints into one read. Text only — no state, no requests.
     function GuideView(props) {
       const sec = (tk, k, extra) => h('section', { className: 'hams-section' },
@@ -753,9 +884,345 @@ window.__ModuleLoader__.load({
         sec('guide.s3t', 'guide.s3'),
         sec('guide.s4t', 'guide.s4'),
         sec('guide.s5t', 'guide.s5'),
+        sec('guide.s6t', 'guide.s6'),
         h('div', { className: 'hams-row' },
           h('button', { className: 'hams-btn', onClick: props.onClose }, tr('guide.done'))),
       )
+    }
+
+    // ---------- session tool cards (DSH tool.call.toolview slot) ----------
+    // DSH renders a generic JSON card per tool call; the tool.call.toolview slot
+    // lets a plugin register custom renderers keyed by the exact wire tool name
+    // (a typo never renders — the generic card stays). One component covers all
+    // eight simulation tools; SmartAnaSim ships no client half and keyed matching
+    // is by name across plugins, so the top-level plugin renders both families.
+    // Local sweeps poll /api/progress live while their tool call blocks; result
+    // cards add the cross-batch aggregate from /api/progress-summary (LOCAL view —
+    // remote batches only after bsub_fetch brought the progress files back, the
+    // same dual-window semantics as the sim_progress tool).
+    const SIM_CARD_TOOLS = ['bsub_submit', 'bsub_poll', 'bsub_fetch', 'sim_progress',
+      'sim_analysis', 'spectre_assemble', 'spectre_run_sweep', 'spectre_parse']
+
+    // Display toggle (default on): a browser-local preference, NOT project settings —
+    // cards render in every session (remote projects included) and remote projects
+    // have no sidebar to host a per-project switch. The custom event flips already
+    // mounted cards without a reload.
+    const TOOLVIEW_KEY = 'hams-toolview'
+    const TOOLVIEW_EVENT = 'hams-toolview-change'
+    function toolviewEnabledRead() {
+      try { return localStorage.getItem(TOOLVIEW_KEY) !== '0' } catch { return true }
+    }
+    function toolviewEnabledWrite(on) {
+      try { localStorage.setItem(TOOLVIEW_KEY, on ? '1' : '0') } catch { /* private mode */ }
+      try { window.dispatchEvent(new CustomEvent(TOOLVIEW_EVENT)) } catch { /* ancient host */ }
+    }
+
+    // Progress data for one card: /api/progress (single run) + /api/progress-summary
+    // (cross-batch aggregate). While the tool call is in flight (active) poll every
+    // 3 s with the visibility pause/resume discipline shared by the sidebar polls;
+    // settled cards fetch once on mount (one fetch per scroll-back remount is fine).
+    function useSimProgress({ runDir, projectDir, active }) {
+      const [data, setData] = useState({ prog: null, agg: null })
+      useEffect(() => {
+        const progUrl = runDir ? API + '/api/progress?runDir=' + encodeURIComponent(runDir) : null
+        const aggUrl = projectDir ? API + '/api/progress-summary?projectDir=' + encodeURIComponent(projectDir)
+          : runDir ? API + '/api/progress-summary?runDir=' + encodeURIComponent(runDir) : null
+        if (!progUrl && !aggUrl) return
+        let alive = true
+        let last = ''
+        const fetchOne = () => Promise.all([
+          progUrl ? fetchJson(progUrl).catch(() => null) : Promise.resolve(null),
+          aggUrl ? fetchJson(aggUrl).catch(() => null) : Promise.resolve(null),
+        ]).then(([p, a]) => {
+          if (!alive || (!p && !a)) return
+          const s = JSON.stringify([p, a])
+          if (s !== last) { last = s; setData({ prog: p, agg: a }) }
+        })
+        if (!active) { fetchOne(); return () => { alive = false } }
+        const timer = setInterval(() => { if (!document.hidden) fetchOne() }, 3000)
+        const onVis = () => { if (!document.hidden) fetchOne() }
+        document.addEventListener('visibilitychange', onVis)
+        fetchOne()
+        return () => {
+          alive = false
+          clearInterval(timer)
+          document.removeEventListener('visibilitychange', onVis)
+        }
+      }, [runDir, projectDir, active])
+      return data
+    }
+
+    function cardStatusText(s) {
+      if (!s) return '—'
+      const t = tr('card.status.' + s)
+      return String(t).indexOf('card.status.') === 0 ? String(s) : t
+    }
+    const CARD_STATUS_TONE = {
+      completed: 'hams-good', running: 'hams-warn', submitted: 'hams-warn', queued: 'hams-warn',
+      partial: 'hams-warn', pending: 'hams-faint', failed: 'hams-bad', error: 'hams-bad', unknown: 'hams-faint',
+    }
+    function CardBadge({ s }) {
+      if (!s) return null
+      return h('span', { className: 'hams-tc-badge ' + (CARD_STATUS_TONE[String(s)] || 'hams-faint') }, cardStatusText(s))
+    }
+    function CardBar({ p }) {
+      const total = Number(p && p.total) || 0
+      if (!total) return null
+      const done = Math.min(Number(p && p.completed) || 0, total)
+      const pct = Math.round((done / total) * 100)
+      const fill = p && p.status === 'failed' ? 'bad' : (p && p.status === 'completed' ? '' : 'run')
+      return h('div', null,
+        h('div', { className: 'hams-tc-bar' }, h('div', { className: 'hams-tc-fill ' + fill, style: { width: pct + '%' } })),
+        h('div', { className: 'hams-dim' }, tr('card.label.progress', { n: done, m: total }) + ' · ' + pct + '%'))
+    }
+    // One label/value row family; items with an empty label render as bare values
+    // (badge-like lines), null/undefined/'' values drop out.
+    function CardKv({ items }) {
+      const rows = (items || []).filter((x) => x && x.v !== undefined && x.v !== null && x.v !== '')
+      if (!rows.length) return null
+      return h('div', { className: 'hams-tc-kv' }, rows.map((x, i) => h('span', { key: i, className: x.cls || '' },
+        x.k ? [h('span', { key: 'k', className: 'hams-tc-k' }, x.k + ': '), String(x.v)]
+          : String(x.v))))
+    }
+    function dirName(p) {
+      const s = String(p || '').replace(/[\\/]+$/, '')
+      const cut = s.replace(/[\\/][^\\/]*$/, '')
+      return cut && cut !== s ? cut : null
+    }
+    function cardArgsOf(props) {
+      const b = props.block
+      if (!b) return null
+      const raw = props.phase === 'start' ? b.argsRaw : (b.call ? b.call.argsRaw : null)
+      if (typeof raw !== 'string' || !raw) return null
+      try { const v = JSON.parse(raw); return v && typeof v === 'object' ? v : null } catch { return null }
+    }
+    function cardResultOf(props) {
+      const b = props.block
+      const text = (b.content ?? []).filter((c) => c && c.type === 'text').map((c) => c.text).join('\n')
+      let data = null
+      try { const v = JSON.parse(text); if (v && typeof v === 'object') data = v } catch { /* raw only */ }
+      return { text, data }
+    }
+    // (runDir, projectDir) candidates for the progress endpoints, per tool shape.
+    function cardRoots(toolName, args, data) {
+      const a = args || {}
+      const r = data || {}
+      let runDir = a.run_dir || a.work_dir || a.raw_dir || r.run_dir || null
+      let projectDir = a.project_dir || (r.report_dir ? dirName(r.report_dir) : null) || null
+      if (toolName === 'spectre_assemble') runDir = a.out_dir || null
+      return { runDir: runDir || null, projectDir: projectDir || null }
+    }
+
+    function simStatusOf(toolName, phase, result, live) {
+      if (phase === 'start') return 'running'
+      if (phase !== 'result') return null
+      const d = result && result.data
+      if (!d) return null
+      if (toolName === 'bsub_poll') return d.state
+      if (toolName === 'sim_progress') return d.status
+      if (toolName === 'bsub_submit') return d.state
+      if (toolName === 'spectre_run_sweep') return (live.prog && live.prog.local && live.prog.status) || (d.ok ? 'completed' : 'failed')
+      return d.ok ? 'completed' : 'failed'
+    }
+
+    function aggLine(agg) {
+      const t = agg.totals || {}
+      return tr('card.agg.line', { done: t.batches_done ?? 0, batches: t.batches ?? 0,
+        comp: t.sims_completed ?? 0, total: t.sims_total ?? 0, pending: t.sims_pending ?? 0 })
+        + (t.batches_unplanned ? ' ' + tr('card.agg.unplanned', { n: t.batches_unplanned }) : '')
+    }
+    function aggTable(agg) {
+      // Status/progress columns reuse the Overview batch-check translations;
+      // statuses stay protocol values server-side and get tone+text here.
+      return h('table', { className: 'hams-table' },
+        h('thead', null, h('tr', null,
+          [tr('card.agg.round'), tr('chk.bc.status'), tr('chk.bc.progress')].map((k) => h('th', { key: k }, tr(k))))),
+        h('tbody', null, (agg.batches || []).map((b) => h('tr', { key: b.round, title: b.dir || '' },
+          h('td', null, esc(b.round)),
+          h('td', { className: batchStatusColor(b.status) }, cardStatusText(b.status)),
+          h('td', null, esc(b.total != null ? (Number(b.completed) || 0) + '/' + b.total : '—'))))))
+    }
+
+    function simBody(toolName, args, result, live, phase) {
+      const els = []
+      const p = live.prog && live.prog.local ? live.prog : null
+      // While the tool call blocks (local sweep): live bar from the progress file.
+      if (phase === 'start') {
+        if (p && p.total) {
+          els.push(h(CardBar, { key: 'bar', p }), h(CardKv, { key: 'kv', items: [
+            { k: tr('card.label.succeeded'), v: p.succeeded },
+            { k: tr('card.label.failed'), v: p.failed },
+            { k: tr('card.label.pending'), v: p.pending },
+            { k: tr('card.label.node'), v: p.compute_node },
+          ] }))
+        } else {
+          els.push(h('div', { key: 'wait', className: 'hams-dim' }, tr('card.waitProgress')))
+        }
+        return els
+      }
+      const d = result && result.data
+      if (!d) {
+        els.push(h('div', { key: 'raw', className: 'hams-dim' }, '—'))
+        return els
+      }
+      if (toolName === 'bsub_poll' || toolName === 'sim_progress') {
+        if (d.total) els.push(h(CardBar, { key: 'bar', p: { total: d.total, completed: d.completed, status: d.state || d.status } }))
+        els.push(h(CardKv, { key: 'kv', items: [
+          { k: tr('card.label.succeeded'), v: d.succeeded },
+          { k: tr('card.label.failed'), v: d.failed },
+          { k: tr('card.label.pending'), v: d.total != null ? Math.max((Number(d.total) || 0) - (Number(d.completed) || 0), 0) : null },
+          { k: tr('card.label.jobState'), v: d.job_state },
+          { k: tr('card.label.node'), v: d.compute_node },
+          { k: tr('card.label.remoteDir'), v: d.remote_dir },
+          { k: tr('card.label.updated'), v: d.updated_at },
+        ] }))
+        if (d.errlog_tail) els.push(h('div', { key: 'err', className: 'hams-pre hams-warn' }, esc(String(d.errlog_tail))))
+        return els
+      }
+      if (toolName === 'bsub_submit') {
+        els.push(h(CardKv, { key: 'kv', items: [
+          { k: tr('card.label.job'), v: d.job_id },
+          { k: tr('card.label.scheduler'), v: d.scheduler },
+          { k: '', v: p && p.total ? tr('card.label.planned', { n: p.total }) : null },
+          { k: tr('card.label.remoteDir'), v: d.remote_dir },
+          { k: tr('card.label.warnings'), v: Array.isArray(d.warnings) && d.warnings.length ? d.warnings.length : null },
+        ] }))
+        return els
+      }
+      if (toolName === 'bsub_fetch') {
+        const f = d.fetched || {}
+        els.push(h(CardKv, { key: 'kv', items: [
+          { k: tr('card.label.job'), v: d.job_id },
+          { k: '', v: (f.points != null || f.sp_files != null) ? tr('card.label.fetched', { n: f.points ?? 0, m: f.sp_files ?? 0 }) : null },
+          { k: tr('card.label.mode'), v: d.mode },
+          { k: tr('card.label.archive'), v: d.archive },
+        ] }))
+        return els
+      }
+      if (toolName === 'sim_analysis') {
+        const metrics = d.summary && typeof d.summary === 'object' ? Object.keys(d.summary).length : null
+        els.push(h(CardKv, { key: 'kv', items: [
+          { k: tr('card.label.simulator'), v: d.simulator },
+          { k: '', v: metrics ? tr('card.label.metrics', { n: metrics }) : null, cls: 'hams-good' },
+          { k: tr('card.label.results'), v: d.results_file },
+          { k: tr('card.label.report'), v: d.report_path },
+          d.registered === true ? { k: '', v: tr('card.label.registered'), cls: 'hams-good' }
+            : d.registered === false ? { k: '', v: tr('card.label.registerFailed'), cls: 'hams-warn' } : null,
+        ] }))
+        return els
+      }
+      if (toolName === 'spectre_assemble') {
+        els.push(h(CardKv, { key: 'kv', items: [
+          { k: tr('card.label.projectDir'), v: d.project_dir || (args && args.project_dir) },
+          { k: '', v: p && p.total ? tr('card.label.planned', { n: p.total }) : null },
+        ] }))
+        return els
+      }
+      if (toolName === 'spectre_run_sweep') {
+        if (p && p.total) els.push(h(CardBar, { key: 'bar', p }))
+        if (p && p.source === 'progress') {
+          els.push(h(CardKv, { key: 'kv', items: [
+            { k: tr('card.label.succeeded'), v: p.succeeded },
+            { k: tr('card.label.failed'), v: p.failed },
+            { k: tr('card.label.node'), v: p.compute_node },
+            { k: tr('card.label.updated'), v: p.updated_at },
+          ] }))
+        }
+        const doneLine = String(d.output || '').split('\n').map((l) => l.trim()).filter((l) => l.indexOf('[sweep] done:') === 0).pop()
+        if (doneLine) els.push(h('div', { key: 'done', className: 'hams-dim' }, esc(doneLine)))
+        els.push(h(CardKv, { key: 'dir', items: [{ k: tr('card.label.runDir'), v: d.run_dir }] }))
+        return els
+      }
+      if (toolName === 'spectre_parse') {
+        const n = d.summary && Array.isArray(d.summary.points) ? d.summary.points.length : null
+        els.push(h(CardKv, { key: 'kv', items: [
+          { k: tr('card.label.results'), v: d.out_dir },
+          { k: '', v: n ? tr('card.label.points', { n }) : null },
+        ] }))
+        return els
+      }
+      els.push(h('div', { key: 'raw', className: 'hams-dim' }, '—'))
+      return els
+    }
+
+    function rawTextOf(props, result) {
+      const args = cardArgsOf(props)
+      const parts = []
+      if (args) parts.push(JSON.stringify(args, null, 2))
+      if (props.phase === 'result') parts.push(result && result.text ? result.text : '(no result text)')
+      return parts.join('\n---\n')
+    }
+
+    // One simulation tool call card, all three phases. Occupying the key means an
+    // off toggle cannot fall back to the DSH generic card — the off view renders
+    // the raw shape itself instead of leaving an empty row.
+    function SimToolCard(props) {
+      const [on, setOn] = useState(toolviewEnabledRead)
+      useEffect(() => {
+        const sync = () => setOn(toolviewEnabledRead())
+        window.addEventListener(TOOLVIEW_EVENT, sync)
+        return () => window.removeEventListener(TOOLVIEW_EVENT, sync)
+      }, [])
+      const phase = props.phase
+      const toolName = props.toolName
+      const d = props.useDisclosure()
+      const args = cardArgsOf(props)
+      const result = phase === 'result' && props.block ? cardResultOf(props) : null
+      const roots = cardRoots(toolName, args, result ? result.data : null)
+      const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir, active: phase === 'start' })
+      if (!on) {
+        return h('div', { className: 'hams-tc' },
+          h('div', { className: 'hams-tc-head' },
+            h('span', { className: 'hams-tc-title' }, esc(toolName)),
+            h('span', { className: 'hams-faint' }, esc(phase))),
+          phase === 'start' && args ? h('div', { className: 'hams-pre' }, esc(JSON.stringify(args, null, 2))) : null,
+          result ? h('div', { className: 'hams-pre' }, esc((result.text || '').slice(0, 4000))) : null)
+      }
+      const agg = live.agg && live.agg.local ? live.agg : null
+      let body
+      let status = simStatusOf(toolName, phase, result, live)
+      if (phase === 'result' && props.block && props.block.isError) {
+        const err = (props.block.error || {})
+        const interrupted = err.code === 'interrupted'
+        status = interrupted ? 'unknown' : 'failed'
+        body = h('div', { className: interrupted ? 'hams-warn' : 'hams-bad' },
+          interrupted ? tr('card.interrupted') : tr('card.error'),
+          err.name ? ' — ' + esc(String(err.name)) : null,
+          err.reason ? ' · ' + esc(String(err.reason).slice(0, 300)) : null)
+      } else if (phase === 'preparing') {
+        body = h('div', { className: 'hams-dim' }, tr('card.preparing'))
+        status = null
+      } else {
+        body = h('div', null, simBody(toolName, args, result, live, phase))
+      }
+      return h('div', { className: 'hams-tc' },
+        h('div', { className: 'hams-tc-head' },
+          h('span', { className: 'hams-tc-title' }, tr('card.title.' + toolName)),
+          h(CardBadge, { s: status }),
+          agg ? h('span', { className: 'hams-tc-agg' }, esc(aggLine(agg))) : null,
+          h('button', { className: 'hams-btn hams-btn-sm', style: { marginLeft: 'auto' }, onClick: d.toggle }, tr('card.label.details'))),
+        body,
+        d.expanded ? h('div', { className: 'hams-tc-details' },
+          agg && (agg.batches || []).length ? aggTable(agg) : null,
+          h('div', { className: 'hams-pre' }, esc(rawTextOf(props, result)))) : null)
+    }
+
+    // Console-page display settings: the toggle backing the tool cards (guide s6
+    // points here; the preference is browser-local by design — see TOOLVIEW_KEY).
+    function DisplaySettingsSection() {
+      const [on, setOn] = useState(toolviewEnabledRead)
+      useEffect(() => {
+        const sync = () => setOn(toolviewEnabledRead())
+        window.addEventListener(TOOLVIEW_EVENT, sync)
+        return () => window.removeEventListener(TOOLVIEW_EVENT, sync)
+      }, [])
+      return h('section', { className: 'hams-section' },
+        h('h2', null, tr('set.title')),
+        h('label', { className: 'hams-row', style: { cursor: 'pointer' } },
+          h('input', { type: 'checkbox', checked: on,
+            onChange: (e) => { toolviewEnabledWrite(e.target.checked); setOn(e.target.checked) } }),
+          h('span', null, tr('set.toolview'))),
+        h('div', { className: 'hams-dim' }, tr('set.toolviewHint')))
     }
 
     // Remote projects (tier 1): the dsh-remote machine list with each machine's mirror
@@ -2227,6 +2694,14 @@ window.__ModuleLoader__.load({
         inner.effect(() => () => { if (openSidebarTab) openSidebarTab = null }, 'harnessams header button handler')
         slots.inject('conversation.session.header.actions', () =>
           slots.register({ name: 'conversation.session.header.actions', id: 'dsh-harnessams-open', order: 20 }, SessionHeaderButton))
+      })
+      // Session tool cards: keyed by wire tool name, exact match (a typo never
+      // renders), so all eight names must be listed verbatim — guarded by the
+      // entry test against the registered tool-name set.
+      slots.inject('tool.call.toolview', function* () {
+        for (const key of SIM_CARD_TOOLS) {
+          yield slots.register({ name: 'tool.call.toolview', key }, SimToolCard)
+        }
       })
     }
 

@@ -27,6 +27,9 @@
 // the generic remote batch channel (bsub_submit/bsub_poll/bsub_fetch; worker scripts
 // come from the workspace sim_scripts_dir) and the simulator-agnostic analysis/ops
 // tools (sim_analysis/sim_progress/safe_trash; analysis Python under scripts/).
+// The session tool cards read two extra read-only endpoints (/api/progress and
+// /api/progress-summary, server/progress.js) to draw the simulation progress
+// cards inside the conversation — no execution surface, pure file reads.
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
@@ -41,6 +44,7 @@ import { readSettings, validateSettings, writeSettings } from './server/settings
 import { startSelfcheck, getSelfcheck } from './server/selfcheck.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
+import { progressPayload, progressSummaryPayload } from './server/progress.js'
 import { registerTools } from './tool.js'
 import { bsubTools } from './tools/bsub.js'
 import { sharedTools } from './tools/shared.js'
@@ -368,6 +372,25 @@ async function handle(req, res, ctx) {
     const st = await fsp.stat(hit.abs).catch(() => null)
     if (!st || !st.isFile()) { json(404, { error: 'not found' }); return }
     json(200, { ok: true, mtime_ms: Math.round(st.mtimeMs), size: st.size })
+    return
+  }
+  if (route === '/api/progress') {
+    // Session tool cards (tool.call.toolview): live single-run progress while a
+    // local sweep blocks its tool call. Read-only; run dir comes from the tool
+    // arguments the card already shows, so no session mapping is involved.
+    const runDir = url.searchParams.get('runDir')
+    if (!runDir) { json(400, { error: 'runDir is required' }); return }
+    json(200, { ok: true, ...progressPayload(runDir) })
+    return
+  }
+  if (route === '/api/progress-summary') {
+    // Cross-batch aggregate over <project>/sweep/Round*/top ("3/5 batches done,
+    // 120/360 sims, 240 pending"). The project root is derived from a run dir or
+    // passed explicitly; local:false lets the client omit the block quietly.
+    const runDir = url.searchParams.get('runDir')
+    const projectDir = url.searchParams.get('projectDir')
+    if (!runDir && !projectDir) { json(400, { error: 'runDir or projectDir is required' }); return }
+    json(200, { ok: true, ...progressSummaryPayload({ runDir, projectDir }) })
     return
   }
   if (route.startsWith('/dash/')) {

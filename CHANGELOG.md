@@ -5,6 +5,45 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — 2026-11-09 (simulation progress tool cards)
+
+- **Session tool cards** (`tool.call.toolview` — the last open item of milestone
+  M3): the eight simulation tools render dedicated progress cards in the
+  conversation instead of the generic JSON card — `bsub_submit`/`bsub_poll`/
+  `bsub_fetch`, `sim_progress`/`sim_analysis`, `spectre_assemble`/
+  `spectre_run_sweep`/`spectre_parse` (`SIM_CARD_TOOLS` in client.js, registered
+  as keyed slot entries by exact wire tool name; SmartAnaSim stays client-free —
+  keyed matching is by name across plugins). Cards carry a status badge, a
+  progress bar plus succeeded/failed/pending counts, a collapsible cross-batch
+  aggregate table ("N/M batches done · X/Y sims · Z pending"), and an expandable
+  raw-JSON details view. A local sweep in flight polls `/api/progress` every 3 s
+  (visibility pause/resume, same discipline as the sidebar polls) so the card
+  grows live while the tool call blocks; settled cards fetch the project
+  aggregate once from `/api/progress-summary` (local view only — remote batches
+  surface after `bsub_fetch`, matching the `sim_progress` dual-window semantics).
+- **Read-only progress endpoints** (`src/server/progress.js`): `GET
+  /api/progress?runDir=…` normalizes one run directory through a
+  sweep_progress.json → .worker_started → sweep_config.json ladder (BOM-tolerant;
+  pre-2026-10 progress files without `simulator` accepted). `GET
+  /api/progress-summary?runDir=…|projectDir=…` derives the project root from the
+  run dir's `sweep/RoundN/top` shape and aggregates `sweep/Round*/top`
+  (≤64 batches) into per-batch rows plus totals (batches / done / unplanned,
+  sims total / completed / failed / pending). Pure file reads; paths that do not
+  exist on this host answer `local:false` and the client omits the block quietly.
+- **Display toggle + guide section**: the console page gains a Display settings
+  block switching the cards off (default on; localStorage `hams-toolview`; a
+  custom event flips already mounted cards without a reload — the off state
+  renders the raw shape itself because an occupied key cannot fall back to the
+  DSH generic card), and the onboarding guide gets a sixth section covering the
+  cards. The zh/en dictionary key sets are now pinned equal by a test.
+- Tests: `tests/progress.test.mjs` (4 cases — root derivation, the progress
+  ladder incl. BOM, the project summary totals, both endpoints) and
+  entry-test extensions (toolview slot + the eight exact keys against the
+  model-facing tool surface, toggle/guide markers, zh/en key-set parity).
+  `tests/selfcheck.test.mjs` probes its 404 through an explicit unknown run id
+  now, so real self-check runs on disk no longer break the no-run assertion
+  (hermeticity; the checked contract is unchanged).
+
 ### Added — 2026-11-08 (project settings + one-click project self-check)
 
 - **Per-project settings** at `<workspace>/.harnessams/project_settings.json`
