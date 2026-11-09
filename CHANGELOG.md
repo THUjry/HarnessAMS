@@ -5,6 +5,20 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed — 2026-11-09 (project self-check launch verification findings)
+
+- **Corrupted `selfcheck_run.json` under concurrent persists**
+  (`src/server/selfcheck.js`): every step queued a fire-and-forget
+  `persistRun`, and two overlapping writes shared
+  `selfcheck_run.json.tmp` — interleaved writeFile/rename ordering could
+  publish a concatenated document (head of one snapshot + tail of the next;
+  observed live on 2 of 7 real runs, breaking the restore-from-disk path while
+  the in-memory API stayed healthy). Persists now serialize through a per-run
+  promise chain (`run._persistChain`), so only one tmp write is ever in
+  flight; a failed write cannot stall the queue. Regression test: a golden run
+  is hammered with reads while it executes and every published snapshot must
+  parse, plus the drained final file must match the run verdict.
+
 ### Added — 2026-11-09 (simulation progress tool cards)
 
 - **Session tool cards** (`tool.call.toolview` — the last open item of milestone
