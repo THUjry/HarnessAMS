@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { writeTasks, readTasks } from '../src/server/project.js'
 import { mimeFor, resolveReportFile, browseDir } from '../src/server/dashboard.js'
-import { apply } from '../src/index.js'
+import { registerRoutes, callGet } from './helpers.mjs'
 
 test('dashboard: MIME by extension (a blanket text/html kills data/*.js scripts)', () => {
   assert.equal(mimeFor('r.html'), 'text/html; charset=utf-8')
@@ -100,22 +100,8 @@ test('dashboard: /api/report-stat answers the report mtime+size for the auto-ref
     await writeFile(htmlPath, '<html></html>')
     await writeTasks(ws, [{ id: 'task-stat', name: 's', reports: [{ id: 'rep-1', path: htmlPath }] }])
 
-    const routes = []
-    await apply({
-      effect: (fn) => { fn() },
-      webServer: { register: (r) => routes.push(r) },
-      workspaceRegistry: { list: () => [{ path: ws }] },
-      tools: { register: () => {} },
-    })
-    const handler = routes[0].handler
-
-    const call = async (query) => {
-      const res = { code: 0, body: '', writeHead(c) { this.code = c }, end(b) { this.body = b } }
-      handler({ method: 'GET', url: 'http://127.0.0.1/harnessams/api/report-stat' + query }, res)
-      // the route handler fire-and-forgets its async work — give it a macrotask
-      for (let i = 0; i < 50 && res.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
-      return { code: res.code, body: res.body ? JSON.parse(res.body) : null }
-    }
+    const handler = await registerRoutes({ workspaceRegistry: { list: () => [{ path: ws }] } })
+    const call = (query) => callGet(handler, 'http://127.0.0.1/harnessams/api/report-stat' + query)
 
     const ok = await call('?taskId=task-stat&reportId=rep-1')
     assert.equal(ok.code, 200)

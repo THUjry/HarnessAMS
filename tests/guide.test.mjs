@@ -5,8 +5,9 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
+import { clientSrc, assertDictKeys } from './helpers.mjs'
 
-const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+const src = await clientSrc()
 const assetsSrc = await readFile(new URL('../src/server/assets.js', import.meta.url), 'utf8')
 const indexSrc = await readFile(new URL('../src/index.js', import.meta.url), 'utf8')
 
@@ -22,16 +23,12 @@ test('guide: console page wiring — seen flag, centered first-run state, persis
 test('guide: bilingual copy — every key exactly twice, slurm marked not supported', () => {
   const keys = [...src.matchAll(/'(guide\.[a-zA-Z0-9.]+)':/g)].map((m) => m[1])
   assert.ok(keys.length >= 14, 'the guide key set must be present, found ' + keys.length)
-  for (const key of new Set(keys)) {
-    const hits = src.split(`'${key}':`).length - 1
-    assert.equal(hits, 2, `dictionary key ${key} must exist exactly twice (zh + en), found ${hits}`)
-  }
+  assertDictKeys(src, [...new Set(keys)])
   assert.match(src, /'guide\.s2slurm': '[^']*暂不支持/, 'slurm must be marked 暂不支持 in zh')
   assert.match(src, /'guide\.s2slurm': '[^']*not supported/, 'slurm must be marked not supported in en')
   // the start-page guide card description was upgraded together with the feature
   assert.ok(!src.includes("'项目任务'"), 'guide card description must not regress to the placeholder text')
-  const desc = src.split(`'tasks.guideDesc':`).length - 1
-  assert.equal(desc, 2, 'tasks.guideDesc must exist exactly twice (zh + en)')
+  assertDictKeys(src, ['tasks.guideDesc'])
 })
 
 test('assets: vendored .js packages with license and copy locations, reports gone', () => {
@@ -45,9 +42,7 @@ test('assets: vendored .js packages with license and copy locations, reports gon
   assert.ok(!src.includes("API + '/dirs'"), 'the assets area must not list sweep reports anymore')
   assert.ok(/assetsStatus\(ws \? ws\.config\.workspace_root : null\)/.test(indexSrc), '/api/assets must pass the workspace root for the copy scan')
   assert.ok(indexSrc.includes("route === '/api/dirs'"), 'the dirs route stays (public surface; only client consumption was removed)')
-  for (const key of ['assets.colPkg', 'assets.colLicense', 'assets.colPkgCopy', 'assets.colRoute', 'assets.colWsCopies', 'assets.noCopies', 'assets.notices']) {
-    const hits = src.split(`'${key}':`).length - 1
-    assert.equal(hits, 2, `dictionary key ${key} must exist exactly twice (zh + en), found ${hits}`)
-  }
+  assertDictKeys(src, ['assets.colPkg', 'assets.colLicense', 'assets.colPkgCopy', 'assets.colRoute',
+    'assets.colWsCopies', 'assets.noCopies', 'assets.notices'])
   assert.ok(!src.includes("'assets.sweepReports'") && !src.includes("'assets.sharedCopy'"), 'retired asset keys must be removed from both dictionaries')
 })

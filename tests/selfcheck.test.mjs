@@ -19,7 +19,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
-import { execFile, execFileSync } from 'node:child_process'
+import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { apply, toolDefinitions } from '../src/index.js'
@@ -27,6 +27,7 @@ import { makeTool } from '../src/tool.js'
 import { defaultSettings, readSettings, validateSettings, writeSettings, settingsPath } from '../src/server/settings.js'
 import { startSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR } from '../src/server/selfcheck.js'
 import { verifyRun, siValue } from '../src/scripts/selfcheck/selfcheck_verify.mjs'
+import { assertValidShell, callRoute, getReq, makeMirrorHome, setDSHHome, clientSrc, assertDictKeys } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -35,13 +36,10 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-let bashAvailable = true
-try { execFileSync('bash', ['--version'], { stdio: 'pipe' }) } catch { bashAvailable = false }
 const rwExecCommands = []
-function assertValidShell(cmd) {
+function guardShell(cmd) {
   rwExecCommands.push(cmd)
-  if (!bashAvailable) return
-  execFileSync('bash', ['-n', '-c', cmd], { stdio: 'pipe' })
+  assertValidShell(cmd)
 }
 
 async function tmpDir() {
@@ -163,7 +161,7 @@ function makeHarness({ scenario = {} }) {
   }
 
   async function rwExec(command) {
-    assertValidShell(command)
+    guardShell(command)
     if (command.includes('bsub -q')) {
       if (scenario.lsfSubmitFail) return { text: 'bsub: queue not available\n[exit code: 1]' }
       return { text: 'Job <4242> is submitted to queue <normal>\n[exit code: 0]' }
@@ -308,14 +306,12 @@ function makeHarness({ scenario = {} }) {
 }
 
 // Mirror + registry setup for remote flows (DSH_HOME layout, like diagnose.test.mjs).
-function setupRemoteEnv(tmp, ctx, sessionId, projectPath) {
-  const prevHome = process.env.DSH_HOME
-  const home = path.join(tmp, 'dshhome')
-  const mirrorDir = path.join(home, 'remote-workspaces', 'h1', 'ws1')
-  fs.mkdirSync(mirrorDir, { recursive: true })
-  fs.writeFileSync(path.join(mirrorDir, '.dsh-remote-meta.json'),
-    JSON.stringify({ host: '192.0.2.10', port: 22, username: 'op', remotePath: '/home/op/sim' }))
-  process.env.DSH_HOME = home
+function setupRemoteEnv(ctx, sessionId, projectPath) {
+  const { home, mirror: mirrorDir } = makeMirrorHome({
+    host: '192.0.2.10', port: 22, user: 'op', remotePath: '/home/op/sim',
+    segments: ['h1', 'ws1'],
+  })
+  const restoreHome = setDSHHome(home)
   ctx.workspaceRegistry.list = () => [
     { id: 'ws-local', path: projectPath, title: 'Local project', sessionIds: [sessionId] },
     { id: 'ws-remote', path: mirrorDir, title: 'node1 (remote)', sessionIds: ['sess-remote-1'] },
@@ -323,7 +319,7 @@ function setupRemoteEnv(tmp, ctx, sessionId, projectPath) {
   return {
     mirrorDir,
     remotePath: '/home/op/sim',
-    restore: () => { if (prevHome === undefined) delete process.env.DSH_HOME; else process.env.DSH_HOME = prevHome },
+    restore: () => { restoreHome(); fs.rmSync(home, { recursive: true, force: true }) },
   }
 }
 
@@ -370,7 +366,7 @@ async function startFlow({ scenario = {}, settings = {}, sessions, remote = fals
 
   let env = null
   if (remote) {
-    env = setupRemoteEnv(tmp, ctx, sessionId, projectPath)
+    env = setupRemoteEnv(ctx, sessionId, projectPath)
     // one live session inside the machine's mirror unless the scenario overrides
     scenario.sessions = scenario.sessions ?? [{ id: 'sess-remote-1', header: { cwd: env.mirrorDir } }]
   } else {
@@ -557,17 +553,7 @@ test('verify: three channels agree; a >1% drift fails', async () => {
 // 6) routes: project-settings + selfcheck guards
 // ---------------------------------------------------------------------------
 
-function fakeRes() {
-  return { code: 0, body: '', writeHead(c) { this.code = c }, end(b) { this.body = String(b ?? '') } }
-}
-async function driveRoute(routes, req) {
-  const res = fakeRes()
-  await routes[0].handler(req, res)
-  for (let i = 0; i < 200 && res.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
-  assert.ok(res.code, 'route never responded')
-  return { code: res.code, body: res.body ? JSON.parse(res.body) : null }
-}
-const getReq = (url) => ({ method: 'GET', url, headers: {} })
+const driveRoute = (routes, req) => callRoute(routes[0].handler, req)
 
 test('routes: project-settings GET/PUT happy path + guards', async () => {
   const tmp = await tmpDir()
@@ -622,7 +608,7 @@ test('route: selfcheck POST rejects unknown session / remote project', async () 
   assert.equal(unknown.code, 404)
 
   // remote project: the session belongs to the workspace inside a dsh-remote mirror
-  const env = setupRemoteEnv(tmp, ctx, 's1', projectPath)
+  const env = setupRemoteEnv(ctx, 's1', projectPath)
   try {
     const remote = await driveRoute(routes, body({ sessionId: 'sess-remote-1' }))
     assert.equal(remote.code, 400)
@@ -766,8 +752,14 @@ test('flow: none + remote — upload, remote compute (python), download + js cro
     const run = await waitDone(f.start.runId, f.ws)
     assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result])))
     const uploads = f.ctx.__uploads
-    // per topo: 18 golden files + 2 verify scripts + 1 parser = 21
-    assert.equal(uploads.length, 42)
+    // per topo: every golden file + 2 verify scripts + 1 parser (counted from the
+    // shipped golden tree, so adding a point to the dataset does not desync this)
+    const countFiles = (dir) => fs.readdirSync(dir, { withFileTypes: true })
+      .reduce((n, e) => n + (e.isDirectory() ? countFiles(path.join(dir, e.name)) : 1), 0)
+    const expected = ['lpf', 'hpf']
+      .reduce((n, topo) => n + countFiles(path.join(GOLDEN_DIR, topo)) + 3, 0)
+    assert.equal(uploads.length, expected,
+      `expected ${expected} uploads (golden files + verify scripts + parser per topo)`)
     const PREFIX = '/home/op/sim/.harnessams/selfcheck/rc_'
     assert.ok(uploads.every((u) => u.path.startsWith(PREFIX)),
       'unexpected upload paths: ' + JSON.stringify(uploads.filter((u) => !u.path.startsWith(PREFIX)).map((u) => u.path)))
@@ -814,7 +806,7 @@ test('start guards: unknown machine / no remote project / no live session', asyn
   const projectPath = path.join(tmp, 'project')
   await fsp.mkdir(projectPath, { recursive: true })
   const ctx = makeHarness({})
-  const env = setupRemoteEnv(tmp, ctx, 's1', projectPath)
+  const env = setupRemoteEnv(ctx, 's1', projectPath)
   try {
     ctx.workspaceRegistry.list = () => [{ id: 'ws-local', path: projectPath, title: 'P', sessionIds: ['s1'] }]
     await writeSettings(projectPath, { ...defaultSettings(), run_mode: 'remote', machine_id: 'm1' })
@@ -916,8 +908,8 @@ test('persist serialization: status file stays valid JSON through a run and matc
 })
 
 test('client static contract: keys bilingual, endpoints wired, two-row table, poll', async () => {
-  const src = await fsp.readFile(path.join(REPO, 'src', 'client.js'), 'utf8')
-  const keys = [
+  const src = await clientSrc()
+  assertDictKeys(src, [
     'pset.title', 'pset.dirLabel', 'pset.dirLocalHint', 'pset.dirRemoteRel', 'pset.browse',
     'pset.browseTitle', 'pset.browseNoMirror', 'pset.browseUp', 'pset.browseHere',
     'pset.currentMirrorDir', 'pset.pickSubdir', 'pset.colMode', 'pset.colMachine', 'pset.colSched',
@@ -927,10 +919,7 @@ test('client static contract: keys bilingual, endpoints wired, two-row table, po
     'selfchk.title', 'selfchk.desc', 'selfchk.run', 'selfchk.running', 'selfchk.startFailed',
     'selfchk.scopeLocal', 'selfchk.scopeRemote', 'selfchk.noneYet', 'selfchk.skipped',
     'selfchk.summaryOk', 'selfchk.summaryFallback', 'selfchk.summaryFail', 'selfchk.diagDone', 'selfchk.diagFail',
-  ]
-  for (const k of keys) {
-    assert.equal(src.split(`'${k}':`).length - 1, 2, `key '${k}' must appear exactly twice (zh+en)`)
-  }
+  ])
   assert.ok(src.includes("API + '/project-settings?"), 'client must call /api/project-settings')
   assert.ok(src.includes("API + '/selfcheck'"), 'client must call /api/selfcheck')
   assert.ok(src.includes('function ProjectSelfcheck('))
@@ -939,7 +928,7 @@ test('client static contract: keys bilingual, endpoints wired, two-row table, po
   assert.ok(src.includes('function SelfcheckSteps('))
   assert.ok(src.includes('SETTING_COLS'), 'column config drives the two-row table')
   assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo })'), 'mounted in the Overview')
-  assert.ok(src.includes('}, 3_000)'), '3s poll while running')
+  assert.match(src, /,\s*3_000\s*\)/, '3s poll while running')
   assert.ok(src.includes("'local'"), 'local dir display branch')
   // remote-switch auto-pick: the machine column only renders in remote mode, so
   // without this the mode switch PUT-400s and rolls back — remote unreachable
