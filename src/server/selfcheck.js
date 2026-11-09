@@ -86,12 +86,23 @@ function runView(run) {
   }
 }
 
-async function persistRun(run) {
+async function doPersist(run) {
   try {
     const tmp = path.join(run.runDir, 'selfcheck_run.json.tmp')
     await fsp.writeFile(tmp, JSON.stringify(runView(run), null, 2) + '\n', 'utf8')
     await fsp.rename(tmp, path.join(run.runDir, 'selfcheck_run.json'))
   } catch { /* the in-memory copy keeps the API alive; disk is durability only */ }
+}
+
+// All persist callers are fire-and-forget, so two writes could previously run
+// concurrently and share selfcheck_run.json.tmp — interleaved writeFile/rename
+// ordering produced a corrupted concatenated document (live-verified head of
+// one snapshot + tail of the next). Serialize through a per-run promise chain;
+// the rejection branch keeps the queue draining when a single write fails.
+function persistRun(run) {
+  const chain = (run._persistChain ?? Promise.resolve()).then(() => doPersist(run), () => doPersist(run))
+  run._persistChain = chain
+  return chain
 }
 
 function addStep(run, spec) {

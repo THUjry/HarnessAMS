@@ -878,6 +878,43 @@ test('buildSelfcheckPrompt: english body, artifacts pointer, answer-language lin
   assert.match(p, /Answer in Chinese\./)
 })
 
+// ---------------------------------------------------------------------------
+// 10) persist serialization (regression: fire-and-forget persistRun calls used
+// to share selfcheck_run.json.tmp and could publish a corrupted concatenated
+// document — live-verified 2/7 runs before the per-run persist chain)
+// ---------------------------------------------------------------------------
+
+test('persist serialization: status file stays valid JSON through a run and matches the final verdict', async () => {
+  const serverSrc = await fsp.readFile(path.join(REPO, 'src', 'server', 'selfcheck.js'), 'utf8')
+  assert.ok(serverSrc.includes('run._persistChain'), 'persists must serialize through a per-run chain')
+  const f = await startFlow({ settings: { simulator: 'none' } })
+  try {
+    assert.ok(f.start.runId, f.start.error)
+    const file = path.join(f.ws.config.workspace_root, 'selfcheck', f.start.runId, 'selfcheck_run.json')
+    let corrupt = null
+    // hammer the status file while the orchestrator writes it: every published
+    // snapshot must parse as a complete JSON document (tmp+rename is the only
+    // publish path, and the per-run chain keeps two writes from interleaving)
+    const t0 = Date.now()
+    while (Date.now() - t0 < 30_000) {
+      const live = getSelfcheck(f.start.runId, f.ws)
+      if (live?.status === 'done') break
+      let raw
+      try { raw = fs.readFileSync(file) } catch { /* not published yet */ }
+      if (raw) {
+        try { JSON.parse(raw.toString('utf8')) } catch (e) { corrupt = corrupt ?? e }
+      }
+      await new Promise((r) => setTimeout(r, 2))
+    }
+    // let the final queued write drain, then the file must equal the verdict
+    await new Promise((r) => setTimeout(r, 300))
+    const disk = JSON.parse(fs.readFileSync(file, 'utf8'))
+    assert.equal(disk.status, 'done')
+    assert.equal(disk.summary.ok, true)
+    assert.ifError(corrupt)
+  } finally { f.restoreAll() }
+})
+
 test('client static contract: keys bilingual, endpoints wired, two-row table, poll', async () => {
   const src = await fsp.readFile(path.join(REPO, 'src', 'client.js'), 'utf8')
   const keys = [
