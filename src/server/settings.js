@@ -12,7 +12,7 @@ const SETTINGS_FILE = 'project_settings.json'
 
 const ENUMS = {
   run_mode: ['local', 'remote'],
-  scheduler: ['lsf', 'none'],
+  scheduler: ['lsf', 'direct'],
   simulator: ['spectre', 'none'],
   compute_script_local: ['python', 'js'],
   compute_script_remote: ['python', 'js'],
@@ -52,6 +52,8 @@ export async function readSettings(workspacePath) {
       if (typeof v === 'string' && v.trim()) settings.machine_id = v.trim().slice(0, 120)
     } else if (k === 'remote_dir') {
       if (typeof v === 'string' && v.trim()) settings.remote_dir = v.trim().replace(/\\/g, '/')
+    } else if (k === 'scheduler' && v === 'none') {
+      settings.scheduler = 'direct' // legacy value from before the scheduler=direct rename
     } else if (ENUMS[k] && ENUMS[k].includes(v)) {
       settings[k] = v
     }

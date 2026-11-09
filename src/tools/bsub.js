@@ -1,5 +1,5 @@
 // Generic remote batch tools: submit a worker script through LSF (bsub), or run
-// the same worker directly on the remote host (scheduler=none, the node-local
+// the same worker directly on the remote host (scheduler=direct, the node-local
 // foreground mode), then poll and fetch artifacts. Nothing in this file names a
 // simulator — a Spectre run is just a worker choice; the worker tree comes from
 // the workspace sim_scripts_dir (see ../bsub.js).
@@ -29,16 +29,16 @@ function underRoot(root, candidate) {
   return candidate === root || candidate.startsWith(root + '/')
 }
 
-export function bsubTools(ctx) {
+export function batchTools(ctx) {
   return [
     {
-      name: 'bsub_submit',
+      name: 'batch_submit',
       description: 'Submit a remote batch through dsh-remote: uploads the run directory (template + '
         + 'sweep_config.json + metadata) and the suite\'s worker scripts (the workspace sim_scripts_dir tree), '
         + 'then either runs the chosen worker under bsub (scheduler="lsf", default) or directly on the target host '
-        + '(scheduler="none", node-local foreground). The worker path is scripts-root-relative (e.g. '
+        + '(scheduler="direct", node-local foreground). The worker path is scripts-root-relative (e.g. '
         + '"spectre/spectre_sweep_worker.py") or absolute on the remote; worker_args are passed through. '
-        + 'Writes .bsub_job.json in the run directory for bsub_poll/bsub_fetch. '
+        + 'Writes .bsub_job.json in the run directory for batch_poll/batch_fetch. '
         + 'Requires a live session in the target machine\'s remote project (or a caller session already inside it).',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
@@ -50,8 +50,8 @@ export function bsubTools(ctx) {
         remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remotePath>/.harnessams/scripts or workspace remote_scripts_dir)' },
         files: { type: 'array', items: { type: 'string' }, description: 'Run-dir files to upload (default: top-level regular files)' },
         queue: { type: 'string', description: 'LSF queue (default normal)' },
-        scheduler: { type: 'string', enum: ['lsf', 'none'],
-          description: 'lsf (default) submits the worker through bsub; none runs the same worker directly on the '
+        scheduler: { type: 'string', enum: ['lsf', 'direct'],
+          description: 'lsf (default) submits the worker through bsub; direct runs the same worker directly on the '
             + 'remote host (node-local foreground mode, no LSF) and waits for it to finish' },
         job_name: { type: 'string', description: 'bsub -J name (default hams-<run dir name>)' },
         sync_scripts: { type: 'boolean', description: 'Upload scripts/ to the remote scripts root (default true; pass false after a successful sync)' },
@@ -113,14 +113,14 @@ export function bsubTools(ctx) {
         }
 
         const remotePython = args.remote_python || wsConfig.remote_python || defaultRemotePython()
-        const scheduler = args.scheduler === 'none' ? 'none' : 'lsf'
+        const scheduler = args.scheduler === 'direct' ? 'direct' : 'lsf'
         const queue = args.queue || 'normal'
         const jobName = args.job_name || `hams-${path.basename(runDir)}`
-        if (scheduler === 'none') {
+        if (scheduler === 'direct') {
           // Node-local foreground mode: no bsub, no queue — run the worker on
           // the machine's login host and wait for it, exactly like an
           // interactive ssh run. poll/fetch still work through the recorded
-          // job file (bsub_poll scheduler=none reads the progress files).
+          // job file (batch_poll scheduler=direct reads the progress files).
           const command = buildDirectCommand({
             remoteDir,
             python: remotePython,
@@ -139,7 +139,7 @@ export function bsubTools(ctx) {
             job_id: jobId,
             queue: null,
             remote_python: remotePython,
-            scheduler: 'none',
+            scheduler: 'direct',
             submitted_at: new Date().toISOString(),
             total_points: totalFromConfig(runDir),
           }
@@ -152,7 +152,7 @@ export function bsubTools(ctx) {
             ok: true,
             job_id: jobId,
             state: 'completed',
-            scheduler: 'none',
+            scheduler: 'direct',
             remote_dir: remoteDir,
             scripts_dir: scriptsRoot,
             warnings: [],
@@ -183,7 +183,7 @@ export function bsubTools(ctx) {
           { timeoutMs: 30_000 })
         if (!post.ok) warnings.push(`post-submit verification failed: ${(post.stderr || post.text).slice(0, 300)}`)
         if (post.stdout.includes('__ERRLOG__')) {
-          warnings.push('remote errlog.txt exists — the worker failed to start (use bsub_poll for details)')
+          warnings.push('remote errlog.txt exists — the worker failed to start (use batch_poll for details)')
         }
         if (!post.stdout.includes('__STARTED__')) {
           warnings.push('no .worker_started marker yet — the job is queued or the worker has not run')
@@ -217,8 +217,8 @@ export function bsubTools(ctx) {
       },
     },
     {
-      name: 'bsub_poll',
-      description: 'Poll a remote LSF batch submitted by bsub_submit: bjobs state plus the batch\'s own progress '
+      name: 'batch_poll',
+      description: 'Poll a remote batch submitted by batch_submit: bjobs state plus the batch\'s own progress '
         + '(point_meta.json count, sweep_progress.json summary, errlog tail). The machine, directory and job id '
         + 'default to <run_dir>/.bsub_job.json. A finished job that left the queue is reported as completed when '
         + 'all point_meta.json files exist.',
@@ -227,7 +227,7 @@ export function bsubTools(ctx) {
         machine_id: { type: 'string', description: 'Override the machine id/name from the job file' },
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the LSF job id' },
-        scheduler: { type: 'string', enum: ['lsf', 'none'], description: 'lsf (default) checks bjobs; none relies on the batch progress files' },
+        scheduler: { type: 'string', enum: ['lsf', 'direct'], description: 'lsf (default) checks bjobs; direct relies on the batch progress files' },
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
@@ -236,8 +236,9 @@ export function bsubTools(ctx) {
         const target = await resolveTarget(ctx, exec, machineId)
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const jobId = args.job_id || job?.job_id
-        if (!jobId) throw new Error('no job id: pass job_id or run bsub_submit first')
-        const scheduler = args.scheduler || job?.scheduler || 'lsf'
+        if (!jobId) throw new Error('no job id: pass job_id or run batch_submit first')
+        let scheduler = args.scheduler || job?.scheduler || 'lsf'
+        if (scheduler === 'none') scheduler = 'direct' // legacy job file from before the rename
         const r = await execRemote(ctx, target.agent,
           pollCommand({ remoteDir, jobId, scheduler }), { timeoutMs: 30_000 })
         if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
@@ -253,8 +254,8 @@ export function bsubTools(ctx) {
       },
     },
     {
-      name: 'bsub_fetch',
-      description: 'Fetch artifacts from a remote LSF batch: tar-gzips the requested files on the remote host, '
+      name: 'batch_fetch',
+      description: 'Fetch artifacts from a remote batch: tar-gzips the requested files on the remote host, '
         + 'downloads the archive over dsh-remote and extracts it into the local run directory (the archive is '
         + 'kept as fetch_<job_id>.tgz). If tar is unavailable it falls back to a bounded per-file download. '
         + 'Afterwards sim_analysis / spectre_parse / snp_read can read the local run directory directly.',

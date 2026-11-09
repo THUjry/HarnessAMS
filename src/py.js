@@ -1,8 +1,8 @@
 // Python pipeline channel: every tool executes a plain script shipped under
 // scripts/ in a fresh `python` process (no build step, system Python only).
-// scripts/ here holds the GENERIC analysis pipeline (collect/report/trash);
-// the simulator workers live in the SmartAnaSim package (see bsub.js for the
-// worker-upload root).
+// scripts/ here holds the GENERIC analysis pipeline (collect/report; trash is
+// a JS module since 2026-11-09 — see trash.js); the simulator workers live in
+// the SmartAnaSim package (see bsub.js for the worker-upload root).
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -32,6 +32,10 @@ export async function runPython(scriptRel, args, timeoutMs = 900_000, options = 
     maxBuffer: 32 * 1024 * 1024,
     windowsHide: true,
     encoding: 'utf8',
+    // Python < 3.15 encodes piped stdout by locale (cp936 on zh-CN Windows)
+    // while we decode utf-8 — force UTF-8 mode so Chinese paths in tool
+    // output (e.g. "[report] ... -> <path>") survive the round trip.
+    env: { ...process.env, PYTHONUTF8: '1' },
     ...options,
   })
 }

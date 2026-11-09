@@ -1,6 +1,6 @@
 // Generic remote batch tools: target resolution, upload/submit/poll/fetch against
 // a mocked dsh-remote tool shell (no network, no SSH, no LSF required). The
-// scheduler=none path is the node-local foreground mode (no bsub).
+// scheduler=direct path is the node-local foreground mode (no bsub).
 // The worker-script upload tree comes from the workspace sim_scripts_dir; tests
 // point HARNESSAMS_SIM_SCRIPTS_DIR at a self-built fixture so they never depend
 // on the real SmartAnaSim checkout.
@@ -109,7 +109,7 @@ function makeCtx({ mirror, sessions = null, poll = {}, archive = null, failUploa
         if (cmd.includes('bsub -q')) {
           return text('Job <777> is submitted to queue <normal>.\n')
         }
-        if (cmd.includes('tar czf .bsub_fetch.tgz')) return text('512\n')
+        if (cmd.includes('tar czf .batch_fetch.tgz')) return text('512\n')
         if (cmd.includes('| sort | head -200')) {
           return text('./00/point_meta.json\n./00/netlist.scs.raw/sp.sp\n')
         }
@@ -188,12 +188,12 @@ test('path guards and poll parsing', () => {
   assert.equal(running.state, 'running')
 })
 
-test('bsub_submit uploads the worker scripts tree and run files, then records the job', async () => {
+test('batch_submit uploads the worker scripts tree and run files, then records the job', async () => {
   const env = setupMirror()
   const run = makeRunDir()
   try {
     const ctx = makeCtx({ mirror: env.mirror })
-    const res = await tool(ctx, 'bsub_submit').execute({
+    const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run,
       remote_dir: 'batch1',
       machine_id: 'node1',
@@ -229,11 +229,11 @@ test('bsub_submit uploads the worker scripts tree and run files, then records th
   }
 })
 
-test('bsub_submit rejects a worker outside the scripts root with guidance', async () => {
+test('batch_submit rejects a worker outside the scripts root with guidance', async () => {
   const env = setupMirror()
   try {
     const ctx = makeCtx({ mirror: env.mirror })
-    await assert.rejects(() => tool(ctx, 'bsub_submit').execute({
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/no_such_worker.py',
     }, {}), /worker script not found under the workspace sim_scripts_dir/)
@@ -242,24 +242,24 @@ test('bsub_submit rejects a worker outside the scripts root with guidance', asyn
   }
 })
 
-test('bsub_submit scheduler=none runs the worker directly on the host (no bsub)', async () => {
+test('batch_submit scheduler=direct runs the worker directly on the host (no bsub)', async () => {
   const env = setupMirror()
   const run = makeRunDir()
   try {
     const ctx = makeCtx({ mirror: env.mirror })
-    const res = await tool(ctx, 'bsub_submit').execute({
+    const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run,
       remote_dir: 'fore',
       machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
-      scheduler: 'none',
+      scheduler: 'direct',
     }, {})
     assert.equal(res.ok, true, JSON.stringify(res))
-    assert.equal(res.scheduler, 'none')
+    assert.equal(res.scheduler, 'direct')
     assert.equal(res.state, 'completed')
 
     const job = JSON.parse(fs.readFileSync(path.join(run, '.bsub_job.json'), 'utf8'))
-    assert.equal(job.scheduler, 'none')
+    assert.equal(job.scheduler, 'direct')
     assert.equal(job.queue, null)
     assert.match(job.job_id, /^direct-/)
     assert.equal(job.remote_dir, '/home/op/sim/fore')
@@ -276,7 +276,7 @@ test('bsub_submit scheduler=none runs the worker directly on the host (no bsub)'
   }
 })
 
-test('bsub_poll reads the job file and reports completed', async () => {
+test('batch_poll reads the job file and reports completed', async () => {
   const env = setupMirror()
   const run = makeRunDir()
   try {
@@ -284,7 +284,7 @@ test('bsub_poll reads the job file and reports completed', async () => {
       machine_id: 'node1', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
     }))
     const ctx = makeCtx({ mirror: env.mirror, poll: { meta: 2, total: 2 } })
-    const res = await tool(ctx, 'bsub_poll').execute({ run_dir: run }, {})
+    const res = await tool(ctx, 'batch_poll').execute({ run_dir: run }, {})
     assert.equal(res.ok, true)
     assert.equal(res.state, 'completed')
     assert.equal(res.completed, 2)
@@ -294,7 +294,7 @@ test('bsub_poll reads the job file and reports completed', async () => {
   }
 })
 
-test('bsub_fetch downloads the archive and extracts it into the run directory', async () => {
+test('batch_fetch downloads the archive and extracts it into the run directory', async () => {
   const env = setupMirror()
   const run = makeRunDir()
   const archive = await makeArchive()
@@ -303,7 +303,7 @@ test('bsub_fetch downloads the archive and extracts it into the run directory', 
       machine_id: 'node1', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
     }))
     const ctx = makeCtx({ mirror: env.mirror, archive })
-    const res = await tool(ctx, 'bsub_fetch').execute({
+    const res = await tool(ctx, 'batch_fetch').execute({
       run_dir: run,
       includes: ['*/point_meta.json', '*/netlist.scs.raw/sp.sp', 'sweep_progress.json'],
     }, {})
@@ -324,16 +324,16 @@ test('bsub tools reject escaped paths, missing mirrors and missing live sessions
   const env = setupMirror()
   try {
     const ctx = makeCtx({ mirror: env.mirror })
-    await assert.rejects(() => tool(ctx, 'bsub_submit').execute({
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1', worker: '../evil.py',
     }, {}), /unsafe relative path/)
 
-    await assert.rejects(() => tool(ctx, 'bsub_submit').execute({
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: '../evil', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /escapes the remote workspace/)
 
-    await assert.rejects(() => tool(ctx, 'bsub_submit').execute({
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
       remote_scripts_dir: '/tmp/elsewhere', sync_scripts: true,
@@ -341,7 +341,7 @@ test('bsub tools reject escaped paths, missing mirrors and missing live sessions
 
     const empty = makeCtx({ mirror: env.mirror })
     empty.get = () => ({ list: () => [] })
-    await assert.rejects(() => tool(empty, 'bsub_submit').execute({
+    await assert.rejects(() => tool(empty, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /no live session/)
@@ -354,7 +354,7 @@ test('bsub tools reject escaped paths, missing mirrors and missing live sessions
   }
 })
 
-test('bsub_submit enforces the template.scs upload convention', async () => {
+test('batch_submit enforces the template.scs upload convention', async () => {
   const env = setupMirror()
   try {
     const run = makeRunDir({
@@ -362,13 +362,13 @@ test('bsub_submit enforces the template.scs upload convention', async () => {
       config: { netlist_template: 'template_thorough.scs', parameters: { SW: [0, 1] } },
     })
     const ctx = makeCtx({ mirror: env.mirror })
-    await assert.rejects(() => tool(ctx, 'bsub_submit').execute({
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: run, remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /netlist_template is "template_thorough.scs"/)
 
     const run2 = makeRunDir({ template: 'template_thorough.scs' })
-    await tool(ctx, 'bsub_submit').execute({
+    await tool(ctx, 'batch_submit').execute({
       run_dir: run2, remote_dir: 'batch2', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {})
@@ -380,17 +380,17 @@ test('bsub_submit enforces the template.scs upload convention', async () => {
   }
 })
 
-test('bsub_submit surfaces upload failures and refuses to clobber a batch', async () => {
+test('batch_submit surfaces upload failures and refuses to clobber a batch', async () => {
   const env = setupMirror()
   try {
     const ctx = makeCtx({ mirror: env.mirror, failUpload: true })
-    await assert.rejects(() => tool(ctx, 'bsub_submit').execute({
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /upload failed/)
 
     const clobberCtx = makeCtx({ mirror: env.mirror, existing: 3 })
-    await assert.rejects(() => tool(clobberCtx, 'bsub_submit').execute({
+    await assert.rejects(() => tool(clobberCtx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /already holds 3 point_meta\.json/)

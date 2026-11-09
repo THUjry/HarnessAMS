@@ -64,12 +64,12 @@ window.__ModuleLoader__.load({
         'guide.s1t': '工作方式：本地还是远程',
         'guide.s1': '本地 — spectre 本地闭环（装配 → 检查 → 仿真 → 解析 → 报告；需本机自备 Spectre）。远程 — 先在 dsh-remote 添加机器并选择一次远程工作区（生成镜像），再到本页「远程项目」一键创建远程项目；远程文件的浏览与编辑直接用 dsh-remote 自带功能。',
         'guide.s2t': '提交作业方式',
-        'guide.s2': '直接提交 — 仿真在本机前台运行（spectre 本地扫掠）。bsub — 提交 LSF 队列（bsub_submit / bsub_poll / bsub_fetch，需该机远程项目有活会话）。',
+        'guide.s2': '直接提交 — 仿真在本机前台运行（spectre 本地扫掠）。batch — 提交 LSF 队列（batch_submit / batch_poll / batch_fetch，需该机远程项目有活会话）。',
         'guide.s2slurm': 'slurm —— 暂不支持。',
         'guide.s3t': '工作区位置',
         'guide.s3': '本地 — harnessams.json 是唯一路径来源（workspace_root、PDK、回收站、脚本目录）。远程 — 镜像目录 ~/.dsh/remote-workspaces/<host>-<user>-<port>/<ws>，插件工具在镜像上原样工作。',
         'guide.s4t': '仿真插件套件',
-        'guide.s4': 'SmartAnaSim 单包安装即注册全部 11 个工具：spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、bsub（通用 LSF 提交 / 轮询 / 取回）、共享（分析 / 进度 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
+        'guide.s4': 'SmartAnaSim 单包安装即注册全部 11 个工具：spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、batch（通用 LSF 提交 / 轮询 / 取回）、共享（分析 / 进度 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
         'guide.s5': '任务侧栏「概览」— 本机环境检查 + 各机器四项检查（远程检查需该机远程项目有活会话）+ 项目设置表与一键项目自检。「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）。「远程终端」— 机器标签绑定该机活会话。',
         'rproj.title': '远程项目',
@@ -226,7 +226,7 @@ window.__ModuleLoader__.load({
         'pset.mode.local': '本地',
         'pset.mode.remote': '远程',
         'pset.sched.lsf': 'LSF 队列',
-        'pset.sched.none': '直接运行',
+        'pset.sched.direct': '直接运行',
         'pset.sim.spectre': 'spectre',
         'pset.sim.none': 'none（免仿真）',
         'pset.comp.python': 'python',
@@ -248,13 +248,13 @@ window.__ModuleLoader__.load({
         'selfchk.diagDone': '已创建诊断会话 {id} — 请到左侧会话树查看。',
         'selfchk.diagFail': '创建诊断会话失败：{err}',
         'guide.s6t': '仿真进度卡片',
-        'guide.s6': '会话里的仿真工具调用（bsub 提交/轮询/取回、进度、分析、spectre 装配/扫掠/解析）渲染为专属进度卡片：实时显示已完成几批、多少个仿真、待完成多少；本地扫批运行中卡片自动刷新。不需要时可在控制台页「显示设置」关闭（默认开启）。',
+        'guide.s6': '会话里的仿真工具调用（batch 提交/轮询/取回、进度、分析、spectre 装配/扫掠/解析）渲染为专属进度卡片：实时显示已完成几批、多少个仿真、待完成多少；本地扫批运行中卡片自动刷新。不需要时可在控制台页「显示设置」关闭（默认开启）。',
         'set.title': '显示设置',
         'set.toolview': '会话内仿真进度卡片',
         'set.toolviewHint': '关闭后这些工具调用回退为原始 JSON 显示。浏览器本地偏好，对本机所有会话生效。',
-        'card.title.bsub_submit': '远程批提交',
-        'card.title.bsub_poll': '远程批轮询',
-        'card.title.bsub_fetch': '远程批取回',
+        'card.title.batch_submit': '远程批提交',
+        'card.title.batch_poll': '远程批轮询',
+        'card.title.batch_fetch': '远程批取回',
         'card.title.sim_progress': '仿真进度',
         'card.title.sim_analysis': '仿真分析',
         'card.title.spectre_assemble': 'Spectre 装配',
@@ -320,12 +320,12 @@ window.__ModuleLoader__.load({
         'guide.s1t': 'Working mode: local or remote',
         'guide.s1': 'Local — the spectre loop runs on this machine (assemble → check → simulate → parse → report; Spectre must be installed locally). Remote — add a machine in dsh-remote and pick a remote workspace once (this creates the mirror), then create the remote project with one click under “Remote projects” on this page; browse and edit remote files with dsh-remote itself.',
         'guide.s2t': 'Job submission',
-        'guide.s2': 'Direct — the simulation runs on this machine in the foreground (local spectre sweeps). bsub — submit to an LSF queue (bsub_submit / bsub_poll / bsub_fetch; needs a live session in that machine’s remote project).',
+        'guide.s2': 'Direct — the simulation runs on this machine in the foreground (local spectre sweeps). batch — submit to an LSF queue (batch_submit / batch_poll / batch_fetch; needs a live session in that machine’s remote project).',
         'guide.s2slurm': 'slurm — not supported yet.',
         'guide.s3t': 'Workspace location',
         'guide.s3': 'Local — harnessams.json is the single source of paths (workspace_root, PDK, trash, script dirs). Remote — the mirror at ~/.dsh/remote-workspaces/<host>-<user>-<port>/<ws>; plugin tools work on the mirror as-is.',
         'guide.s4t': 'Simulation plugin suites',
-        'guide.s4': 'SmartAnaSim registers all 11 tools on install: spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), bsub (generic LSF submit / poll / fetch), shared (analysis / progress / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
+        'guide.s4': 'SmartAnaSim registers all 11 tools on install: spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), batch (generic LSF submit / poll / fetch), shared (analysis / progress / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
         'guide.s5': 'Task sidebar “Overview” — local environment checks plus four checks per machine (remote checks need a live session in that machine’s remote project), plus the project-settings table and the one-click project self-check. “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in). “Terminal” — machine tabs bind to that machine’s live session.',
         'rproj.title': 'Remote projects',
@@ -482,7 +482,7 @@ window.__ModuleLoader__.load({
         'pset.mode.local': 'local',
         'pset.mode.remote': 'remote',
         'pset.sched.lsf': 'LSF queue',
-        'pset.sched.none': 'direct',
+        'pset.sched.direct': 'direct',
         'pset.sim.spectre': 'spectre',
         'pset.sim.none': 'none (no simulation)',
         'pset.comp.python': 'python',
@@ -504,7 +504,7 @@ window.__ModuleLoader__.load({
         'selfchk.diagDone': 'Diagnosis session {id} created — see the session tree.',
         'selfchk.diagFail': 'Failed to create a diagnosis session: {err}',
         'guide.s6t': 'Simulation progress cards',
-        'guide.s6': 'Simulation tool calls in a conversation (bsub submit/poll/fetch, progress, analysis, '
+        'guide.s6': 'Simulation tool calls in a conversation (batch submit/poll/fetch, progress, analysis, '
           + 'spectre assemble/sweep/parse) render as dedicated progress cards: live batches done, simulations '
           + 'finished and pending; a local sweep in flight refreshes the card automatically. Toggle them off in '
           + 'the console page display settings (on by default).',
@@ -512,9 +512,9 @@ window.__ModuleLoader__.load({
         'set.toolview': 'Simulation progress cards in conversations',
         'set.toolviewHint': 'When off, these tool calls fall back to the raw JSON view. Browser-local preference, '
           + 'applies to every session on this machine.',
-        'card.title.bsub_submit': 'Remote batch submit',
-        'card.title.bsub_poll': 'Remote batch poll',
-        'card.title.bsub_fetch': 'Remote batch fetch',
+        'card.title.batch_submit': 'Remote batch submit',
+        'card.title.batch_poll': 'Remote batch poll',
+        'card.title.batch_fetch': 'Remote batch fetch',
         'card.title.sim_progress': 'Simulation progress',
         'card.title.sim_analysis': 'Simulation analysis',
         'card.title.spectre_assemble': 'Spectre assemble',
@@ -898,9 +898,9 @@ window.__ModuleLoader__.load({
     // is by name across plugins, so the top-level plugin renders both families.
     // Local sweeps poll /api/progress live while their tool call blocks; result
     // cards add the cross-batch aggregate from /api/progress-summary (LOCAL view —
-    // remote batches only after bsub_fetch brought the progress files back, the
+    // remote batches only after batch_fetch brought the progress files back, the
     // same dual-window semantics as the sim_progress tool).
-    const SIM_CARD_TOOLS = ['bsub_submit', 'bsub_poll', 'bsub_fetch', 'sim_progress',
+    const SIM_CARD_TOOLS = ['batch_submit', 'batch_poll', 'batch_fetch', 'sim_progress',
       'sim_analysis', 'spectre_assemble', 'spectre_run_sweep', 'spectre_parse']
 
     // Display toggle (default on): a browser-local preference, NOT project settings —
@@ -1019,9 +1019,9 @@ window.__ModuleLoader__.load({
       if (phase !== 'result') return null
       const d = result && result.data
       if (!d) return null
-      if (toolName === 'bsub_poll') return d.state
+      if (toolName === 'batch_poll') return d.state
       if (toolName === 'sim_progress') return d.status
-      if (toolName === 'bsub_submit') return d.state
+      if (toolName === 'batch_submit') return d.state
       if (toolName === 'spectre_run_sweep') return (live.prog && live.prog.local && live.prog.status) || (d.ok ? 'completed' : 'failed')
       return d.ok ? 'completed' : 'failed'
     }
@@ -1066,7 +1066,7 @@ window.__ModuleLoader__.load({
         els.push(h('div', { key: 'raw', className: 'hams-dim' }, '—'))
         return els
       }
-      if (toolName === 'bsub_poll' || toolName === 'sim_progress') {
+      if (toolName === 'batch_poll' || toolName === 'sim_progress') {
         if (d.total) els.push(h(CardBar, { key: 'bar', p: { total: d.total, completed: d.completed, status: d.state || d.status } }))
         els.push(h(CardKv, { key: 'kv', items: [
           { k: tr('card.label.succeeded'), v: d.succeeded },
@@ -1080,7 +1080,7 @@ window.__ModuleLoader__.load({
         if (d.errlog_tail) els.push(h('div', { key: 'err', className: 'hams-pre hams-warn' }, esc(String(d.errlog_tail))))
         return els
       }
-      if (toolName === 'bsub_submit') {
+      if (toolName === 'batch_submit') {
         els.push(h(CardKv, { key: 'kv', items: [
           { k: tr('card.label.job'), v: d.job_id },
           { k: tr('card.label.scheduler'), v: d.scheduler },
@@ -1090,7 +1090,7 @@ window.__ModuleLoader__.load({
         ] }))
         return els
       }
-      if (toolName === 'bsub_fetch') {
+      if (toolName === 'batch_fetch') {
         const f = d.fetched || {}
         els.push(h(CardKv, { key: 'kv', items: [
           { k: tr('card.label.job'), v: d.job_id },
@@ -1520,7 +1520,7 @@ window.__ModuleLoader__.load({
         visible: (s) => s.run_mode === 'remote' },
       { id: 'scheduler', labelKey: 'pset.colSched', column: 'scheduler',
         visible: (s) => s.run_mode === 'remote' && s.simulator === 'spectre',
-        options: [['lsf', 'pset.sched.lsf'], ['none', 'pset.sched.none']] },
+        options: [['lsf', 'pset.sched.lsf'], ['direct', 'pset.sched.direct']] },
       { id: 'simulator', labelKey: 'pset.colSim', column: 'simulator',
         options: [['spectre', 'pset.sim.spectre'], ['none', 'pset.sim.none']] },
       { id: 'compute_script_local', labelKey: 'pset.colCompLocal', column: 'compute_local',
@@ -1674,10 +1674,9 @@ window.__ModuleLoader__.load({
         fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId))
           .then((r) => { if (alive) setSettings(r.settings) })
           .catch((e) => { if (alive) setSettingsError(String(e.message ?? e)) })
-        // restore the latest run (memory or disk) so a remount/reload keeps the table
-        fetchJson(API + '/selfcheck')
-          .then((r) => { if (alive && r?.run) setRun(r.run) })
-          .catch(() => { /* no run yet */ })
+        // No restore fetch here (removed 2026-11-09): the former "latest run"
+        // surface was global and bled verdicts across projects. The table only
+        // fills from a run THIS session started (POST then poll by runId).
         return () => { alive = false }
       }, [sessionId])
 

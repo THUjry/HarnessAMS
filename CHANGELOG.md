@@ -5,6 +5,40 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed — 2026-11-09 (code-review follow-ups)
+
+- **Self-check verdict no longer lies in direct mode**: with `scheduler=direct`
+  a failed primary submit/poll used to report `remote: "ok"` / `summary.ok:
+  true` — finalize forgave primary-attempt failures unconditionally, but
+  direct mode has no fallback to do the forgiving. Primary failures now fail
+  the verdict unless a fallback actually completed (regression-tested).
+- **Trash rewritten in JS (`src/trash.js`)**, replacing
+  `scripts/common/common_trash.py`: the old `--restore`/`--purge` accepted
+  `../` traversal (and purge is a recursive delete) — entry names are now
+  fenced inside the trash root; trashing a plain file no longer breaks meta
+  writing after the move; every entry is a directory holding the item plus
+  `.trash_meta.json`.
+- **Python pipeline output forced to UTF-8** (`PYTHONUTF8=1` in `runPython`):
+  Python 3.14 pipes still encode by locale (cp936 on zh-CN Windows) while the
+  JS side decodes utf-8 — Chinese paths in tool output used to come back as
+  mojibake or crash the writer.
+
+### Changed — 2026-11-09 (batch tool rename)
+
+- **`bsub_submit`/`bsub_poll`/`bsub_fetch` renamed to
+  `batch_submit`/`batch_poll`/`batch_fetch`** and the scheduler value `none`
+  renamed to `direct` (0.1.0 was never published; no aliases, matching the
+  earlier `sim_*` → `spectre_*` precedent). Stored settings with the legacy
+  `scheduler: "none"` migrate to `direct` on read; legacy job files are
+  normalized in `batch_poll`.
+- **The self-check "restore latest run" surface was removed**: the global
+  latest run (memory + newest-on-disk scan) bled verdicts across projects —
+  project B's Overview displayed and live-polled project A's run. `GET
+  /api/selfcheck` now requires an id; the client only polls a run it started.
+- Tests: 92 → 97 (a trash module suite ×4 and the direct-mode verdict
+  regression; the id-less GET 400 and the scheduler migration assertions fold
+  into existing tests).
+
 ### Changed — 2026-11-09 (test suite dedup)
 
 - **Shared test scaffolding extracted to `tests/helpers.mjs`** and five

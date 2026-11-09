@@ -5,6 +5,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { cliError, readJsonIfExists, resolveDir, runPython } from '../py.js'
+import { listTrash, purgeEntry, restoreEntry, trashPaths } from '../trash.js'
 
 // --- Optional sim_analysis(report=true, task=…) injection target: the
 // HarnessAMS task dashboard. This plugin's own sidebar owns the task store at
@@ -180,8 +181,8 @@ export function sharedTools() {
       name: 'sim_progress',
       description: 'Read a sweep batch\'s progress file (sweep_progress.json in the run directory; no simulation '
         + 'is started). This is the LOCAL file window: use it directly for local runs; for a remote batch poll '
-        + 'bsub_poll while it runs (it also sees the LSF queue state, which this file never knows) and call '
-        + 'this tool after bsub_fetch brought the progress file back.',
+        + 'batch_poll while it runs (it also sees the LSF queue state, which this file never knows) and call '
+        + 'this tool after batch_fetch brought the progress file back.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Run directory holding sweep_progress.json' },
       },
@@ -207,23 +208,32 @@ export function sharedTools() {
     {
       name: 'safe_trash',
       description: 'Workspace trash (safety by default): move paths into <workspace>/.trash instead of deleting, '
-        + 'then list, restore, or explicitly purge an entry.',
+        + 'then list, restore, or explicitly purge an entry (restore/purge take an entry name exactly as list '
+        + 'reports it; names are fenced inside the trash directory).',
       parameters: {
         action: { type: 'string', required: true, enum: ['trash', 'list', 'restore', 'purge'],
           description: 'trash | list | restore | purge' },
-        path: { type: 'string', description: 'trash: path to move; restore/purge: trash entry name' },
+        path: { type: 'string', description: 'trash: path to move; restore/purge: trash entry name (from list)' },
         dest: { type: 'string', description: 'restore destination directory' },
       },
       async execute(args) {
-        let argv
-        if (args.action === 'list') argv = ['--list']
-        else if (args.action === 'restore') argv = ['--restore', String(args.path), String(args.dest ?? '.')]
-        else if (args.action === 'purge') argv = ['--purge', String(args.path)]
-        else if (args.action === 'trash') argv = [String(args.path)]
-        else return { ok: false, error: `unknown action: ${args.action}` }
-        const { stdout } = await runPython('common/common_trash.py', argv, 120_000)
-          .catch((e) => { throw new Error(`trash operation failed: ${cliError(e)}`) })
-        return { ok: true, output: stdout.trim() }
+        if (args.action === 'list') {
+          const entries = listTrash()
+          return { ok: true, entries, output: JSON.stringify(entries, null, 2) }
+        }
+        if (args.action === 'restore') {
+          if (!args.path) return { ok: false, error: 'restore requires path=<trash entry name from list>' }
+          return { ok: true, output: restoreEntry(String(args.path), args.dest ? String(args.dest) : '.') }
+        }
+        if (args.action === 'purge') {
+          if (!args.path) return { ok: false, error: 'purge requires path=<trash entry name from list>' }
+          return { ok: true, output: purgeEntry(String(args.path)) }
+        }
+        if (args.action === 'trash') {
+          if (!args.path) return { ok: false, error: 'trash requires path=<file or directory>' }
+          return { ok: true, output: trashPaths([String(args.path)]).join('\n') }
+        }
+        return { ok: false, error: `unknown action: ${args.action}` }
       },
     },
   ]
