@@ -924,9 +924,10 @@ window.__ModuleLoader__.load({
     function useSimProgress({ runDir, projectDir, active }) {
       const [data, setData] = useState({ prog: null, agg: null })
       useEffect(() => {
-        const progUrl = runDir ? API + '/api/progress?runDir=' + encodeURIComponent(runDir) : null
-        const aggUrl = projectDir ? API + '/api/progress-summary?projectDir=' + encodeURIComponent(projectDir)
-          : runDir ? API + '/api/progress-summary?runDir=' + encodeURIComponent(runDir) : null
+        // API already ends with /api — the endpoints hang right off it.
+        const progUrl = runDir ? API + '/progress?runDir=' + encodeURIComponent(runDir) : null
+        const aggUrl = projectDir ? API + '/progress-summary?projectDir=' + encodeURIComponent(projectDir)
+          : runDir ? API + '/progress-summary?runDir=' + encodeURIComponent(runDir) : null
         if (!progUrl && !aggUrl) return
         let alive = true
         let last = ''
@@ -1036,7 +1037,7 @@ window.__ModuleLoader__.load({
       // statuses stay protocol values server-side and get tone+text here.
       return h('table', { className: 'hams-table' },
         h('thead', null, h('tr', null,
-          [tr('card.agg.round'), tr('chk.bc.status'), tr('chk.bc.progress')].map((k) => h('th', { key: k }, tr(k))))),
+          ['card.agg.round', 'chk.bc.status', 'chk.bc.progress'].map((k) => h('th', { key: k }, tr(k))))),
         h('tbody', null, (agg.batches || []).map((b) => h('tr', { key: b.round, title: b.dir || '' },
           h('td', null, esc(b.round)),
           h('td', { className: batchStatusColor(b.status) }, cardStatusText(b.status)),
