@@ -72,7 +72,8 @@ test('client half: syntax valid and registers the three tiers', async () => {
   const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   assert.ok(src.includes("window.__ModuleLoader__.load"), 'must register as a classic script')
   assert.ok(src.includes("exports.apply = apply"), 'must export apply for the loader')
-  for (const slot of ["'main'", "'sidebar.panellist'", "'sidebar.right.pane.tab'", "'conversation.session.header.actions'"]) {
+  for (const slot of ["'main'", "'sidebar.panellist'", "'sidebar.right.pane.tab'",
+    "'conversation.session.header.actions'", "'tool.call.toolview'"]) {
     assert.ok(src.includes(slot), `client must inject the ${slot} slot`)
   }
   assert.ok(src.includes("sidebarRightTabs"), 'client must register the right-sidebar tab')
@@ -86,4 +87,49 @@ test('client half: syntax valid and registers the three tiers', async () => {
   assert.ok(src.includes('hams-task-view'), 'sub-view choice must persist via localStorage')
   assert.ok(src.includes('rememberTaskView'), 'view switch must write the persisted choice')
   assert.ok(src.includes('useState(readTaskView)'), 'TaskSidebarBody must restore the persisted view on mount')
+})
+
+test('client half: simulation tool cards keyed by exact wire tool names', async () => {
+  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  assert.ok(src.includes("slots.inject('tool.call.toolview'"), 'must inject the tool card slot')
+  // A key typo never renders (silent generic-card fallback), so the eight names
+  // are pinned against the model-facing tool surface verbatim.
+  const m = /const SIM_CARD_TOOLS = \[([^\]]+)\]/.exec(src)
+  assert.ok(m, 'SIM_CARD_TOOLS list must exist')
+  const cardTools = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean)
+  assert.deepEqual(cardTools.sort(), ['bsub_fetch', 'bsub_poll', 'bsub_submit', 'sim_analysis',
+    'sim_progress', 'spectre_assemble', 'spectre_parse', 'spectre_run_sweep'])
+  assert.ok(src.includes('/api/progress'), 'cards must poll the progress endpoints')
+  assert.ok(src.includes('hams-toolview'), 'card display toggle must persist via localStorage')
+  assert.ok(src.includes('TOOLVIEW_EVENT'), 'mounted cards must flip without a reload')
+  assert.ok(src.includes('DisplaySettingsSection'), 'console page must host the display toggle')
+  assert.ok(src.includes("sec('guide.s6t', 'guide.s6')"), 'guide must cover the tool cards')
+})
+
+test('client half: zh/en dictionaries keep identical key sets', async () => {
+  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  const blockKeys = (name) => {
+    const start = src.indexOf(name + ': {')
+    assert.ok(start >= 0, `dict block ${name} must exist`)
+    const open = src.indexOf('{', start)
+    let depth = 0
+    let end = -1
+    for (let i = open; i < src.length; i++) {
+      if (src[i] === '{') depth++
+      else if (src[i] === '}') { depth--; if (depth === 0) { end = i; break } }
+    }
+    const keys = []
+    const re = /^\s+'([A-Za-z0-9_.-]+)':/gm
+    let mm
+    const body = src.slice(open, end)
+    while ((mm = re.exec(body))) keys.push(mm[1])
+    return keys
+  }
+  const zh = blockKeys('zh')
+  const en = blockKeys('en')
+  assert.equal(zh.length, en.length, 'same key count')
+  assert.deepEqual([...zh].sort(), [...en].sort(), 'same key sets')
+  for (const probe of ['card.agg.line', 'set.toolview', 'guide.s6']) {
+    assert.ok(zh.includes(probe), `zh dictionary must carry ${probe}`)
+  }
 })

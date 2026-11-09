@@ -37,8 +37,9 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
 
 1. **Global console page** — the "HarnessAMS" entry in the left sidebar (next to
    Plugins / Automation tasks) opens a full page with **Remote projects**, **Digital
-   assets** (plotly asset status + the workspace report library), and **Disk usage**
-   for the local workspace.
+   assets** (plotly asset status + the workspace report library), **Disk usage**
+   for the local workspace, and a **Display settings** block (the session
+   tool-card toggle, on by default).
 
    Remote connectivity is delegated entirely to the dsh-remote plugin — HarnessAMS
    keeps no server registry and no ssh channel of its own. This page reads
@@ -142,6 +143,23 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    compute script — python or js locally (js runs in-process), python or node
    remotely (`remote_node` workspace key). Failures start diagnosis sessions
    automatically (same private session-controller channel as the check buttons).
+4. **Session tool cards (conversation)** — DSH renders a generic JSON card for
+   every model tool call; HarnessAMS registers the `tool.call.toolview` slot for
+   the eight simulation tools (`bsub_submit`/`bsub_poll`/`bsub_fetch`,
+   `sim_progress`/`sim_analysis`, `spectre_assemble`/`spectre_run_sweep`/
+   `spectre_parse` — keyed by exact wire tool name, one renderer covers both
+   plugins; SmartAnaSim ships no client half). A card shows a status badge, a
+   progress bar with succeeded/failed/pending counts, and the project-level
+   batch aggregate ("3/5 batches done · 120/360 sims · 240 pending"): a local
+   sweep in flight polls `/api/progress` live (3 s, paused while the tab is
+   hidden) so the bar grows while the tool call blocks, and settled cards fetch
+   the cross-batch summary once from `/api/progress-summary` (a local view —
+   remote batches surface after `bsub_fetch` brings the progress files back,
+   the same dual-window semantics as the `sim_progress` tool). An expandable
+   details section keeps the raw args/result JSON; the console-page display
+   settings toggle turns the cards off (browser-local preference; the off state
+   renders the raw shape itself since the occupied key cannot fall back to the
+   DSH generic card). The onboarding guide covers the cards in its sixth section.
 
 ## What the npm packages ship (besides the JS)
 
