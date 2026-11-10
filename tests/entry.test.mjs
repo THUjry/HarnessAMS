@@ -109,6 +109,24 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   assert.ok(src.includes("sec('guide.s6t', 'guide.s6')"), 'guide must cover the tool cards')
 })
 
+test('client half: top-level overview tab and the check sub-view', async () => {
+  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  // The overview is its own TOP-LEVEL right-sidebar tab (2026-11-10): a second
+  // sidebarRightTabs registration plus a second pane-tab body keyed by OV_TAB_ID,
+  // project-scoped and cached across same-project session switches.
+  assert.ok(src.includes("const OV_TAB_ID = 'dsh-harnessams-overview'"), 'overview tab id constant')
+  assert.ok(src.includes("const OV_TAB_KIND = 'harnessams-overview'"), 'overview tab kind constant')
+  assert.ok(src.includes('function OverviewSidebarBody'), 'overview body component')
+  assert.ok(src.includes('key: OV_TAB_ID'), 'overview body keyed by the tab id')
+  assert.ok(src.includes('overviewMemory'), 'same-project remount cache')
+  assert.ok(src.includes('right.openTab(OV_TAB_KIND)'), 'sticky reopen must target the overview tab')
+  // The task tab lost its overview sub-view and gained the check-params one
+  assert.ok(!src.includes("id: 'overview'"), 'overview must not stay a TASK_VIEWS entry')
+  assert.ok(/id: 'check', labelKey: 'tasks\.viewCheck'/.test(src), 'TASK_VIEWS must carry the check view')
+  assert.ok(src.includes("API + '/check-params"), 'check sub-view must call the check-params API')
+  assert.ok(src.includes('check.oldValue'), 'unconfirmed edits must show the old value')
+})
+
 test('client half: zh/en dictionaries keep identical key sets', async () => {
   const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   const blockKeys = (name) => {

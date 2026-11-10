@@ -35,6 +35,11 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'dsh-harnessams'
     const TAB_ID = 'dsh-harnessams'
     const TAB_KIND = 'harnessams'
+    // The project overview is its own TOP-LEVEL right-sidebar tab (next to the
+    // host tabs), project-scoped and auto-opened by the sticky logic; the task
+    // tab keeps the per-task sub-views.
+    const OV_TAB_ID = 'dsh-harnessams-overview'
+    const OV_TAB_KIND = 'harnessams-overview'
     const API = '/harnessams/api'
 
     // ---------- i18n ----------
@@ -157,7 +162,8 @@ window.__ModuleLoader__.load({
         'tasks.remoteProjectNote': '远程项目不提供 HarnessAMS 侧边栏——远程文件的浏览与编辑请直接使用 dsh-remote；检查与任务请在本地项目中进行。',
         'tasks.noTasks': '还没有任务 — 点“+”创建第一个。',
         'tasks.projectLabel': '项目：',
-        'tasks.viewOverview': '概览',
+        'tasks.tabOverview': '总览',
+        'tasks.viewCheck': '参数检查',
         'tasks.viewDashboard': '仪表盘',
         'tasks.viewSim': '仿真设置',
         'tasks.deleteAria': '删除 {name}',
@@ -200,12 +206,37 @@ window.__ModuleLoader__.load({
         'term.fontSize': '字号（Ctrl+滚轮可调）',
         'tasks.simTitle': '仿真设置',
         'tasks.simPlaceholder': '占位 — 本任务的 SmartAnaSim 配置将在后续里程碑落地。',
-        'tasks.pinOn': '已固定：切换会话/工作区时任务侧栏会自动重开 — 点击取消跟随',
+        'tasks.pinOn': '已固定：切换会话/工作区时总览页自动重开 — 点击取消跟随',
         'tasks.pinOff': '未固定：切换会话时侧栏收起 — 点击让它跟随切换',
-        'tasks.headerPinOn': 'HarnessAMS 任务 — 已固定：随会话/工作区切换重开',
-        'tasks.headerPinOff': 'HarnessAMS 任务 — 打开侧栏（固定以跟随会话切换）',
-        'tasks.headerTasks': '任务',
+        'tasks.headerPinOn': 'HarnessAMS 总览 — 已固定：随会话/工作区切换重开',
+        'tasks.headerPinOff': 'HarnessAMS 总览 — 打开总览页（固定以跟随会话切换）',
+        'tasks.headerOverview': '总览',
         'tasks.guideDesc': '任务、检查、报告与使用引导',
+        'tasks.guideOvDesc': '项目环境检查、设置与一键自检',
+        'check.title': '装配层检查参数',
+        'check.desc': '装配脚本的检查阈值与开关；确认后写入 check_params.json，下次装配生效。',
+        'check.colParam': '参数',
+        'check.colValue': '值',
+        'check.colNote': '说明',
+        'check.rclR': '理想电阻范围 (R)',
+        'check.rclC': '理想电容范围 (C)',
+        'check.rclL': '理想电感范围 (L)',
+        'check.noteR': 'Ω；下限 < 上限（基本单位）',
+        'check.noteC': 'F；下限 < 上限（基本单位）',
+        'check.noteL': 'H；下限 < 上限（基本单位）',
+        'check.unitCheck': '单位检查',
+        'check.noteUnit': '长度 u/n、频率/电流后缀与裸数拦截',
+        'check.biasCheck': '偏置 < Vdd 检查',
+        'check.noteBias': '关闭后 check_bias_lt_vdd 不再拦截',
+        'check.strictIncludes': 'include 严格模式',
+        'check.noteStrict': '开启后无法核对的绝对路径 include 也算错误',
+        'check.on': '开',
+        'check.off': '关',
+        'check.oldValue': '（旧值：{v}）',
+        'check.confirm': '确认',
+        'check.loadFailed': '读取检查参数失败：{msg}',
+        'check.saveFailed': '保存失败：{msg}',
+        'check.badPair': '“{p}”须为正数且下限 < 上限',
         'pset.title': '项目设置',
         'pset.dirLabel': '工作目录',
         'pset.dirLocalHint': '本地模式：自检产物写入本地工作区 selfcheck/ 目录',
@@ -413,7 +444,8 @@ window.__ModuleLoader__.load({
         'tasks.remoteProjectNote': 'No HarnessAMS sidebar in remote projects — browse and edit remote files with dsh-remote; run checks and manage tasks in a local project.',
         'tasks.noTasks': 'No tasks yet — create the first one with “+”.',
         'tasks.projectLabel': 'Project: ',
-        'tasks.viewOverview': 'Overview',
+        'tasks.tabOverview': 'Overview',
+        'tasks.viewCheck': 'Checks',
         'tasks.viewDashboard': 'Dashboard',
         'tasks.viewSim': 'Sim settings',
         'tasks.deleteAria': 'Delete {name}',
@@ -456,12 +488,37 @@ window.__ModuleLoader__.load({
         'term.fontSize': 'Font size (Ctrl+wheel adjusts)',
         'tasks.simTitle': 'Simulation settings',
         'tasks.simPlaceholder': 'Placeholder — SmartAnaSim configuration for this task lands here in later milestones.',
-        'tasks.pinOn': 'Pinned: the task tab reopens when you switch sessions/workspaces — click to stop following',
+        'tasks.pinOn': 'Pinned: the overview tab reopens when you switch sessions/workspaces — click to stop following',
         'tasks.pinOff': 'Not pinned: the sidebar collapses on session switch — click to make it follow switches',
-        'tasks.headerPinOn': 'HarnessAMS tasks — pinned: reopens on session/workspace switch',
-        'tasks.headerPinOff': 'HarnessAMS tasks — open the tab (pin it to follow session switches)',
-        'tasks.headerTasks': 'Tasks',
+        'tasks.headerPinOn': 'HarnessAMS overview — pinned: reopens on session/workspace switch',
+        'tasks.headerPinOff': 'HarnessAMS overview — open the overview tab (pin it to follow session switches)',
+        'tasks.headerOverview': 'Overview',
         'tasks.guideDesc': 'Tasks, checks, reports and a guide',
+        'tasks.guideOvDesc': 'Project health checks, settings and one-click self-check',
+        'check.title': 'Assembly check parameters',
+        'check.desc': 'Thresholds and switches for the assembly-layer checks; confirming writes check_params.json and takes effect on the next assembly.',
+        'check.colParam': 'Parameter',
+        'check.colValue': 'Value',
+        'check.colNote': 'Note',
+        'check.rclR': 'Ideal resistor range (R)',
+        'check.rclC': 'Ideal capacitor range (C)',
+        'check.rclL': 'Ideal inductor range (L)',
+        'check.noteR': 'ohm; min < max (base unit)',
+        'check.noteC': 'farad; min < max (base unit)',
+        'check.noteL': 'henry; min < max (base unit)',
+        'check.unitCheck': 'Unit checks',
+        'check.noteUnit': 'length u/n suffixes, freq/current suffixes, bare-number rejection',
+        'check.biasCheck': 'Bias < Vdd check',
+        'check.noteBias': 'off disables the check_bias_lt_vdd gate',
+        'check.strictIncludes': 'Strict includes',
+        'check.noteStrict': 'on makes unverifiable absolute includes errors',
+        'check.on': 'On',
+        'check.off': 'Off',
+        'check.oldValue': ' (old: {v})',
+        'check.confirm': 'Confirm',
+        'check.loadFailed': 'Failed to load check parameters: {msg}',
+        'check.saveFailed': 'Failed to save: {msg}',
+        'check.badPair': '"{p}" must be positive numbers with min < max',
         'pset.title': 'Project settings',
         'pset.dirLabel': 'Working directory',
         'pset.dirLocalHint': 'local mode: self-check artifacts go under the local workspace\'s selfcheck/ directory',
@@ -1336,11 +1393,13 @@ window.__ModuleLoader__.load({
 
     // ---------- tier 3: per-project task sidebar ----------
 
-    // Lowest navigation level inside a task: overview / dashboard / remote terminal /
-    // sim settings (sim settings is a placeholder until its milestone lands).
+    // Lowest navigation level inside a task: dashboard / check parameters / remote
+    // terminal / sim settings (sim settings is a placeholder until its milestone
+    // lands). The project-level overview moved up to its own TOP-LEVEL tab
+    // (OverviewSidebarBody); only the task-level info block stayed in this tab.
     const TASK_VIEWS = [
-      { id: 'overview', labelKey: 'tasks.viewOverview' },
       { id: 'dashboard', labelKey: 'tasks.viewDashboard' },
+      { id: 'check', labelKey: 'tasks.viewCheck' },
       { id: 'term', labelKey: 'tasks.viewTerm' },
       { id: 'sim', labelKey: 'tasks.viewSim' },
     ]
@@ -1359,7 +1418,7 @@ window.__ModuleLoader__.load({
         const v = localStorage.getItem(TASK_VIEW_KEY)
         if (isValidTaskView(v)) { taskViewMemory = v; return v }
       } catch { /* private mode */ }
-      return 'overview'
+      return 'dashboard'
     }
     function rememberTaskView(v) {
       taskViewMemory = v
@@ -1658,27 +1717,48 @@ window.__ModuleLoader__.load({
         h('tbody', null, rows))
     }
 
-    function ProjectSelfcheck({ sessionId, info }) {
-      const [settings, setSettings] = useState(null)
+    // Module memory for the overview tab's project-level surfaces: the host
+    // remounts the whole right pane on every session switch, so the last
+    // project's data lives here and a remount for the SAME project renders
+    // straight from the snapshot (silent revalidate, no blank flash) while a
+    // different project simply misses and refetches clean.
+    const overviewMemory = { path: null, project: null, checksInfo: null, checkRun: null }
+    const selfcheckMemory = { path: null, settings: null, run: null }
+
+    function ProjectSelfcheck({ sessionId, info, projectPath }) {
+      const [settings, setSettings] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.settings : null))
       const [settingsError, setSettingsError] = useState(null)
       const [dirDraft, setDirDraft] = useState(null)
-      const [run, setRun] = useState(null)
+      const [run, setRun] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.run : null))
       const [startError, setStartError] = useState(null)
       const [browseOpen, setBrowseOpen] = useState(false)
       const machines = info?.machines ?? []
 
+      // Same-project remount (session switch inside one workspace): adopt the
+      // module snapshot instead of clearing — the table never flashes blank and
+      // a running self-check keeps polling by runId. Different/first project:
+      // full reset, same as before.
       useEffect(() => {
         let alive = true
-        setSettings(null); setSettingsError(null); setRun(null); setStartError(null)
+        const adopt = !!projectPath && selfcheckMemory.path === projectPath
+        if (!adopt) { setSettings(null); setSettingsError(null); setRun(null); setStartError(null) }
         if (!sessionId) return
         fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId))
-          .then((r) => { if (alive) setSettings(r.settings) })
-          .catch((e) => { if (alive) setSettingsError(String(e.message ?? e)) })
+          .then((r) => { if (alive) setSettings((prev) => (JSON.stringify(prev) === JSON.stringify(r.settings) ? prev : r.settings)) })
+          .catch((e) => { if (alive && !adopt) setSettingsError(String(e.message ?? e)) })
         // No restore fetch here: a global "latest run" surface would bleed
         // verdicts across projects. The table only fills from a run THIS
-        // session started (POST then poll by runId).
+        // sidebar started (POST then poll by runId) — or the module snapshot.
         return () => { alive = false }
-      }, [sessionId])
+      }, [sessionId, projectPath])
+
+      // write the snapshot back for the next same-project remount
+      useEffect(() => {
+        if (!projectPath) return
+        selfcheckMemory.path = projectPath
+        selfcheckMemory.settings = settings
+        selfcheckMemory.run = run
+      }, [projectPath, settings, run])
 
       const runId = run?.id ?? null
       const runStatus = run?.status ?? null
@@ -1782,6 +1862,135 @@ window.__ModuleLoader__.load({
         }))
     }
 
+    // ---------- tier 3: project overview (own TOP-LEVEL right-sidebar tab) ----------
+    // Project-level surfaces only (health checks + settings/self-check): nothing
+    // here depends on a task, so switching sessions INSIDE one project must not
+    // refresh the tab — the body initializes from overviewMemory and only a real
+    // project change clears and refetches. The sticky logic auto-opens this tab.
+    function OverviewSidebarBody(props) {
+      const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
+      const [project, setProject] = useState(() => overviewMemory.project ?? undefined)
+      const [reason, setReason] = useState(null)
+      const [checksInfo, setChecksInfo] = useState(() => (overviewMemory.path ? overviewMemory.checksInfo : null))
+      const [checkRun, setCheckRun] = useState(() => (overviewMemory.path ? overviewMemory.checkRun : null))
+      const [analyze, setAnalyze] = useState(null)
+      const projectPath = project?.path ?? null
+      const projectRemote = !!project?.remote
+
+      useEffect(() => {
+        let alive = true
+        if (!sessionId) { setProject(null); setReason(tr('tasks.noSession')); return }
+        fetchJson(API + '/project?sessionId=' + encodeURIComponent(sessionId))
+          .then((r) => {
+            if (!alive) return
+            rememberProjectKind(sessionId, !!r?.project?.remote)
+            if (!r?.project || r.project.path !== overviewMemory.path) {
+              // different (or first) project: drop the cached surfaces so the
+              // checks effect below refetches for the new workspace
+              overviewMemory.path = r?.project?.path ?? null
+              overviewMemory.project = null
+              overviewMemory.checksInfo = null
+              overviewMemory.checkRun = null
+              setChecksInfo(null); setCheckRun(null)
+            }
+            setProject(r.project ?? null)
+            setReason(r.project ? null : r.reason ?? null)
+          })
+          .catch((e) => { if (alive) { setProject(null); setReason(String(e.message ?? e)) } })
+        return () => { alive = false }
+      }, [sessionId])
+
+      // Overview check surface (local projects: local environment + per-machine
+      // remote checks). No upfront clear: a same-project remount keeps showing
+      // the cached copy while the silent revalidate lands (JSON-compare swap).
+      useEffect(() => {
+        let alive = true
+        if (!projectPath || !sessionId || projectRemote) return
+        fetchJson(API + '/checks?sessionId=' + encodeURIComponent(sessionId))
+          .then((r) => { if (alive) setChecksInfo((prev) => (JSON.stringify(prev) === JSON.stringify(r) ? prev : r)) })
+          .catch(() => { /* keep the cached copy */ })
+        return () => { alive = false }
+      }, [projectPath, sessionId, projectRemote])
+
+      // remember the last rendered surfaces for the next same-project remount
+      useEffect(() => {
+        if (!projectPath) return
+        overviewMemory.path = projectPath
+        overviewMemory.project = project
+        overviewMemory.checksInfo = checksInfo
+        overviewMemory.checkRun = checkRun
+      }, [projectPath, project, checksInfo, checkRun])
+
+      // mid=null runs the local-environment check; otherwise mid is the machineId
+      // of the machine block the button sits in (remote checks borrow that
+      // machine's remote-project session server-side). Identical to the task
+      // tab's former copy — the check surface moved here with the overview.
+      const runCheck = async (mid, id) => {
+        const key = mid ? mid + ':' + id : id
+        setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'running', results: null })
+        try {
+          const q = 'sessionId=' + encodeURIComponent(sessionId) + '&check=' + encodeURIComponent(id)
+            + (mid ? '&machineId=' + encodeURIComponent(mid) : '')
+          const r = await fetchJson(API + '/checks/run?' + q)
+          setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'done', results: r.results, channel: r.channel })
+          // Auto handoff (path 2, user decision 2026-11-01): a REMOTE check that
+          // ends with failed entries immediately starts a diagnosis session, so
+          // cluster problems never need a manual copy-paste. Local check failures
+          // stay button-only (auto sessions for trivial failures would just burn
+          // tokens). Behavior switch is a constant for now — future: user setting.
+          if (AUTO_ANALYZE_REMOTE && mid && (r.results ?? []).some((x) => x && x.ok === false)) {
+            void analyzeRun({ machineId: mid, check: id, results: r.results }, true)
+          }
+        } catch (e) {
+          setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'failed', error: String(e.message ?? e), results: null })
+        }
+      }
+
+      // analyzeRun: hand a run's failed entries to a newly created diagnosis
+      // session (POST /api/checks/analyze); auto=true marks the automatic
+      // trigger for the result message. Same as the task tab's former copy.
+      const analyzeRun = async (run, auto) => {
+        const failed = (run.results ?? []).filter((x) => x && x.ok === false)
+        if (!failed.length || !sessionId) return
+        setAnalyze({ status: 'running', auto })
+        try {
+          const r = await fetchJson(API + '/checks/analyze', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId,
+              check: run.check,
+              machineId: run.machineId ?? null,
+              lang: effectiveLang(),
+              auto: !!auto,
+              failed,
+            }),
+          })
+          setAnalyze({ status: 'done', auto, sessionId: r.sessionId, title: r.title })
+        } catch (e) {
+          setAnalyze({ status: 'failed', auto, error: String(e.message ?? e) })
+        }
+      }
+
+      // Remote projects render nothing but the explanatory note — their role is
+      // anchoring the connection; checks run from local projects.
+      if (project && projectRemote) {
+        return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
+          h('div', { className: 'hams-body' },
+            h('div', { className: 'hams-dim' }, tr('tasks.remoteProjectNote'))))
+      }
+
+      return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
+        h('div', { className: 'hams-body' },
+          project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
+          project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
+          project && h('div', { className: 'hams-dim' },
+            tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
+          project && !projectRemote && checksInfo && h(CheckPanel, { info: checksInfo, run: checkRun, onRun: runCheck, analyze, onAnalyze: analyzeRun }),
+          project && !projectRemote && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath }),
+        ))
+    }
+
     function TaskSidebarBody(props) {
       const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
       const [project, setProject] = useState(undefined) // undefined=loading, null=none
@@ -1792,9 +2001,7 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState(null)
       const [dialogOpen, setDialogOpen] = useState(false)
       const [descDraft, setDescDraft] = useState(null)
-      const [checksInfo, setChecksInfo] = useState(null)
-      const [checkRun, setCheckRun] = useState(null) // { id, status, results?, channel?, error? }
-      const [analyze, setAnalyze] = useState(null) // { status: 'running'|'done'|'failed', auto, sessionId?, error? }
+      const [checksInfo, setChecksInfo] = useState(null) // machines for the term sub-view; the check surface itself lives in the overview tab
 
       const projectPath = project?.path ?? null
       const projectRemote = !!project?.remote
@@ -1862,9 +2069,11 @@ window.__ModuleLoader__.load({
 
       // Overview check surface (local projects: local environment + per-machine
       // remote checks); fetched independently so it never blocks the task list.
+      // The check buttons themselves moved to the overview tab — only the
+      // machines list is needed here (term sub-view session binding).
       useEffect(() => {
         let alive = true
-        setChecksInfo(null); setCheckRun(null)
+        setChecksInfo(null)
         if (!projectPath || !sessionId || projectRemote) return
         fetchJson(API + '/checks?sessionId=' + encodeURIComponent(sessionId))
           .then((r) => { if (alive) setChecksInfo(r) })
@@ -1872,56 +2081,9 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [projectPath, sessionId, projectRemote])
 
-      // mid=null runs the local-environment check; otherwise mid is the machineId of
-      // the machine block the button sits in (remote checks borrow that machine's
-      // remote-project session server-side).
-      const runCheck = async (mid, id) => {
-        const key = mid ? mid + ':' + id : id
-        setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'running', results: null })
-        try {
-          const q = 'sessionId=' + encodeURIComponent(sessionId) + '&check=' + encodeURIComponent(id)
-            + (mid ? '&machineId=' + encodeURIComponent(mid) : '')
-          const r = await fetchJson(API + '/checks/run?' + q)
-          setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'done', results: r.results, channel: r.channel })
-          // Auto handoff (path 2): a REMOTE check that
-          // ends with failed entries immediately starts a diagnosis session, so
-          // cluster problems never need a manual copy-paste. Local check failures
-          // stay button-only (auto sessions for trivial failures would just burn
-          // tokens). Behavior switch is a constant for now — future: user setting.
-          if (AUTO_ANALYZE_REMOTE && mid && (r.results ?? []).some((x) => x && x.ok === false)) {
-            void analyzeRun({ machineId: mid, check: id, results: r.results }, true)
-          }
-        } catch (e) {
-          setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'failed', error: String(e.message ?? e), results: null })
-        }
-      }
-
-      // analyzeRun: create the diagnosis session via the host (POST /api/checks/analyze)
-      // with the run's failed entries verbatim; the server assembles the English prompt
-      // (answer-language line per the current UI language) and drives the DSH session
-      // controller. auto=true marks the automatic trigger for the result message.
-      const analyzeRun = async (run, auto) => {
-        const failed = (run.results ?? []).filter((x) => x && x.ok === false)
-        if (!failed.length || !sessionId) return
-        setAnalyze({ status: 'running', auto })
-        try {
-          const r = await fetchJson(API + '/checks/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sessionId,
-              check: run.check,
-              machineId: run.machineId ?? null,
-              lang: effectiveLang(),
-              auto: !!auto,
-              failed,
-            }),
-          })
-          setAnalyze({ status: 'done', auto, sessionId: r.sessionId, title: r.title })
-        } catch (e) {
-          setAnalyze({ status: 'failed', auto, error: String(e.message ?? e) })
-        }
-      }
+      // The check buttons and the diagnosis handoff moved to the overview tab
+      // (OverviewSidebarBody); this tab keeps only the machines fetch above for
+      // the term sub-view's session binding.
 
       // persist(mutator) re-bases the change on the LATEST server list before the
       // full-list PUT: the store has a second writer now (sim_report's report
@@ -2006,7 +2168,23 @@ window.__ModuleLoader__.load({
           project && h('div', { className: 'hams-dim' },
             tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
           selected && h('div', { style: { marginTop: '8px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
-            // lowest level: per-task sub navigation (overview / dashboard / sim settings)
+            // task-level info (the old overview sub-view's residue): name+date row
+            // and the description editor stay always visible above the sub tabs
+            h('div', { className: 'hams-row' },
+              h('b', null, selected.name),
+              h('span', { className: 'hams-dim' }, selected.created_at ? selected.created_at.slice(0, 10) : '')),
+            h('div', { className: 'hams-taskdesc' },
+              h('textarea', {
+                className: 'hams-textarea',
+                rows: 2,
+                value: descDraft ?? selected.description ?? '',
+                placeholder: tr('tasks.descPlaceholder'),
+                onChange: (e) => setDescDraft(e.target.value),
+              }),
+              descDraft !== null && h('div', { className: 'hams-row' },
+                h('button', { className: 'hams-btn hams-btn-sm', onClick: saveDescription }, tr('common.save')),
+                h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDescDraft(null) }, tr('common.cancel')))),
+            // lowest level: per-task sub navigation (dashboard / check params / term / sim)
             h('div', { className: 'hams-subtabs', role: 'tablist' },
               TASK_VIEWS.map((v) => h('button', {
                 key: v.id,
@@ -2015,23 +2193,8 @@ window.__ModuleLoader__.load({
                 'aria-selected': view === v.id,
                 onClick: () => { rememberTaskView(v.id); setView(v.id) },
               }, tr(v.labelKey)))),
-            view === 'overview' && h('div', null,
-              h('div', { className: 'hams-row' },
-                h('b', null, selected.name),
-                h('span', { className: 'hams-dim' }, selected.created_at ? selected.created_at.slice(0, 10) : '')),
-              checksInfo && h(CheckPanel, { info: checksInfo, run: checkRun, onRun: runCheck, analyze, onAnalyze: analyzeRun }),
-              sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo }),
-              h('div', { className: 'hams-taskdesc' },
-                h('textarea', {
-                  className: 'hams-textarea',
-                  value: descDraft ?? selected.description ?? '',
-                  placeholder: tr('tasks.descPlaceholder'),
-                  onChange: (e) => setDescDraft(e.target.value),
-                }),
-                descDraft !== null && h('div', { className: 'hams-row' },
-                  h('button', { className: 'hams-btn hams-btn-sm', onClick: saveDescription }, tr('common.save')),
-                  h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDescDraft(null) }, tr('common.cancel'))))),
             view === 'dashboard' && h(TaskDashboard, { task: selected, updateTask }),
+            view === 'check' && h(CheckParams, { sessionId }),
             view === 'term' && h(TaskTerminal, { info: checksInfo }),
             view === 'sim' && h('div', { className: 'hams-dash' },
               h('b', null, tr('tasks.simTitle')), h('br'),
@@ -2322,6 +2485,131 @@ window.__ModuleLoader__.load({
       body: JSON.stringify({ ...payload, sessionId: m.sessionId }),
     })
 
+    // Check-parameters sub-view (task tab): editable table of the assembly-layer
+    // check thresholds/switches stored in check_params.json (project-level). The
+    // six R/C/L numbers are strings while drafting; the confirm button validates,
+    // PUTs the whole object, and the server re-validates. While a draft differs
+    // from the saved value the cell keeps the old value visible in gray
+    // parentheses so the pre-confirm state is always readable.
+    function CheckParams({ sessionId }) {
+      const [params, setParams] = useState(null) // saved copy (null = loading)
+      const [draft, setDraft] = useState(null) // working copy; numbers as strings
+      const [error, setError] = useState(null)
+      const [saveError, setSaveError] = useState(null)
+      const [saving, setSaving] = useState(false)
+
+      const toDraft = (p) => ({
+        rcl: { r: p.rcl.r.map(String), c: p.rcl.c.map(String), l: p.rcl.l.map(String) },
+        unit_check: p.unit_check,
+        bias_check: p.bias_check,
+        strict_includes: p.strict_includes,
+      })
+      const toNumeric = (d) => ({
+        rcl: {
+          r: [Number(d.rcl.r[0]), Number(d.rcl.r[1])],
+          c: [Number(d.rcl.c[0]), Number(d.rcl.c[1])],
+          l: [Number(d.rcl.l[0]), Number(d.rcl.l[1])],
+        },
+        unit_check: d.unit_check,
+        bias_check: d.bias_check,
+        strict_includes: d.strict_includes,
+      })
+
+      useEffect(() => {
+        let alive = true
+        setParams(null); setDraft(null); setError(null); setSaveError(null)
+        if (!sessionId) return
+        fetchJson(API + '/check-params?sessionId=' + encodeURIComponent(sessionId))
+          .then((r) => { if (alive && r?.params) { setParams(r.params); setDraft(toDraft(r.params)) } })
+          .catch((e) => { if (alive) setError(tr('check.loadFailed', { msg: String(e.message ?? e) })) })
+        return () => { alive = false }
+      }, [sessionId])
+
+      const dirty = !!params && !!draft && JSON.stringify(toNumeric(draft)) !== JSON.stringify(params)
+
+      const confirm = async () => {
+        setSaveError(null)
+        for (const k of ['r', 'c', 'l']) {
+          const lo = Number(draft.rcl[k][0])
+          const hi = Number(draft.rcl[k][1])
+          if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || lo >= hi) {
+            setSaveError(tr('check.badPair', { p: tr('check.rcl' + k.toUpperCase()) }))
+            return
+          }
+        }
+        const next = toNumeric(draft)
+        setSaving(true)
+        try {
+          const r = await fetchJson(API + '/check-params?sessionId=' + encodeURIComponent(sessionId),
+            { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) })
+          setParams(r.params ?? next)
+          setDraft(toDraft(r.params ?? next))
+        } catch (e) {
+          setSaveError(tr('check.saveFailed', { msg: String(e.message ?? e) }))
+        } finally {
+          setSaving(false)
+        }
+      }
+
+      const rclRow = (k, labelKey, noteKey) => {
+        const saved = params?.rcl?.[k]
+        const changed = !!saved && (draft.rcl[k][0] !== String(saved[0]) || draft.rcl[k][1] !== String(saved[1]))
+        return h('tr', null,
+          h('td', null, tr(labelKey)),
+          h('td', null,
+            h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+              h('input', { className: 'hams-input', style: { width: '80px' }, value: draft.rcl[k][0],
+                onChange: (e) => setDraft({ ...draft, rcl: { ...draft.rcl, [k]: [e.target.value, draft.rcl[k][1]] } }),
+                onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void confirm() } } }),
+              h('span', { className: 'hams-dim' }, '…'),
+              h('input', { className: 'hams-input', style: { width: '80px' }, value: draft.rcl[k][1],
+                onChange: (e) => setDraft({ ...draft, rcl: { ...draft.rcl, [k]: [draft.rcl[k][0], e.target.value] } }),
+                onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void confirm() } } })),
+            changed && h('span', { className: 'hams-dim' },
+              tr('check.oldValue', { v: String(saved[0]) + ' … ' + String(saved[1]) }))),
+          h('td', { className: 'hams-dim' }, tr(noteKey)))
+      }
+
+      const switchRow = (key, labelKey, noteKey) => {
+        const saved = params ? params[key] : null
+        const changed = !!params && draft[key] !== saved
+        return h('tr', null,
+          h('td', null, tr(labelKey)),
+          h('td', null,
+            h('select', { className: 'hams-select', value: draft[key] ? '1' : '0',
+              onChange: (e) => setDraft({ ...draft, [key]: e.target.value === '1' }) },
+              h('option', { value: '1' }, tr('check.on')),
+              h('option', { value: '0' }, tr('check.off'))),
+            ' ',
+            changed && h('span', { className: 'hams-dim' },
+              tr('check.oldValue', { v: tr(saved ? 'check.on' : 'check.off') }))),
+          h('td', { className: 'hams-dim' }, tr(noteKey)))
+      }
+
+      if (!sessionId) return h('div', { className: 'hams-dash' }, tr('tasks.noSession'))
+      return h('div', { className: 'hams-dash' },
+        h('b', null, tr('check.title')),
+        h('div', { className: 'hams-dim' }, tr('check.desc')),
+        error && h('div', { className: 'hams-err' }, esc(error)),
+        saveError && h('div', { className: 'hams-err' }, esc(saveError)),
+        !params && !error && h('div', { className: 'hams-dim' }, tr('common.loading')),
+        params && draft && h('table', { className: 'hams-table' },
+          h('thead', null, h('tr', null, [tr('check.colParam'), tr('check.colValue'), tr('check.colNote')]
+            .map((c) => h('th', { key: c }, c)))),
+          h('tbody', null,
+            rclRow('r', 'check.rclR', 'check.noteR'),
+            rclRow('c', 'check.rclC', 'check.noteC'),
+            rclRow('l', 'check.rclL', 'check.noteL'),
+            switchRow('unit_check', 'check.unitCheck', 'check.noteUnit'),
+            switchRow('bias_check', 'check.biasCheck', 'check.noteBias'),
+            switchRow('strict_includes', 'check.strictIncludes', 'check.noteStrict'))),
+        params && draft && h('div', { className: 'hams-row' },
+          h('button', { className: 'hams-btn hams-btn-sm', disabled: !dirty || saving, onClick: () => { void confirm() } },
+            saving ? tr('common.loading') : tr('check.confirm')),
+          h('button', { className: 'hams-btn hams-btn-sm', disabled: !dirty || saving, onClick: () => setDraft(toDraft(params)) },
+            tr('common.cancel'))))
+    }
+
     function TaskTerminal({ info }) {
       const machines = (info?.machines ?? []).filter((x) => x.sessionId)
       const [activeId, setActiveId] = useState(null)
@@ -2611,12 +2899,12 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // Sticky task sidebar: DSH resets the right sidebar to its start page whenever the
-    // conversation switches. While pinned (default on), the header button re-opens the
-    // task tab on every sessionId change so the sidebar follows workspace switches
-    // instead of collapsing — EXCEPT for remote projects, which get no sidebar at all.
-    // Clicking the header button always opens + pins; the pin toggle lives at the end
-    // of the task tab strip.
+    // Sticky overview sidebar: DSH resets the right sidebar to its start page
+    // whenever the conversation switches. While pinned (default on), the header
+    // button re-opens the OVERVIEW tab on every sessionId change so the sidebar
+    // follows workspace switches instead of collapsing — EXCEPT for remote
+    // projects, which get no sidebar at all. Clicking the header button always
+    // opens + pins; the pin toggle lives at the end of the task tab strip.
     let openSidebarTab = null
     const STICKY_KEY = 'hams-task-sidebar-pinned'
     const pinStore = {
@@ -2661,7 +2949,7 @@ window.__ModuleLoader__.load({
           ? tr('tasks.headerPinOn')
           : tr('tasks.headerPinOff'),
         onClick: () => { if (!pinStore.pinned) setPinnedValue(true); if (openSidebarTab) openSidebarTab() },
-      }, tr('tasks.headerTasks'), pinned ? ' 📌' : '')
+      }, tr('tasks.headerOverview'), pinned ? ' 📌' : '')
     }
 
     // ---------- assembly ----------
@@ -2676,12 +2964,29 @@ window.__ModuleLoader__.load({
         slots.register({ name: 'main', key: PANEL_ID }, ConsolePage))
       slots.inject('sidebar.panellist', () =>
         slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 20, label: () => 'HarnessAMS' }, PanelIcon))
-      // tier 3: right-sidebar tab — body keyed to the tab id receives the active
-      // sessionId via props (verified: switching sessions updates the prop).
-      slots.inject('sidebar.right.pane.tab', () =>
-        slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, TaskSidebarBody))
+      // tier 3: right-sidebar tabs — bodies keyed to their tab id receive the
+      // active sessionId via props (verified: switching sessions updates the
+      // prop). The OVERVIEW is its own top-level tab next to the host tabs
+      // (project-scoped, survives same-project session switches via
+      // overviewMemory); the TASK tab keeps the per-task sub-views. Multi-body
+      // registration follows dsh-remote's pattern (register all entries, return
+      // one composite disposer — verified in-browser 2026-11-10).
+      slots.inject('sidebar.right.pane.tab', () => {
+        const disposers = [
+          slots.register({ name: 'sidebar.right.pane.tab', key: OV_TAB_ID }, OverviewSidebarBody),
+          slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, TaskSidebarBody),
+        ]
+        return () => disposers.forEach((dispose) => dispose())
+      })
       ctx.inject(['sidebarRightTabs'], (inner) => {
         const tabs = inner.get('sidebarRightTabs')
+        inner.effect(() => tabs.register({
+          id: OV_TAB_ID,
+          kind: OV_TAB_KIND,
+          priority: 'extension',
+          title: () => tr('tasks.tabOverview'),
+          guide: [{ order: 15, title: () => 'HarnessAMS · ' + tr('tasks.tabOverview'), description: () => tr('tasks.guideOvDesc'), icon: PanelIcon }],
+        }), 'harnessams overview tab')
         inner.effect(() => tabs.register({
           id: TAB_ID,
           kind: TAB_KIND,
@@ -2694,8 +2999,10 @@ window.__ModuleLoader__.load({
       // switch, so the conversation header keeps a direct entry point.
       ctx.inject(['sidebarRight'], (inner) => {
         const right = inner.get('sidebarRight')
+        // default entry: the OVERVIEW tab (2026-11-10) — the task tab stays
+        // reachable from the right-sidebar tab strip
         openSidebarTab = () => {
-          try { right.openTab(TAB_KIND) } catch { try { right.openTab(TAB_ID) } catch { /* tab service unavailable */ } }
+          try { right.openTab(OV_TAB_KIND) } catch { try { right.openTab(OV_TAB_ID) } catch { /* tab service unavailable */ } }
         }
         inner.effect(() => () => { if (openSidebarTab) openSidebarTab = null }, 'harnessams header button handler')
         slots.inject('conversation.session.header.actions', () =>

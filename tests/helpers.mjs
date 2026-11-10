@@ -57,8 +57,15 @@ export const postReq = (url, payload) => ({
     yield Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload))
   },
 })
+export const putReq = (url, payload) => ({
+  method: 'PUT', url, headers: {},
+  async *[Symbol.asyncIterator]() {
+    yield Buffer.from(typeof payload === 'string' ? payload : JSON.stringify(payload))
+  },
+})
 export const callGet = (handler, url) => callRoute(handler, getReq(url))
 export const callPost = (handler, url, payload) => callRoute(handler, postReq(url, payload))
+export const callPut = (handler, url, payload) => callRoute(handler, putReq(url, payload))
 
 // ---- DSH_HOME mirror fixture ----------------------------------------------
 // remoteWorkspacesRoot() resolves mirrors under $DSH_HOME/remote-workspaces;
