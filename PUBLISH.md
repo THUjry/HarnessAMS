@@ -1,7 +1,6 @@
 # Publishing the HarnessAMS packages
 
-Two npm packages are published from this repository; the simulation plugin is published
-from its own repository.
+Two npm packages are published from this repository; the simulation plugin is published from its own repository.
 
 | Package | Directory |
 |---|---|
