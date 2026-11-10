@@ -1,6 +1,6 @@
 // Thin dsh-remote shell used by the generic batch tools.
 //
-// Coupling contract (dsh-remote 0.8.83 since 2026-11-10, exact-pinned in the web
+// Coupling contract (dsh-remote 0.8.83, exact-pinned in the web
 // profile; binding/machines/promotion-marker templates re-verified against the
 // v0.8.83 upstream tag per the project's upgrade checklist):
 //   - only rw_machines / rw_exec / rw_upload / rw_download are consumed;

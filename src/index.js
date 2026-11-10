@@ -9,7 +9,7 @@
 //            health-check buttons, consumed per active session; failed checks can be
 //            handed to a newly created diagnosis session (POST /api/checks/analyze,
 //            diagnose.js — private surface over the DSH session controller).
-// Routes are not token-gated by the DSH web server (verified 2026-10-25): only local
+// Routes are not token-gated by the DSH web server (verified): only local
 // management reads/writes live here — no credentials, no remote-execution passthrough.
 // The Dashboard viewer is display-only: it serves task-registered local HTML reports
 // read-only (/dash/<taskId>/<reportId>/…, bounded by each report's own directory) and
@@ -23,11 +23,10 @@
 // first live-session id on /api/checks so the client can pass it as the binding hint,
 // and serves the vendored xterm.js bundle under /assets/. Remote file browsing/editing
 // is NOT proxied here — dsh-remote's own tools and web surface do it.
-// Model tools (moved from SmartAnaSim 2026-11-01, keeping that plugin simulator-only):
-// the generic remote batch channel (batch_submit/batch_poll/batch_fetch; worker scripts
-// come from the workspace sim_scripts_dir) and the simulator-agnostic analysis/ops
-// tools (sim_analysis/sim_progress/safe_trash; the analysis pipeline is pure JS
-// in tools/sim_analysis.js since 2026-11-10, safe_trash in trash.js).
+// Model tools: the generic remote batch channel (batch_submit/batch_poll/batch_fetch;
+// worker scripts come from the workspace sim_scripts_dir) and the simulator-agnostic
+// analysis/ops tools (sim_analysis/sim_progress/safe_trash; the analysis pipeline is
+// pure JS in tools/sim_analysis.js, safe_trash in trash.js).
 // The session tool cards read two extra read-only endpoints (/api/progress and
 // /api/progress-summary, server/progress.js) to draw the simulation progress
 // cards inside the conversation — no execution surface, pure file reads.
@@ -60,7 +59,7 @@ export function toolDefinitions(ctx = {}) {
   return [...batchTools(ctx), ...analysisTools(ctx), safeTrashTool()]
 }
 // Current analysis surface: sim_analysis (collect + optional report dashboard,
-// pure JS since 2026-11-10), sim_progress (local progress-file window);
+// pure JS), sim_progress (local progress-file window);
 // safe_trash comes from trash.js with its mechanics.
 
 export function apply(ctx) {
@@ -308,9 +307,8 @@ async function handle(req, res, ctx) {
     return
   }
   if (route === '/api/selfcheck') {
-    // id pins one run (the restore-latest surface was removed 2026-11-09: a
-    // global "latest" run bled verdicts across projects). The client only ever
-    // polls a run it started itself.
+    // id pins one run (a global "latest" run would bleed verdicts across
+    // projects). The client only ever polls a run it started itself.
     const id = url.searchParams.get('id')
     if (!id) { json(400, { error: 'id is required (the runId returned by POST /api/selfcheck)' }); return }
     const run = getSelfcheck(id, ws)
@@ -366,8 +364,8 @@ async function handle(req, res, ctx) {
     return
   }
   if (route === '/api/report-stat') {
-    // Change signal for the Dashboard auto-refresh poll (session_04b668d1 方案B):
-    // mtime + size of the report document. The generator rewrites the HTML on
+    // Change signal for the Dashboard auto-refresh poll: mtime + size of the
+    // report document. The generator rewrites the HTML on
     // every run, so the document stat alone is a sufficient freshness token —
     // no body fetch. Resolution mirrors /dash (opaque ids, no secrets).
     const taskId = url.searchParams.get('taskId')

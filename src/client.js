@@ -1371,7 +1371,7 @@ window.__ModuleLoader__.load({
     // through that remote project's live session (borrowed server-side). Every button
     // runs independently; results replace whatever showed below.
     const REMOTE_CHECK_IDS = ['load', 'jobs', 'batches', 'scripts']
-    // Auto handoff policy (2026-11-01, user decision): remote check failures start a
+    // Auto handoff policy: remote check failures start a
     // diagnosis session without a click; local failures only offer the button. A
     // constant until the behavior gets its settings card — flip to false for
     // button-only behavior.
@@ -1674,9 +1674,9 @@ window.__ModuleLoader__.load({
         fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId))
           .then((r) => { if (alive) setSettings(r.settings) })
           .catch((e) => { if (alive) setSettingsError(String(e.message ?? e)) })
-        // No restore fetch here (removed 2026-11-09): the former "latest run"
-        // surface was global and bled verdicts across projects. The table only
-        // fills from a run THIS session started (POST then poll by runId).
+        // No restore fetch here: a global "latest run" surface would bleed
+        // verdicts across projects. The table only fills from a run THIS
+        // session started (POST then poll by runId).
         return () => { alive = false }
       }, [sessionId])
 
@@ -1829,8 +1829,8 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [projectPath, sessionId, projectRemote])
 
-      // The Dashboard sub-view stays live while visible (auto-refresh, 2026-11-01
-      // 方案B): sim_analysis(report=true, task=…) appends to tasks.json behind the
+      // The Dashboard sub-view stays live while visible (auto-refresh):
+      // sim_analysis(report=true, task=…) appends to tasks.json behind the
       // sidebar's back, so poll the store every 10 s while the sub-view is open
       // and the tab visible; persist-in-flight ticks are skipped so a just-applied
       // optimistic update is never flashed over by a stale list, and the list
@@ -1883,7 +1883,7 @@ window.__ModuleLoader__.load({
             + (mid ? '&machineId=' + encodeURIComponent(mid) : '')
           const r = await fetchJson(API + '/checks/run?' + q)
           setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'done', results: r.results, channel: r.channel })
-          // Auto handoff (path 2, user decision 2026-11-01): a REMOTE check that
+          // Auto handoff (path 2): a REMOTE check that
           // ends with failed entries immediately starts a diagnosis session, so
           // cluster problems never need a manual copy-paste. Local check failures
           // stay button-only (auto sessions for trivial failures would just burn
@@ -2104,7 +2104,7 @@ window.__ModuleLoader__.load({
     // root, so the document's relative references (data/*.js, images) keep
     // working inside the iframe. Refresh remounts the iframe via the key/nonce
     // (a plain location.reload is unreliable across same-origin documents).
-    // Auto-refresh (2026-11-01 方案B): the sub-view polls the store (parent
+    // Auto-refresh: the sub-view polls the store (parent
     // effect) and this component polls the current report's /api/report-stat —
     // a regenerated document (mtime/size change) reloads through the nonce,
     // so an externally re-run sim_analysis shows up without a manual ↻.

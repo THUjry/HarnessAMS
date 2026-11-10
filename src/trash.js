@@ -1,10 +1,9 @@
-// Workspace trash (safety by default): deletion never destroys. JS port of the
-// former scripts/common/common_trash.py (2026-11-09) with the two sharp edges
-// filed down: restore/purge fence the entry name inside the trash root (the
-// Python version accepted ../ traversal — and purge is a recursive delete), and
-// every entry is now a DIRECTORY holding the item plus .trash_meta.json, so
-// trashing a plain file no longer breaks meta writing. Entry layout and the
-// list JSON shape stay compatible with entries created by the old script.
+// Workspace trash (safety by default): deletion never destroys. Two sharp edges
+// are fenced: restore/purge resolve the entry name strictly inside the trash
+// root (a ../ name would escape — and purge is a recursive delete), and every
+// entry is a DIRECTORY holding the item plus .trash_meta.json, so trashing a
+// plain file cannot break meta writing. Flat one-file entries without meta
+// (an earlier trash layout still found in some workspaces) restore as-is.
 import fs from 'node:fs'
 import path from 'node:path'
 import { readWorkspaceConfig } from './batch.js'
@@ -121,7 +120,7 @@ export function listTrash(opts = {}) {
     let meta = {}
     try {
       meta = JSON.parse(fs.readFileSync(path.join(p, '.trash_meta.json'), 'utf8'))
-    } catch { /* missing/unreadable meta (legacy file entries have none) */ }
+    } catch { /* missing/unreadable meta (flat file entries have none) */ }
     items.push({
       name,
       original_path: meta.original_path ?? null,
@@ -132,11 +131,11 @@ export function listTrash(opts = {}) {
   return items
 }
 
-// Restore an entry back into destDir. New entries hold the item under its own
-// basename inside the entry; legacy Python entries moved the item AS the entry
-// (its children sit at the top level), so anything else restores the whole
-// entry directory. The destination name strips the leading <date>_<time> stamp
-// (the old script cut at the FIRST underscore, leaving 'HHMMSS_name' behind).
+// Restore an entry back into destDir. Entries hold the item under its own
+// basename inside the entry; flat entries moved the item AS the entry (its
+// children sit at the top level), so anything else restores the whole entry
+// directory. The destination name strips the leading <date>_<time> stamp (some
+// entries cut at the FIRST underscore, leaving 'HHMMSS_name' behind).
 export function restoreEntry(name, destDir = '.', opts = {}) {
   const trash = rootOf(opts)
   if (!fs.existsSync(trash)) throw new Error(`no such trash entry: ${name}`)
@@ -171,8 +170,7 @@ export function purgeEntry(name, opts = {}) {
   return `purged ${name}`
 }
 
-// Model-facing safe_trash tool (definition moved here from tools/shared.js on
-// 2026-11-10 — it belongs with the mechanics it routes to).
+// Model-facing safe_trash tool (the definition lives beside the mechanics it routes to).
 export function safeTrashTool() {
   return {
     name: 'safe_trash',

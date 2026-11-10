@@ -1,10 +1,10 @@
 // Python pipeline channel: a tool executes a plain script shipped under
 // scripts/ in a fresh `python` process (no build step, system Python only).
-// scripts/ here now holds only the project self-check (selfcheck/) — the
-// generic analysis pipeline (collect/report) moved to pure JS on 2026-11-10
-// (tools/sim_analysis.js; the retired common/ copies stay as _dont_use_*) and
-// trash has been a JS module since 2026-11-09 (trash.js). The simulator
-// workers live in the SmartAnaSim package (see batch.js for the upload root).
+// scripts/ here holds only the project self-check (selfcheck/); common/ holds
+// retired reference copies that are never executed. The analysis pipeline is
+// pure JS (tools/sim_analysis.js) and trash is a JS module (trash.js). The
+// simulator workers live in the SmartAnaSim package (see batch.js for the
+// upload root).
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'

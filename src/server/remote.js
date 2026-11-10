@@ -1,4 +1,4 @@
-// Remote projects (2026-10-26 business-logic rework): remote connectivity is delegated
+// Remote projects: remote connectivity is delegated
 // entirely to dsh-remote — this plugin keeps no server registry and no ssh channel of
 // its own. A "remote project" is simply a DSH workspace whose path lies inside a
 // dsh-remote local mirror (~/.dsh/remote-workspaces/<host>-<user>-<port>/<ws>, marked
@@ -6,7 +6,7 @@
 // setup, so most users never need more than one. The mirror's remotePath is the scope
 // boundary for every remote command this plugin runs (checks interpolate it as
 // $WORKSPACE). Remote projects carry no HarnessAMS UI (the sidebar is local-projects
-// only, 2026-10-27): their role is to anchor the connection — sessions opened in the
+// only): their role is to anchor the connection — sessions opened in the
 // remote project bind dsh-remote's rw_* tools to that machine, and the local project's
 // Overview checks borrow one of those sessions as the agent context. Remote file
 // browsing/editing is deliberately NOT duplicated here: use dsh-remote's own file
@@ -127,8 +127,8 @@ export function projectSessions(ctx, workspacePath) {
 
 // One-click remote-project creation (tier 1): register a machine's EXISTING dsh-remote
 // mirror as a DSH workspace via workspaceRegistry — the mirror itself is never created
-// here (the ensure-mirror POST was removed 2026-10-28: sending {machineId} without a
-// path is a guaranteed 400 on dsh-remote's /dsh-remote/mirror, so it never worked).
+// here: sending {machineId} without a path is a guaranteed 400 on dsh-remote's
+// /dsh-remote/mirror, so mirror creation is simply not attempted.
 // Mirrors are born when the user picks a remote workspace in dsh-remote itself
 // (rw_pick_workspace or its picker UI); a machine without one gets an actionable
 // error. One remote project per machine, at the mirror root. Never switches

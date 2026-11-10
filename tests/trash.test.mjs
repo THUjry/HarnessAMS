@@ -1,6 +1,5 @@
-// Trash module (src/trash.js — JS port of the former common_trash.py, 2026-11-09).
-// The Python version's sharp edges are pinned here: restore/purge must fence the
-// entry name inside the trash root (no ../, no separators, no drive letters),
+// Trash module (src/trash.js). The sharp edges are pinned here: restore/purge must
+// fence the entry name inside the trash root (no ../, no separators, no drive letters),
 // trashing a plain file must not break meta writing, and purge is fenced rmtree.
 import test from 'node:test'
 import assert from 'node:assert/strict'

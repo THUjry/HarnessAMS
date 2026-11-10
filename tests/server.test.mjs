@@ -142,7 +142,7 @@ test('machines: execute must carry callId+signal; text listing wins over HTTP', 
     get: (name) => (name === 'rw_machines' ? { name } : undefined),
     execute: async (input) => {
       seen.push(input)
-      // regression: the 2026-10-25 crash was execute() reading signal.aborted
+      // regression pin: the tool pipeline crashes reading signal.aborted without these
       assert.ok(input.callId, 'callId required')
       assert.ok(input.signal instanceof AbortSignal, 'AbortSignal required')
       return { isError: false, value: { text: RW_MACHINES_TEXT }, content: [] }

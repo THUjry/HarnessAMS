@@ -1,6 +1,6 @@
 // Workspace configuration: locating the runtime harnessams.json and resolving its
-// relative path fields. (The former nodes.yaml server-registry block was removed in
-// the 2026-10-26 rework — remote connectivity is delegated entirely to dsh-remote.)
+// relative path fields. (There is no server-registry file — remote connectivity is
+// delegated entirely to dsh-remote.)
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'

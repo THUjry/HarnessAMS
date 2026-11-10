@@ -1,4 +1,4 @@
-// Project self-check orchestrator (2026-11-08). One button walks the WHOLE
+// Project self-check orchestrator. One button walks the WHOLE
 // pipeline under the project's current settings (project_settings.json, see
 // settings.js) — the point is not the simulation itself but verifying machine,
 // connection, environment, permissions, tools and compute end to end:
@@ -94,9 +94,9 @@ async function doPersist(run) {
   } catch { /* the in-memory copy keeps the API alive; disk is durability only */ }
 }
 
-// All persist callers are fire-and-forget, so two writes could previously run
+// All persist callers are fire-and-forget, so two writes can run
 // concurrently and share selfcheck_run.json.tmp — interleaved writeFile/rename
-// ordering produced a corrupted concatenated document (live-verified head of
+// ordering produces a corrupted concatenated document (live-verified head of
 // one snapshot + tail of the next). Serialize through a per-run promise chain;
 // the rejection branch keeps the queue draining when a single write fails.
 function persistRun(run) {
@@ -319,9 +319,9 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
 }
 
 // A run is only reachable by its id (POST returns the runId; the client polls
-// GET /api/selfcheck?id=...). The former restore-latest surface was removed
-// (2026-11-09): a global "latest" run bled verdicts across projects — the
-// Overview of project B happily displayed (and live-polled) project A's run.
+// GET /api/selfcheck?id=...). There is deliberately no global "latest" surface:
+// that would bleed verdicts across projects — the Overview of project B would
+// happily display (and live-poll) project A's run.
 export function getSelfcheck(id, ws) {
   if (!id) return null
   const mem = store.get(id)
@@ -898,7 +898,7 @@ function finalize(run) {
     // the fallback attempt takes over — those failures must not sink the verdict
     // once the fallback completed the chain. Without a SUCCESSFUL fallback there
     // is nothing to forgive: with scheduler=direct there is no fallback at all,
-    // so a primary failure must fail the verdict (it used to report remote:'ok').
+    // so a primary failure must fail the verdict.
     const hardFailed = remoteSteps.some((s) => s.ok === false
       && (s.attempt !== 'primary' || !run._priv.viaFallback))
     if (hardFailed) remote = 'failed'

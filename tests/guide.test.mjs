@@ -44,5 +44,5 @@ test('assets: vendored .js packages with license and copy locations, reports gon
   assert.ok(indexSrc.includes("route === '/api/dirs'"), 'the dirs route stays (public surface; only client consumption was removed)')
   assertDictKeys(src, ['assets.colPkg', 'assets.colLicense', 'assets.colPkgCopy', 'assets.colRoute',
     'assets.colWsCopies', 'assets.noCopies', 'assets.notices'])
-  assert.ok(!src.includes("'assets.sweepReports'") && !src.includes("'assets.sharedCopy'"), 'retired asset keys must be removed from both dictionaries')
+  assert.ok(!src.includes("'assets.sweepReports'") && !src.includes("'assets.sharedCopy'"), 'removed asset keys must stay out of both dictionaries')
 })
