@@ -2,7 +2,7 @@
 // scripts/ in a fresh `python` process (no build step, system Python only).
 // scripts/ here holds the GENERIC analysis pipeline (collect/report; trash is
 // a JS module since 2026-11-09 — see trash.js); the simulator workers live in
-// the SmartAnaSim package (see bsub.js for the worker-upload root).
+// the SmartAnaSim package (see batch.js for the worker-upload root).
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'

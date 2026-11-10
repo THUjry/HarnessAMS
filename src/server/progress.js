@@ -30,7 +30,7 @@ function statDir(p) {
 }
 
 // Planned point count from sweep_config.json — the same cross-product rule as
-// tools/bsub.js totalFromConfig, kept local so the server layer never imports
+// tools/batch.js totalFromConfig, kept local so the server layer never imports
 // the tools layer.
 function totalFromConfig(runDir) {
   const cfg = readJsonTolerant(path.join(runDir, 'sweep_config.json'))

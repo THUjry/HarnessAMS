@@ -6,7 +6,7 @@
 // drive a mock ctx.tools shell that:
 //   - answers rw_* (dsh-remote) with scripted text — every rw_exec command is
 //     bash -n validated here, same as server.test.mjs;
-//   - runs the REAL bsub_* tools (makeTool(toolDefinitions(ctx))) so submit/
+//   - runs the REAL batch_* tools (makeTool(toolDefinitions(ctx))) so submit/
 //     poll/fetch logic is exercised for real against the mocked remote;
 //   - fakes the SmartAnaSim spectre_* boundary: assemble runs the real bundled
 //     gen script, run_sweep copies the golden point trees + progress, parse
@@ -351,7 +351,7 @@ async function startFlow({ scenario = {}, settings = {}, sessions, remote = fals
   const wsRoot = path.join(tmp, 'wsroot')
   await fsp.mkdir(projectPath, { recursive: true })
   await fsp.mkdir(wsRoot, { recursive: true })
-  // worker scripts root for bsub (dummy tree; upload is mocked)
+  // worker scripts root for the batch tools (dummy tree; upload is mocked)
   const scriptsRoot = path.join(tmp, 'scripts')
   fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
   fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), '# dummy worker\n')

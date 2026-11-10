@@ -7,7 +7,7 @@
 // list JSON shape stay compatible with entries created by the old script.
 import fs from 'node:fs'
 import path from 'node:path'
-import { readWorkspaceConfig } from './bsub.js'
+import { readWorkspaceConfig } from './batch.js'
 
 export function trashDir() {
   const { config, dir } = readWorkspaceConfig()

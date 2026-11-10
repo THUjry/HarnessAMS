@@ -27,9 +27,9 @@
 // parallel) and once more at the end for anything still uncovered.
 //
 // Tool calls go through the registered tool surface (ctx.tools.execute via
-// callTool) — SmartAnaSim's spectre_* tools, this plugin's bsub_* tools and
+// callTool) — SmartAnaSim's spectre_* tools, this plugin's batch_* tools and
 // dsh-remote's rw_* — but verdicts are read from DISK ARTIFACTS
-// (sweep_progress.json / psf_index.json / .bsub_job.json) wherever possible:
+// (sweep_progress.json / psf_index.json / .batch_job.json) wherever possible:
 // the pipeline's serialization of model-tool results is a launch-class TODO and
 // artifacts are the ground truth anyway (self-check spirit).
 import fs from 'node:fs'
@@ -39,7 +39,7 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { runPython } from '../py.js'
 import { callTool, execRemote, uploadFile, downloadFile, shq } from '../remote.js'
-import { readJob, readWorkspaceConfig, remoteJoin, resolveRemoteDir, simScriptsDir } from '../bsub.js'
+import { readJob, readWorkspaceConfig, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
 import { readSettings } from './settings.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
 import { fetchMachines, sessionInMirror } from './machines.js'
@@ -165,7 +165,7 @@ export function buildSelfcheckPrompt({ scope, runDir, machine, remotePath, mirro
     lines.push('- Machine: local (this host)')
   }
   lines.push(`- Run artifacts: ${runDir} (point_meta.json / sweep_progress.json / errlog.txt / `
-    + 'spectre.out / .bsub_job.json / selfcheck_run.json live under it — inspect them read-only)')
+    + 'spectre.out / .batch_job.json / selfcheck_run.json live under it — inspect them read-only)')
   if (projectTitle) lines.push(`- Project: ${projectTitle}`)
   lines.push(`- Time: ${new Date().toISOString()}`)
   lines.push('')

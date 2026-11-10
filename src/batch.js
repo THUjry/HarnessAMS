@@ -9,7 +9,7 @@
 // with tar. A simulator-specific flow is only a choice of worker + worker_args
 // (for example spectre/spectre_sweep_worker.py --config sweep_config.json ...).
 //
-// Worker-script source: the bsub tools live here but the simulator workers do
+// Worker-script source: the batch tools live here but the simulator workers do
 // NOT — they ship with the SmartAnaSim plugin. The upload tree / worker lookup
 // root is the workspace harnessams.json `sim_scripts_dir` (normally pointing at
 // SmartAnaSim's scripts/ directory), so cross-package npm resolution is never
@@ -251,7 +251,7 @@ export function fetchCommand({ remoteDir, includes }) {
   const conds = findConditions(includes)
   const expr = conds.length === 1 ? conds[0] : `\\( ${conds.join(' -o ')} \\)`
   return `cd ${shq(remoteDir)} && find . -maxdepth 5 ${expr} -print | `
-    + 'tar czf .bsub_fetch.tgz -T -; wc -c < .bsub_fetch.tgz'
+    + 'tar czf .batch_fetch.tgz -T -; wc -c < .batch_fetch.tgz'
 }
 
 export function listCommand({ remoteDir, includes }) {
@@ -290,7 +290,7 @@ export function countFetched(runDir) {
 }
 
 export function jobFile(runDir) {
-  return path.join(runDir, '.bsub_job.json')
+  return path.join(runDir, '.batch_job.json')
 }
 
 export function readJob(runDir) {

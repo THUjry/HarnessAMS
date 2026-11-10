@@ -28,7 +28,7 @@ export function findWorkspaceConfig() {
       // example workspace works from any clone location. `remote_scripts_dir` is a REMOTE
       // absolute path and deliberately stays opaque (never resolved against a local base);
       // so are `remote_python` / `remote_node` (remote interpreter commands, read
-      // verbatim by the bsub tools and the project self-check).
+      // verbatim by the batch tools and the project self-check).
       const base = path.dirname(c)
       for (const k of ['workspace_root', 'pdk_lib', 'trash_dir', 'sim_scripts_dir']) {
         const v = config[k]
