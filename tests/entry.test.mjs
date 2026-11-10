@@ -109,19 +109,26 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   assert.ok(src.includes("sec('guide.s6t', 'guide.s6')"), 'guide must cover the tool cards')
 })
 
-test('client half: top-level overview tab and the check sub-view', async () => {
+test('client half: single tab with the project overview on the first-level strip', async () => {
   const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
-  // The overview is its own TOP-LEVEL right-sidebar tab (2026-11-10): a second
-  // sidebarRightTabs registration plus a second pane-tab body keyed by OV_TAB_ID,
-  // project-scoped and cached across same-project session switches.
-  assert.ok(src.includes("const OV_TAB_ID = 'dsh-harnessams-overview'"), 'overview tab id constant')
-  assert.ok(src.includes("const OV_TAB_KIND = 'harnessams-overview'"), 'overview tab kind constant')
-  assert.ok(src.includes('function OverviewSidebarBody'), 'overview body component')
-  assert.ok(src.includes('key: OV_TAB_ID'), 'overview body keyed by the tab id')
-  assert.ok(src.includes('overviewMemory'), 'same-project remount cache')
-  assert.ok(src.includes('right.openTab(OV_TAB_KIND)'), 'sticky reopen must target the overview tab')
-  // The task tab lost its overview sub-view and gained the check-params one
-  assert.ok(!src.includes("id: 'overview'"), 'overview must not stay a TASK_VIEWS entry')
+  // The overview dropped back from its own top-level tab (2026-11-10, same day
+  // it was promoted): ONE tab remains, and the project overview is the default
+  // entry of its first-level strip, ahead of the task capsules and "new task".
+  assert.ok(!src.includes('OV_TAB_ID') && !src.includes('OV_TAB_KIND'), 'the top-level overview tab must be gone')
+  assert.ok(!src.includes('OverviewSidebarBody'), 'the old top-level body name must be gone')
+  assert.ok(src.includes('function ProjectOverviewView'), 'project overview view component')
+  assert.ok(src.includes("stripSel === 'overview' && h(ProjectOverviewView"), 'overview renders as the strip selection')
+  assert.ok(src.includes("'tasks.projectOverview'"), 'project overview strip capsule copy key')
+  assert.ok(src.includes("const STRIP_SEL_KEY = 'hams-task-strip-sel'"), 'strip selection must survive remounts')
+  assert.ok(src.includes("tr('tasks.newTask')),"),
+    'the create button must read "new task" (not a bare +)')
+  // The sidebar follows session switches by tracking open state, not a pin
+  assert.ok(!src.includes('STICKY_KEY') && !src.includes('PinToggle'), 'the pin mechanism must be gone')
+  assert.ok(src.includes('const sidebarOpenState'), 'open-state tracking')
+  assert.ok(src.includes('right.openTab(TAB_KIND)'), 'reopen targets the HarnessAMS tab')
+  assert.ok(src.includes('overviewMemory'), 'same-project remount cache stays')
+  // The check sub-view keeps its contract
+  assert.ok(!src.includes("id: 'overview'"), 'overview must not be a TASK_VIEWS entry')
   assert.ok(/id: 'check', labelKey: 'tasks\.viewCheck'/.test(src), 'TASK_VIEWS must carry the check view')
   assert.ok(src.includes("API + '/check-params"), 'check sub-view must call the check-params API')
   assert.ok(src.includes('check.oldValue'), 'unconfirmed edits must show the old value')
