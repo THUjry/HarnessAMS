@@ -8,7 +8,7 @@
 
 | Plugin | npm package | row id | Responsibility | Stage | Status |
 |---|---|---|---|---|---|
-| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (remote projects, digital assets, disk usage), project = DSH workspace, per-project task sidebar with health checks; the generic remote batch channel (`bsub_*`, worker tree from the workspace `sim_scripts_dir`) and the simulator-agnostic analysis tools (`sim_analysis`/`sim_progress`/`safe_trash`) | stage 1 | implemented (this repo, `src/`) |
+| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Three-tier UI + orchestration: global console page (remote projects, digital assets, disk usage), project = DSH workspace, per-project task sidebar with health checks; the generic remote batch channel (`batch_*`, worker tree from the workspace `sim_scripts_dir`) and the simulator-agnostic analysis tools (`sim_analysis`/`sim_progress`/`safe_trash`) | stage 1 | implemented (this repo, `src/`) |
 | HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local Spectre channel (code-driven netlist assembly with hard PDK isolation), PSF parsing, S-parameter reading/extraction — simulator-specific code only | stage 1 | implemented (separate repo) |
 | HarnessAMS-SmartPostLayout | (repo in stage 2) | `harnessams-smart-post-layout` | One-click post-layout simulation | stage 2 | not started |
 | HarnessAMS-aligner | (repo in stage 3) | `harnessams-aligner` | Multi-level alignment | stage 3 | not started |
@@ -20,8 +20,9 @@ src/                     dsh-harnessams — console plugin package:
                          index.js (host-half routes + model-tool registration, plain JS, no build chain),
                          server/ (host-half modules: workspace/checks/disk/project/machines/remote/assets/
                                  settings/selfcheck),
-                         tools/ + tool.js/py.js/bsub.js/remote.js (generic batch + analysis model
-                         tools, moved from SmartAnaSim 2026-11-01),
+                         tools/ + tool.js/py.js/batch.js/remote.js (generic batch + analysis model
+                         tools, moved from SmartAnaSim 2026-11-01; batch.js renamed from
+                         bsub.js 2026-11-10),
                          client.js (browser half — single-file classic script on window.__ModuleLoader__),
                          assets/ (plotly.min.js + the vendored xterm bundle + THIRD_PARTY_NOTICES),
                          scripts/ (generic analysis Python: collect/report/trash under common/)
@@ -162,11 +163,69 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    renders the raw shape itself since the occupied key cannot fall back to the
    DSH generic card). The onboarding guide covers the cards in its sixth section.
 
+## Simulation execution modes
+
+A sweep always starts with the same assembly step; only the execution channel
+differs. Three modes exist, defined by WHERE the worker actually runs:
+
+| Mode | Selection | Worker host | Channel |
+|---|---|---|---|
+| local | `spectre_run_sweep` (no scheduler involved) | the host running DSH itself | in-process Python spawn |
+| direct | `batch_submit(scheduler="direct")` | the SSH target node's own host, foreground | dsh-remote upload + `rw_exec` (no LSF) |
+| lsf | `batch_submit(scheduler="lsf")` (default) | the SSH target node's cluster via the LSF queue | dsh-remote upload + `bsub`/`bjobs` |
+
+### Mode 1 — local (the DSH host runs Spectre itself)
+
+Needs ONLY the SmartAnaSim plugin (`dsh-harnessams-smart-ana-sim`): the three
+`spectre_*` tools all live there, so this path runs with the top-level plugin
+absent. AMS adds `sim_analysis` (HTML report + sidebar injection) and the
+`batch_*` remote channel — neither is required here. Spectre must be installed
+on the DSH host; the whole call is bounded by `timeout_sec` (default 1200 s).
+
+spectre_assemble(project_dir=...)   # design_params.json -> template.scs + sweep_config.json (+ format/unit/bias checks)
+spectre_run_sweep(run_dir=...)      # per-point NN/netlist.scs (@@PARAM@@ substitution) + psfascii raw + point_meta.json
+spectre_parse(work_dir=...)         # raw psfascii -> per-point JSON curves + psf_index.json (optional long CSV)
+
+Results land in the local run directory — analyze immediately, no fetch step.
+
+### Mode 2 — remote, direct (the target node's local foreground, no LSF)
+
+Same worker, but executed on the SSH target node's own host as a foreground
+process. Requires a live session in that machine's remote project (`machine_id`,
+or a calling session already inside the mirror).
+
+spectre_assemble(project_dir=...)
+batch_submit(run_dir=..., machine_id=..., remote_dir=...,
+             worker="spectre/spectre_sweep_worker.py", scheduler="direct")
+batch_poll(run_dir=...)             # reads progress files (job file carries scheduler=direct), not bjobs
+batch_fetch(run_dir=...)            # tar over dsh-remote, extracted into the local run_dir
+sim_analysis(run_dir=...) / spectre_parse(work_dir=...)
+
+Gotchas: the whole worker must finish inside the `rw_exec` 600 s wall clock
+(long sweeps belong on lsf); artifacts stay on the remote until `batch_fetch`
+brings them back; a `direct-<timestamp>` job id plus the run's coordinates are
+recorded in `<run_dir>/.batch_job.json` for poll/fetch.
+
+### Mode 3 — remote, LSF (the target cluster's queue)
+
+The default scheduler. No wall-clock cap — queue wait and execution are both
+visible through bjobs, so arbitrarily long sweeps are fine.
+
+spectre_assemble(project_dir=...)
+batch_submit(run_dir=..., machine_id=..., remote_dir=...,
+             worker="spectre/spectre_sweep_worker.py")   # scheduler="lsf" is the default
+batch_poll(run_dir=...)             # bjobs state + point_meta count; "No job found" with full meta = completed
+batch_fetch(run_dir=...)            # bsub.out / bsub.err (LSF's own outputs) are in the default includes
+sim_analysis(run_dir=...) / spectre_parse(work_dir=...)
+
+The worker scripts upload tree for both remote modes is the workspace
+`sim_scripts_dir` (normally the SmartAnaSim package's `scripts/`).
+
 ## What the npm packages ship (besides the JS)
 
 | Package | Ships beyond the entry JS | Deliberately NOT shipped |
 |---|---|---|
-| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`bsub.js`/`remote.js`/`trash.js` (the 6 model tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`; trash is a JS module since 2026-11-09); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (3 `.py`: the analysis pipeline collect/report + a byte-identical `common_workspace.py` copy); `scripts/selfcheck/` (`selfcheck_verify.py` + `selfcheck_verify.mjs`, the self-check compute twins — same JSON contract); `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` + `golden/`, a 36-file analytic 3×3 psfascii dataset that replays the pipeline without a simulator) | `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
+| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js` (the 6 model tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`; trash is a JS module since 2026-11-09); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/common/` (3 `.py`: the analysis pipeline collect/report + a byte-identical `common_workspace.py` copy); `scripts/selfcheck/` (`selfcheck_verify.py` + `selfcheck_verify.mjs`, the self-check compute twins — same JSON contract); `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` + `golden/`, a 36-file analytic 3×3 psfascii dataset that replays the pipeline without a simulator) | `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
 The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite

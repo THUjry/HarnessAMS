@@ -5,6 +5,35 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Added — 2026-11-10 (execution-modes documentation)
+
+- README gains **"Simulation execution modes"**: the three worker-host modes
+  (local = the DSH host itself via `spectre_run_sweep`; direct = the SSH
+  target node's local foreground via `batch_submit(scheduler="direct")`;
+  lsf = the target cluster's LSF queue via `scheduler="lsf"`), each with its
+  own annotated tool-call sequence. The local section states the path runs
+  with the SmartAnaSim plugin alone (no top-level AMS needed) and pins the
+  `spectre_run_sweep` overall timeout at 1200 s (matches SmartAnaSim's
+  default change of the same day). The plugin-index row's stale `bsub_*`
+  mention is fixed to `batch_*`.
+
+### Changed — 2026-11-10 (bsub → batch file naming)
+
+- **Module files renamed to match the 2026-11-09 tool rename**:
+  `src/bsub.js` → `src/batch.js`, `src/tools/bsub.js` → `src/tools/batch.js`,
+  `tests/bsub.test.mjs` → `tests/batch.test.mjs` (import sites in
+  `src/index.js` / `src/trash.js` / `src/server/selfcheck.js` / the tools
+  module itself updated). Own runtime artifacts follow: the job record
+  `.bsub_job.json` → **`.batch_job.json`** (hard cut — `readJob` reads only
+  the new name; a run directory recorded under the old name must re-run
+  `batch_submit` or pass `machine_id`/`remote_dir`/`job_id` explicitly) and
+  the remote fetch archive `.bsub_fetch.tgz` → `.batch_fetch.tgz` (which also
+  revives the fetch mock branch in tests/batch.test.mjs that already matched
+  the new name). LSF-domain names untouched: the `bsub` command, `bjobs`, and
+  the `bsub.out`/`bsub.err` job outputs they produce. Packaging list
+  (src/package.json) and the PUBLISH.md checklist updated. Tests 97/97
+  re-run green.
+
 ### Changed — 2026-11-10 (host upgrade re-pin)
 
 - **`engines.dsh` re-pinned `0.2.1-rc.2` → `0.2.2-rc.1`** (src/package.json,
