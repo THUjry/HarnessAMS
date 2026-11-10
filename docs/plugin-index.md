@@ -1,7 +1,6 @@
 # Plugin index
 
-> Basis: top-level repo responsibilities — each plugin's spec, version, dependencies, permission boundaries, verified DSH version.
-> The status column is updated per milestone; entries marked "TBD at M1" are backfilled when the plugin lands.
+> Basis: top-level repo responsibilities — each plugin's spec, version, dependencies, permission boundaries, verified DSH version. The status column is updated per milestone; entries marked "TBD at M1" are backfilled when the plugin lands.
 
 | Plugin | npm package / spec | row id | Dependencies (@deepseek-ai/dsh-*, peer range) | Permission boundary | Verified DSH | Status |
 |---|---|---|---|---|---|---|
