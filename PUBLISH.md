@@ -23,17 +23,18 @@ Checklist (per package, run from the package directory):
      `safe_trash`), `cordis.patch.yml`, `assets/` (`plotly.min.js` about 4.6 MB + the vendored
      xterm bundle — `xterm.js`, `xterm.css`, `xterm-addon-fit.js`, `xterm-addon-search.js`
      — + `THIRD_PARTY_NOTICES.md`; the Plotly and xterm attributions travel with the
-     assets), `scripts/common/` (3 `.py`: `common_collect_results.py`,
-     `common_gen_sweep_report.py` + a byte-identical
-     `common_workspace.py` copy), `scripts/selfcheck/` (2 files:
+     assets), `scripts/selfcheck/` (2 files:
      `selfcheck_verify.py` + `selfcheck_verify.mjs` — the self-check compute twins),
      `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` +
      `golden/` — 36 files, about 386 KB, the analytic 3×3 psfascii golden dataset),
      plus `package.json` (npm always includes it).
-   - Must NOT contain: any vendored simulator binaries or PDK model files (the former
-     `LocalDesignExample/` bundle was removed from the repo on 2026-11-02 — it must not
-     reappear in the tarball), `docs/`, `tests/`, `install_suite/`, `.gitattributes`, or the
-     repo-root README/AGENTS/CHANGELOG (running from `src/` keeps them out).
+   - Must NOT contain: `scripts/common/` (the retired `_dont_use_*.py` copies of the
+     analysis pipeline that became pure JS in `tools/sim_analysis.js` on 2026-11-10 —
+     the `files` whitelist excludes the directory), any vendored simulator binaries or
+     PDK model files (the former `LocalDesignExample/` bundle was removed from the repo
+     on 2026-11-02 — it must not reappear in the tarball), `docs/`, `tests/`,
+     `install_suite/`, `.gitattributes`, or the repo-root README/AGENTS/CHANGELOG
+     (running from `src/` keeps them out).
    - `dsh-harnessams-suite` (run in `install_suite/`) must contain exactly `cordis.patch.yml`
      (plus `package.json`); nothing else.
 3. Publish

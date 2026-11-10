@@ -26,7 +26,8 @@
 // Model tools (moved from SmartAnaSim 2026-11-01, keeping that plugin simulator-only):
 // the generic remote batch channel (batch_submit/batch_poll/batch_fetch; worker scripts
 // come from the workspace sim_scripts_dir) and the simulator-agnostic analysis/ops
-// tools (sim_analysis/sim_progress/safe_trash; analysis Python under scripts/).
+// tools (sim_analysis/sim_progress/safe_trash; the analysis pipeline is pure JS
+// in tools/sim_analysis.js since 2026-11-10, safe_trash in trash.js).
 // The session tool cards read two extra read-only endpoints (/api/progress and
 // /api/progress-summary, server/progress.js) to draw the simulation progress
 // cards inside the conversation — no execution surface, pure file reads.
@@ -47,7 +48,8 @@ import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { progressPayload, progressSummaryPayload } from './server/progress.js'
 import { registerTools } from './tool.js'
 import { batchTools } from './tools/batch.js'
-import { sharedTools } from './tools/shared.js'
+import { analysisTools } from './tools/sim_analysis.js'
+import { safeTrashTool } from './trash.js'
 
 export const name = 'dsh-harnessams'
 // workspaceRegistry/tools are required on the web composition (both ship with dsh-base);
@@ -55,10 +57,11 @@ export const name = 'dsh-harnessams'
 export const inject = ['webServer', 'workspaceRegistry', 'tools']
 
 export function toolDefinitions(ctx = {}) {
-  return [...batchTools(ctx), ...sharedTools(ctx)]
+  return [...batchTools(ctx), ...analysisTools(ctx), safeTrashTool()]
 }
-// Current shared surface: sim_analysis (collect + optional report dashboard),
-// sim_progress (local progress-file window), safe_trash.
+// Current analysis surface: sim_analysis (collect + optional report dashboard,
+// pure JS since 2026-11-10), sim_progress (local progress-file window);
+// safe_trash comes from trash.js with its mechanics.
 
 export function apply(ctx) {
   ctx.effect(() => {

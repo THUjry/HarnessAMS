@@ -26,6 +26,7 @@
     "assets/",
     "locale/",
     "scripts/",
+    "!scripts/common/",
     "!**/__pycache__",
     "!**/*.pyc"
   ],

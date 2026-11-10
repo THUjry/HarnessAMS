@@ -43,7 +43,7 @@ function totalFromConfig(runDir) {
 }
 
 // Project root from a run-dir string ("<root>/sweep/RoundN/top"), null when the
-// shape does not match. String-level like tools/shared.js deriveProjectDir, so
+// shape does not match. String-level like tools/sim_analysis.js deriveProjectDir, so
 // POSIX remote paths derive identically (existence is checked separately).
 export function projectRootOf(p) {
   const norm = String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '')

@@ -170,3 +170,39 @@ export function purgeEntry(name, opts = {}) {
   fs.rmSync(entry, { recursive: true, force: true })
   return `purged ${name}`
 }
+
+// Model-facing safe_trash tool (definition moved here from tools/shared.js on
+// 2026-11-10 — it belongs with the mechanics it routes to).
+export function safeTrashTool() {
+  return {
+    name: 'safe_trash',
+    description: 'Workspace trash (safety by default): move paths into <workspace>/.trash instead of deleting, '
+      + 'then list, restore, or explicitly purge an entry (restore/purge take an entry name exactly as list '
+      + 'reports it; names are fenced inside the trash directory).',
+    parameters: {
+      action: { type: 'string', required: true, enum: ['trash', 'list', 'restore', 'purge'],
+        description: 'trash | list | restore | purge' },
+      path: { type: 'string', description: 'trash: path to move; restore/purge: trash entry name (from list)' },
+      dest: { type: 'string', description: 'restore destination directory' },
+    },
+    async execute(args) {
+      if (args.action === 'list') {
+        const entries = listTrash()
+        return { ok: true, entries, output: JSON.stringify(entries, null, 2) }
+      }
+      if (args.action === 'restore') {
+        if (!args.path) return { ok: false, error: 'restore requires path=<trash entry name from list>' }
+        return { ok: true, output: restoreEntry(String(args.path), args.dest ? String(args.dest) : '.') }
+      }
+      if (args.action === 'purge') {
+        if (!args.path) return { ok: false, error: 'purge requires path=<trash entry name from list>' }
+        return { ok: true, output: purgeEntry(String(args.path)) }
+      }
+      if (args.action === 'trash') {
+        if (!args.path) return { ok: false, error: 'trash requires path=<file or directory>' }
+        return { ok: true, output: trashPaths([String(args.path)]).join('\n') }
+      }
+      return { ok: false, error: `unknown action: ${args.action}` }
+    },
+  }
+}
