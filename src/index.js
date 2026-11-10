@@ -41,6 +41,7 @@ import { remoteMachinesStatus, fetchMachines, sessionInMirror } from './server/m
 import { remoteProjectFor, checkMachinesForLocal, findRemoteProjectForMachine, createRemoteProject } from './server/remote.js'
 import { buildDiagnosisPrompt, createDiagnosisSession } from './server/diagnose.js'
 import { readSettings, validateSettings, writeSettings } from './server/settings.js'
+import { readCheckParams, validateCheckParams, writeCheckParams } from './server/checkparams.js'
 import { startSelfcheck, getSelfcheck } from './server/selfcheck.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
@@ -148,6 +149,21 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, settings: v.settings })
       return
     }
+    if (req.method === 'PUT' && route === '/api/check-params') {
+      // Per-project check parameters (check_params.json): the check sub-view's
+      // confirm button PUTs the full edited object at once. Local projects only.
+      const sessionId = url.searchParams.get('sessionId')
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      if (remoteProjectFor(project.path)) { json(400, { error: 'check parameters run from a local project — the sidebar is disabled inside remote projects' }); return }
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const v = validateCheckParams(body)
+      if (v.error) { json(400, { error: v.error }); return }
+      await writeCheckParams(project.path, v.params)
+      json(200, { ok: true, params: v.params })
+      return
+    }
     if (req.method === 'POST' && route === '/api/selfcheck') {
       // One-click project self-check under the CURRENT settings: the server
       // reads project_settings.json itself (single source of truth) and runs the
@@ -215,7 +231,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, sessionId: r.sessionId, title })
       return
     }
-    json(405, { error: 'GET only (PUT /api/tasks, PUT /api/project-settings, POST /api/remote-project, POST /api/selfcheck, POST /api/checks/analyze)' })
+    json(405, { error: 'GET only (PUT /api/tasks, PUT /api/project-settings, PUT /api/check-params, POST /api/remote-project, POST /api/selfcheck, POST /api/checks/analyze)' })
     return
   }
 
@@ -304,6 +320,16 @@ async function handle(req, res, ctx) {
     let settings
     try { ({ settings } = await readSettings(project.path)) } catch (e) { json(500, { error: `project_settings.json unreadable: ${e.message}` }); return }
     json(200, { ok: true, settings })
+    return
+  }
+  if (route === '/api/check-params') {
+    const sessionId = url.searchParams.get('sessionId')
+    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+    if (remoteProjectFor(project.path)) { json(400, { error: 'check parameters run from a local project — the sidebar is disabled inside remote projects' }); return }
+    let params
+    try { ({ params } = await readCheckParams(project.path)) } catch (e) { json(500, { error: `check_params.json unreadable: ${e.message}` }); return }
+    json(200, { ok: true, params })
     return
   }
   if (route === '/api/selfcheck') {
