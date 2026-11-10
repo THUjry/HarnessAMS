@@ -5,6 +5,25 @@ All notable changes are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed — 2026-11-10 (host upgrade re-pin)
+
+- **`engines.dsh` re-pinned `0.2.1-rc.2` → `0.2.2-rc.1`** (src/package.json,
+  install_suite/package.json): DSH 0.2.2 enforces the engines check even for
+  dev-mount rows, so an exact pin that misses the running host disables the
+  plugin row at startup. devDependencies (dsh-host-webserver /
+  dsh-client-ui-renderer / dsh-client-locale) move to 0.2.2-rc.1 in step.
+  Docs re-pinned along: README (Node >= 24.9 floor, verified-version lines),
+  PUBLISH.md, docs/compatibility.md (new 0.2.2-rc.1 row), docs/plugin-index.md,
+  and the dsh-remote coupling comments in src/remote.js, src/server/checks.js,
+  src/server/machines.js.
+- **Verified dsh-remote 0.8.66 → 0.8.83** (profile exact-pin, docs updated):
+  pairs with the 0.2.2 host (0.8.74 fixes a DSH-0.2.2-only UI bug); the four
+  coupling files (binding / exec-job / http-transport / remote-sandbox) show
+  no change to a consumed contract. Tests 97/97 re-run green; dev-mount smoke
+  (plugin rows, routes, tools, local APIs) green on the 0.2.2-rc.1 host; the
+  six remote regressions (terminal + check buttons against node1) remain
+  pending.
+
 ### Fixed — 2026-11-09 (code-review follow-ups)
 
 - **Self-check verdict no longer lies in direct mode**: with `scheduler=direct`
