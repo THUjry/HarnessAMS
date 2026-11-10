@@ -9,12 +9,12 @@
 //           session of a workspace shares one task list; a workspace inside a
 //           dsh-remote mirror is a REMOTE PROJECT and renders NO sidebar (connection
 //           anchor only; dsh-remote itself browses its files);
-//   tier 3: right-sidebar task tab, LOCAL projects only — a tab strip over the active
-//           project's tasks with "+" to create; the Overview sub-view carries the
-//           health-check buttons (local environment + one block per machine with a
-//           remote project: load / LSF jobs / batch dirs / script sync, borrowed from
-//           that remote project's live session); the Dashboard sub-view shows the
-//           task-registered local HTML reports (browse-to-add / dropdown / reload).
+//   tier 3: right-sidebar task tab, LOCAL projects only — the first-level strip
+//           opens on the project overview (health-check buttons + settings +
+//           one-click self-check, project-scoped so same-project session switches
+//           never refresh it), then one capsule per task with "new task" to create;
+//           the Dashboard sub-view shows the task-registered local HTML reports
+//           (browse-to-add / dropdown / reload).
 //           Remote file browsing/editing is NOT here — dsh-remote's own tools do it.
 // Classic script on the host module loader (same shape as dsh-remote's client): the
 // factory receives a synchronous require, React comes from the host page, and the whole
@@ -35,11 +35,6 @@ window.__ModuleLoader__.load({
     const PANEL_ID = 'dsh-harnessams'
     const TAB_ID = 'dsh-harnessams'
     const TAB_KIND = 'harnessams'
-    // The project overview is its own TOP-LEVEL right-sidebar tab (next to the
-    // host tabs), project-scoped and auto-opened by the sticky logic; the task
-    // tab keeps the per-task sub-views.
-    const OV_TAB_ID = 'dsh-harnessams-overview'
-    const OV_TAB_KIND = 'harnessams-overview'
     const API = '/harnessams/api'
 
     // ---------- i18n ----------
@@ -76,7 +71,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': 'SmartAnaSim 单包安装即注册全部 11 个工具：spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、batch（通用 LSF 提交 / 轮询 / 取回）、共享（分析 / 进度 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': '任务侧栏「概览」— 本机环境检查 + 各机器四项检查（远程检查需该机远程项目有活会话）+ 项目设置表与一键项目自检。「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）。「远程终端」— 机器标签绑定该机活会话。',
+        'guide.s5': 'HarnessAMS 任务侧栏「项目总览」— 本机环境检查 + 各机器四项检查（远程检查需该机远程项目有活会话）+ 项目设置表与一键项目自检；「new task」建新任务，任务内「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）、「远程终端」— 机器标签绑定该机活会话。',
         'rproj.title': '远程项目',
         'rproj.dshremoteOk': 'dsh-remote：{n} 台机器',
         'rproj.dshremoteMissing': 'dsh-remote 不可用',
@@ -160,15 +155,13 @@ window.__ModuleLoader__.load({
         'tasks.loadingProject': '正在加载项目…',
         'tasks.noProject': '此会话没有对应项目。',
         'tasks.remoteProjectNote': '远程项目不提供 HarnessAMS 侧边栏——远程文件的浏览与编辑请直接使用 dsh-remote；检查与任务请在本地项目中进行。',
-        'tasks.noTasks': '还没有任务 — 点“+”创建第一个。',
+        'tasks.projectOverview': '项目总览',
         'tasks.projectLabel': '项目：',
-        'tasks.tabOverview': '总览',
         'tasks.viewCheck': '参数检查',
         'tasks.viewDashboard': '仪表盘',
         'tasks.viewSim': '仿真设置',
         'tasks.deleteAria': '删除 {name}',
         'tasks.newTask': '新建任务',
-        'tasks.addTask': '+ 任务',
         'tasks.deleteConfirm': '删除任务“{name}”？',
         'tasks.descPlaceholder': '任务描述…',
         'tasks.nameLabel': '名称',
@@ -206,13 +199,8 @@ window.__ModuleLoader__.load({
         'term.fontSize': '字号（Ctrl+滚轮可调）',
         'tasks.simTitle': '仿真设置',
         'tasks.simPlaceholder': '占位 — 本任务的 SmartAnaSim 配置将在后续里程碑落地。',
-        'tasks.pinOn': '已固定：切换会话/工作区时总览页自动重开 — 点击取消跟随',
-        'tasks.pinOff': '未固定：切换会话时侧栏收起 — 点击让它跟随切换',
-        'tasks.headerPinOn': 'HarnessAMS 总览 — 已固定：随会话/工作区切换重开',
-        'tasks.headerPinOff': 'HarnessAMS 总览 — 打开总览页（固定以跟随会话切换）',
-        'tasks.headerOverview': '总览',
-        'tasks.guideDesc': '任务、检查、报告与使用引导',
-        'tasks.guideOvDesc': '项目环境检查、设置与一键自检',
+        'tasks.headerOpen': '打开 HarnessAMS 任务侧栏（项目总览与任务）',
+        'tasks.guideDesc': '项目总览、任务、检查与使用引导',
         'check.title': '装配层检查参数',
         'check.desc': '装配脚本的检查阈值与开关；确认后写入 check_params.json，下次装配生效。',
         'check.colParam': '参数',
@@ -358,7 +346,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'SmartAnaSim registers all 11 tools on install: spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), batch (generic LSF submit / poll / fetch), shared (analysis / progress / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'Task sidebar “Overview” — local environment checks plus four checks per machine (remote checks need a live session in that machine’s remote project), plus the project-settings table and the one-click project self-check. “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in). “Terminal” — machine tabs bind to that machine’s live session.',
+        'guide.s5': 'HarnessAMS task sidebar “Project overview” — local environment checks plus four checks per machine (remote checks need a live session in that machine’s remote project), plus the project-settings table and the one-click project self-check; “new task” creates a task, and inside a task “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in) and “Terminal” — machine tabs bind to that machine’s live session.',
         'rproj.title': 'Remote projects',
         'rproj.dshremoteOk': 'dsh-remote: {n} machine(s)',
         'rproj.dshremoteMissing': 'dsh-remote not available',
@@ -442,15 +430,13 @@ window.__ModuleLoader__.load({
         'tasks.loadingProject': 'Loading project…',
         'tasks.noProject': 'No project for this session.',
         'tasks.remoteProjectNote': 'No HarnessAMS sidebar in remote projects — browse and edit remote files with dsh-remote; run checks and manage tasks in a local project.',
-        'tasks.noTasks': 'No tasks yet — create the first one with “+”.',
+        'tasks.projectOverview': 'Project overview',
         'tasks.projectLabel': 'Project: ',
-        'tasks.tabOverview': 'Overview',
         'tasks.viewCheck': 'Checks',
         'tasks.viewDashboard': 'Dashboard',
         'tasks.viewSim': 'Sim settings',
         'tasks.deleteAria': 'Delete {name}',
         'tasks.newTask': 'New task',
-        'tasks.addTask': '+ task',
         'tasks.deleteConfirm': 'Delete task “{name}”?',
         'tasks.descPlaceholder': 'Task description…',
         'tasks.nameLabel': 'Name',
@@ -488,13 +474,8 @@ window.__ModuleLoader__.load({
         'term.fontSize': 'Font size (Ctrl+wheel adjusts)',
         'tasks.simTitle': 'Simulation settings',
         'tasks.simPlaceholder': 'Placeholder — SmartAnaSim configuration for this task lands here in later milestones.',
-        'tasks.pinOn': 'Pinned: the overview tab reopens when you switch sessions/workspaces — click to stop following',
-        'tasks.pinOff': 'Not pinned: the sidebar collapses on session switch — click to make it follow switches',
-        'tasks.headerPinOn': 'HarnessAMS overview — pinned: reopens on session/workspace switch',
-        'tasks.headerPinOff': 'HarnessAMS overview — open the overview tab (pin it to follow session switches)',
-        'tasks.headerOverview': 'Overview',
-        'tasks.guideDesc': 'Tasks, checks, reports and a guide',
-        'tasks.guideOvDesc': 'Project health checks, settings and one-click self-check',
+        'tasks.headerOpen': 'Open the HarnessAMS sidebar (project overview and tasks)',
+        'tasks.guideDesc': 'Project overview, tasks, checks and a guide',
         'check.title': 'Assembly check parameters',
         'check.desc': 'Thresholds and switches for the assembly-layer checks; confirming writes check_params.json and takes effect on the next assembly.',
         'check.colParam': 'Parameter',
@@ -792,7 +773,6 @@ window.__ModuleLoader__.load({
 .hams-listitem .hams-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hams-browse-dialog { max-width: 560px; width: min(560px, 92vw); }
 .hams-headerbtn { display: inline-flex; align-items: center; gap: 4px; }
-.hams-pin-on { border-color: color-mix(in srgb, #3fb950 45%, transparent); color: #3fb950; }
 /* tier 3 remote terminal: machine tab strip + pooled xterm viewport (dsh-ssh-ops-shaped) */
 .hams-termtabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 4px 0 6px; }
 .hams-termtab { padding: 2px 10px; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); cursor: pointer;
@@ -881,7 +861,8 @@ window.__ModuleLoader__.load({
     // ---------- tier 1: global console page ----------
 
     // First-run flag for the console page guide (global, browser-local — the console
-    // page is not per-project). Same try/catch discipline as STICKY_KEY below.
+    // page is not per-project). Same try/catch discipline as the strip-selection
+    // persistence (readStripSel) in tier 3.
     const GUIDE_SEEN_KEY = 'hams-guide-seen'
     function guideSeenRead() {
       try { return localStorage.getItem(GUIDE_SEEN_KEY) === '1' } catch { return false }
@@ -1395,8 +1376,8 @@ window.__ModuleLoader__.load({
 
     // Lowest navigation level inside a task: dashboard / check parameters / remote
     // terminal / sim settings (sim settings is a placeholder until its milestone
-    // lands). The project-level overview moved up to its own TOP-LEVEL tab
-    // (OverviewSidebarBody); only the task-level info block stayed in this tab.
+    // lands). Above it sits the first-level strip (project overview + task
+    // capsules), and above that the tab itself — see ProjectOverviewView.
     const TASK_VIEWS = [
       { id: 'dashboard', labelKey: 'tasks.viewDashboard' },
       { id: 'check', labelKey: 'tasks.viewCheck' },
@@ -1423,6 +1404,25 @@ window.__ModuleLoader__.load({
     function rememberTaskView(v) {
       taskViewMemory = v
       try { localStorage.setItem(TASK_VIEW_KEY, v) } catch { /* private mode */ }
+    }
+
+    // First-level strip selection inside the task tab: 'overview' (the project
+    // overview pseudo-capsule, the default display) or a task id. Same survive-a-
+    // remount treatment as the sub-view above; a stale task id falls back to
+    // 'overview' when the list arrives (TaskSidebarBody sanitizes after fetch).
+    const STRIP_SEL_KEY = 'hams-task-strip-sel'
+    let stripSelMemory = null
+    function readStripSel() {
+      if (stripSelMemory) return stripSelMemory
+      try {
+        const v = localStorage.getItem(STRIP_SEL_KEY)
+        if (v) { stripSelMemory = v; return v }
+      } catch { /* private mode */ }
+      return 'overview'
+    }
+    function rememberStripSel(v) {
+      stripSelMemory = v
+      try { localStorage.setItem(STRIP_SEL_KEY, v) } catch { /* private mode */ }
     }
 
     // Overview health-check panel (LOCAL projects): one local-environment button plus
@@ -1862,12 +1862,13 @@ window.__ModuleLoader__.load({
         }))
     }
 
-    // ---------- tier 3: project overview (own TOP-LEVEL right-sidebar tab) ----------
+    // ---------- tier 3: project overview (first-level view inside the task tab) ----------
     // Project-level surfaces only (health checks + settings/self-check): nothing
-    // here depends on a task, so switching sessions INSIDE one project must not
-    // refresh the tab — the body initializes from overviewMemory and only a real
-    // project change clears and refetches. The sticky logic auto-opens this tab.
-    function OverviewSidebarBody(props) {
+    // here depends on a task, so switching sessions or strip entries INSIDE one
+    // project must not refresh the view — the body initializes from overviewMemory
+    // and only a real project change clears and refetches. Rendered by
+    // TaskSidebarBody as the strip's default 'overview' entry (项目总览).
+    function ProjectOverviewView(props) {
       const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
       const [project, setProject] = useState(() => overviewMemory.project ?? undefined)
       const [reason, setReason] = useState(null)
@@ -1923,8 +1924,7 @@ window.__ModuleLoader__.load({
 
       // mid=null runs the local-environment check; otherwise mid is the machineId
       // of the machine block the button sits in (remote checks borrow that
-      // machine's remote-project session server-side). Identical to the task
-      // tab's former copy — the check surface moved here with the overview.
+      // machine's remote-project session server-side).
       const runCheck = async (mid, id) => {
         const key = mid ? mid + ':' + id : id
         setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'running', results: null })
@@ -1948,7 +1948,7 @@ window.__ModuleLoader__.load({
 
       // analyzeRun: hand a run's failed entries to a newly created diagnosis
       // session (POST /api/checks/analyze); auto=true marks the automatic
-      // trigger for the result message. Same as the task tab's former copy.
+      // trigger for the result message.
       const analyzeRun = async (run, auto) => {
         const failed = (run.results ?? []).filter((x) => x && x.ok === false)
         if (!failed.length || !sessionId) return
@@ -1996,7 +1996,7 @@ window.__ModuleLoader__.load({
       const [project, setProject] = useState(undefined) // undefined=loading, null=none
       const [reason, setReason] = useState(null)
       const [tasks, setTasks] = useState([])
-      const [selectedId, setSelectedId] = useState(null)
+      const [stripSel, setStripSel] = useState(readStripSel) // first-level strip: 'overview' | task id
       const [view, setView] = useState(readTaskView)
       const [error, setError] = useState(null)
       const [dialogOpen, setDialogOpen] = useState(false)
@@ -2005,6 +2005,24 @@ window.__ModuleLoader__.load({
 
       const projectPath = project?.path ?? null
       const projectRemote = !!project?.remote
+
+      // Sidebar-follows-switch bookkeeping (see SessionHeaderButton): the host
+      // keeps this body mounted even while the sidebar is collapsed (hidden), so
+      // visibility — not mount state — is what "the sidebar is open" means. Probe
+      // the root element's box every 500 ms and stamp sidebarOpenState while it
+      // is actually on screen.
+      const rootRef = useRef(null)
+      useEffect(() => {
+        const probe = () => {
+          const el = rootRef.current
+          if (el && el.isConnected && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
+            sidebarOpenState.lastSeenVisibleAt = Date.now()
+          }
+        }
+        probe()
+        const timer = setInterval(probe, 500)
+        return () => clearInterval(timer)
+      }, [])
 
       useEffect(() => {
         let alive = true
@@ -2025,12 +2043,16 @@ window.__ModuleLoader__.load({
       // Remote projects are connection anchors — no task store, no check surface.
       useEffect(() => {
         let alive = true
-        if (!projectPath || !sessionId || projectRemote) { setTasks([]); setSelectedId(null); return }
+        if (!projectPath || !sessionId || projectRemote) { setTasks([]); return }
         fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId))
           .then((d) => {
             if (!alive) return
-            setTasks(d.tasks ?? [])
-            setSelectedId((prev) => (d.tasks ?? []).some((t) => t.id === prev) ? prev : (d.tasks?.[0]?.id ?? null))
+            const fresh = d.tasks ?? []
+            setTasks(fresh)
+            // sanitize the strip selection: a stored task id that no longer
+            // exists (deleted, or left over from another project) falls back to
+            // the project overview — the tab's default display
+            setStripSel((prev) => prev !== 'overview' && !fresh.some((t) => t.id === prev) ? 'overview' : prev)
           })
           .catch((e) => { if (alive) setError(String(e.message ?? e)) })
         return () => { alive = false }
@@ -2052,7 +2074,7 @@ window.__ModuleLoader__.load({
               if (!alive) return
               const fresh = d.tasks ?? []
               setTasks((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh))
-              setSelectedId((prev) => fresh.some((t) => t.id === prev) ? prev : (fresh[0]?.id ?? null))
+              setStripSel((prev) => prev !== 'overview' && !fresh.some((t) => t.id === prev) ? 'overview' : prev)
             })
             .catch(() => { /* keep the current list */ })
         }
@@ -2069,8 +2091,8 @@ window.__ModuleLoader__.load({
 
       // Overview check surface (local projects: local environment + per-machine
       // remote checks); fetched independently so it never blocks the task list.
-      // The check buttons themselves moved to the overview tab — only the
-      // machines list is needed here (term sub-view session binding).
+      // The check buttons themselves live in the project overview view — only
+      // the machines list is needed here (term sub-view session binding).
       useEffect(() => {
         let alive = true
         setChecksInfo(null)
@@ -2081,9 +2103,9 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [projectPath, sessionId, projectRemote])
 
-      // The check buttons and the diagnosis handoff moved to the overview tab
-      // (OverviewSidebarBody); this tab keeps only the machines fetch above for
-      // the term sub-view's session binding.
+      // The check buttons and the diagnosis handoff live in the project overview
+      // view (ProjectOverviewView); this tab keeps only the machines fetch above
+      // for the term sub-view's session binding.
 
       // persist(mutator) re-bases the change on the LATEST server list before the
       // full-list PUT: the store has a second writer now (sim_report's report
@@ -2111,17 +2133,20 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const selected = tasks.find((t) => t.id === selectedId) ?? null
+      const selected = stripSel !== 'overview' ? (tasks.find((t) => t.id === stripSel) ?? null) : null
 
       const createTask = async (name, description) => {
         const saved = await persist((latest) => [...latest, { name, description: description || '' }])
-        if (saved && saved.length) setSelectedId(saved[saved.length - 1].id)
+        if (saved && saved.length) { const id = saved[saved.length - 1].id; rememberStripSel(id); setStripSel(id) }
       }
       const removeTask = (id) => {
         const t = tasks.find((x) => x.id === id)
         if (!t) return
         if (!window.confirm(tr('tasks.deleteConfirm', { name: t.name }))) return
-        if (selectedId === id) setSelectedId(tasks.filter((x) => x.id !== id)[0]?.id ?? null)
+        if (stripSel === id) {
+          const next = tasks.filter((x) => x.id !== id)[0]?.id ?? 'overview'
+          rememberStripSel(next); setStripSel(next)
+        }
         persist((latest) => latest.filter((x) => x.id !== id))
       }
       const saveDescription = () => {
@@ -2137,39 +2162,43 @@ window.__ModuleLoader__.load({
       // tasks, no checks. Their role is anchoring the connection; remote files go
       // through dsh-remote itself, and checks run from local projects.
       if (project && projectRemote) {
-        return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
+        return h('div', { ref: rootRef, style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
           h('div', { className: 'hams-body' },
             h('div', { className: 'hams-dim' }, tr('tasks.remoteProjectNote'))))
       }
 
-      return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
-        // tab strip: one card per task, "+" to create (modeled after dsh-ssh-ops' server tabs);
-        // trailing pin toggle controls the reopen-on-switch behavior
+      return h('div', { ref: rootRef, style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
+        // first-level strip (modeled after dsh-ssh-ops' server tabs): the project
+        // overview pseudo-capsule first — the tab's default display, not
+        // deletable — then one capsule per task and the "new task" button; the
+        // tab's whole navigation lives on this one level
         h('div', { className: 'hams-tabstrip' },
+          h('div', {
+            className: 'hams-tasktab' + (stripSel === 'overview' ? ' active' : ''),
+            title: tr('tasks.projectOverview'),
+            onClick: () => { rememberStripSel('overview'); setStripSel('overview') },
+          }, h('span', { className: 'hams-tabname' }, tr('tasks.projectOverview'))),
           tasks.map((t) => h('div', {
               key: t.id,
-              className: 'hams-tasktab' + (t.id === selectedId ? ' active' : ''),
+              className: 'hams-tasktab' + (t.id === stripSel ? ' active' : ''),
               title: t.name,
-              onClick: () => { setSelectedId(t.id); setDescDraft(null) },
+              onClick: () => { rememberStripSel(t.id); setStripSel(t.id); setDescDraft(null) },
             },
             h('span', { className: 'hams-tabname' }, t.name),
             h('span', { className: 'hams-x', role: 'button', 'aria-label': tr('tasks.deleteAria', { name: t.name }),
               onClick: (e) => { e.stopPropagation(); removeTask(t.id) } }, '×'))),
           project && h('button', { className: 'hams-addbtn', title: tr('tasks.newTask'), onClick: () => setDialogOpen(true) },
-            tasks.length ? '+' : tr('tasks.addTask')),
-          h(PinToggle, null),
+            tr('tasks.newTask')),
         ),
         h('div', { className: 'hams-body' },
           error && h('div', { className: 'hams-err' }, error),
           project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
           project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
-          project && tasks.length === 0 && !error && h('div', { className: 'hams-dim' },
-            tr('tasks.noTasks')),
-          project && h('div', { className: 'hams-dim' },
-            tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
+          project && stripSel === 'overview' && h(ProjectOverviewView, { sessionId }),
           selected && h('div', { style: { marginTop: '8px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
-            // task-level info (the old overview sub-view's residue): name+date row
-            // and the description editor stay always visible above the sub tabs
+            // task-level info: name+date row and the description editor stay
+            // always visible above the sub tabs (project-level info lives in the
+            // project overview view)
             h('div', { className: 'hams-row' },
               h('b', null, selected.name),
               h('span', { className: 'hams-dim' }, selected.created_at ? selected.created_at.slice(0, 10) : '')),
@@ -2205,19 +2234,6 @@ window.__ModuleLoader__.load({
           onCreate: async (n, d) => { setDialogOpen(false); await createTask(n, d) },
         }),
       )
-    }
-
-    function PinToggle() {
-      const [pinned] = usePinned()
-      return h('button', {
-        className: 'hams-addbtn' + (pinned ? ' hams-pin-on' : ''),
-        style: { marginLeft: 'auto' },
-        'aria-pressed': pinned,
-        title: pinned
-          ? tr('tasks.pinOn')
-          : tr('tasks.pinOff'),
-        onClick: () => setPinnedValue(!pinStore.pinned),
-      }, pinned ? '📌' : '📍')
     }
 
     function NewTaskDialog({ onCancel, onCreate }) {
@@ -2899,57 +2915,41 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // Sticky overview sidebar: DSH resets the right sidebar to its start page
-    // whenever the conversation switches. While pinned (default on), the header
-    // button re-opens the OVERVIEW tab on every sessionId change so the sidebar
-    // follows workspace switches instead of collapsing — EXCEPT for remote
-    // projects, which get no sidebar at all. Clicking the header button always
-    // opens + pins; the pin toggle lives at the end of the task tab strip.
+    // Sidebar follows session switches when it was open. DSH keeps one right-
+    // sidebar layout PER SESSION (localStorage dsh.sidebar-right.v1.<sessionId>,
+    // host README): a fresh session starts collapsed, and a reload restores each
+    // session's own layout — so page loads need no help. Only a mid-page session
+    // switch collapses an open sidebar. Mounted state alone cannot tell open
+    // from collapsed (the host keeps the body mounted while hidden), so the
+    // task body probes its own visibility and stamps the last time it was
+    // actually seen; the header button below re-opens the tab on a sessionId
+    // change iff the sidebar was visible recently (within the probe cadence
+    // plus the switch teardown, 1.5 s).
     let openSidebarTab = null
-    const STICKY_KEY = 'hams-task-sidebar-pinned'
-    const pinStore = {
-      pinned: (() => { try { return localStorage.getItem(STICKY_KEY) !== '0' } catch { return true } })(),
-      listeners: new Set(),
-    }
-    function setPinnedValue(v) {
-      pinStore.pinned = v
-      try { localStorage.setItem(STICKY_KEY, v ? '1' : '0') } catch { /* private mode */ }
-      for (const l of pinStore.listeners) l(v)
-    }
-    function usePinned() {
-      const [v, setV] = useState(pinStore.pinned)
-      useEffect(() => {
-        pinStore.listeners.add(setV)
-        return () => { pinStore.listeners.delete(setV) }
-      }, [])
-      return [v]
-    }
+    const sidebarOpenState = { lastSeenVisibleAt: 0 }
 
     function SessionHeaderButton(props) {
       const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
-      const [pinned] = usePinned()
       useEffect(() => {
-        if (!pinned || !sessionId || !openSidebarTab) return
+        if (!sessionId || !openSidebarTab) return
         let cancelled = false
         // the host tears the right pane down and up around a switch; a short delay
         // keeps the reopen from landing on the intermediate state
         const t = setTimeout(() => {
           if (cancelled || !openSidebarTab) return
+          if (Date.now() - sidebarOpenState.lastSeenVisibleAt > 1500) return // was closed — leave it
           // remote projects must NOT get the sidebar auto-opened (cache-backed check)
           void isRemoteProject(sessionId).then((remote) => {
             if (!cancelled && !remote && openSidebarTab) openSidebarTab()
           })
         }, 350)
         return () => { cancelled = true; clearTimeout(t) }
-      }, [sessionId, pinned])
+      }, [sessionId])
       return h('button', {
-        className: 'hams-btn hams-btn-sm hams-headerbtn' + (pinned ? ' hams-pin-on' : ''),
-        'aria-pressed': pinned,
-        title: pinned
-          ? tr('tasks.headerPinOn')
-          : tr('tasks.headerPinOff'),
-        onClick: () => { if (!pinStore.pinned) setPinnedValue(true); if (openSidebarTab) openSidebarTab() },
-      }, tr('tasks.headerOverview'), pinned ? ' 📌' : '')
+        className: 'hams-btn hams-btn-sm hams-headerbtn',
+        title: tr('tasks.headerOpen'),
+        onClick: () => { if (openSidebarTab) openSidebarTab() },
+      }, 'HarnessAMS')
     }
 
     // ---------- assembly ----------
@@ -2964,29 +2964,15 @@ window.__ModuleLoader__.load({
         slots.register({ name: 'main', key: PANEL_ID }, ConsolePage))
       slots.inject('sidebar.panellist', () =>
         slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 20, label: () => 'HarnessAMS' }, PanelIcon))
-      // tier 3: right-sidebar tabs — bodies keyed to their tab id receive the
-      // active sessionId via props (verified: switching sessions updates the
-      // prop). The OVERVIEW is its own top-level tab next to the host tabs
-      // (project-scoped, survives same-project session switches via
-      // overviewMemory); the TASK tab keeps the per-task sub-views. Multi-body
-      // registration follows dsh-remote's pattern (register all entries, return
-      // one composite disposer — verified in-browser 2026-11-10).
-      slots.inject('sidebar.right.pane.tab', () => {
-        const disposers = [
-          slots.register({ name: 'sidebar.right.pane.tab', key: OV_TAB_ID }, OverviewSidebarBody),
-          slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, TaskSidebarBody),
-        ]
-        return () => disposers.forEach((dispose) => dispose())
-      })
+      // tier 3: right-sidebar task tab — the body keyed to its tab id receives
+      // the active sessionId via props (verified: switching sessions updates the
+      // prop). One tab: the first-level strip inside it carries the project
+      // overview (project-scoped, survives same-project session switches via
+      // overviewMemory) plus the per-task sub-views.
+      slots.inject('sidebar.right.pane.tab', () =>
+        slots.register({ name: 'sidebar.right.pane.tab', key: TAB_ID }, TaskSidebarBody))
       ctx.inject(['sidebarRightTabs'], (inner) => {
         const tabs = inner.get('sidebarRightTabs')
-        inner.effect(() => tabs.register({
-          id: OV_TAB_ID,
-          kind: OV_TAB_KIND,
-          priority: 'extension',
-          title: () => tr('tasks.tabOverview'),
-          guide: [{ order: 15, title: () => 'HarnessAMS · ' + tr('tasks.tabOverview'), description: () => tr('tasks.guideOvDesc'), icon: PanelIcon }],
-        }), 'harnessams overview tab')
         inner.effect(() => tabs.register({
           id: TAB_ID,
           kind: TAB_KIND,
@@ -2995,14 +2981,13 @@ window.__ModuleLoader__.load({
           guide: [{ order: 20, title: () => 'HarnessAMS', description: () => tr('tasks.guideDesc'), icon: PanelIcon }],
         }), 'harnessams sidebar tab')
       })
-      // One-click reopen: DSH resets the right sidebar to its start page on session
-      // switch, so the conversation header keeps a direct entry point.
+      // One-click reopen: DSH keeps the right-sidebar layout per session, so a
+      // mid-page session switch collapses an open sidebar — the conversation
+      // header keeps a direct entry point and re-opens it when it was open.
       ctx.inject(['sidebarRight'], (inner) => {
         const right = inner.get('sidebarRight')
-        // default entry: the OVERVIEW tab (2026-11-10) — the task tab stays
-        // reachable from the right-sidebar tab strip
         openSidebarTab = () => {
-          try { right.openTab(OV_TAB_KIND) } catch { try { right.openTab(OV_TAB_ID) } catch { /* tab service unavailable */ } }
+          try { right.openTab(TAB_KIND) } catch { try { right.openTab(TAB_ID) } catch { /* tab service unavailable */ } }
         }
         inner.effect(() => () => { if (openSidebarTab) openSidebarTab = null }, 'harnessams header button handler')
         slots.inject('conversation.session.header.actions', () =>
