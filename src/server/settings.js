@@ -1,4 +1,4 @@
-// Project settings (2026-11-08, project self-check era): per-project config at
+// Project settings (project self-check): per-project config at
 // <workspace>/.harnessams/project_settings.json, next to tasks.json. The Overview
 // settings table edits it; the self-check orchestrator reads it as the single
 // source of truth for HOW a run executes (mode / machine / scheduler / simulator
@@ -53,7 +53,7 @@ export async function readSettings(workspacePath) {
     } else if (k === 'remote_dir') {
       if (typeof v === 'string' && v.trim()) settings.remote_dir = v.trim().replace(/\\/g, '/')
     } else if (k === 'scheduler' && v === 'none') {
-      settings.scheduler = 'direct' // legacy value from before the scheduler=direct rename
+      settings.scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
     } else if (ENUMS[k] && ENUMS[k].includes(v)) {
       settings[k] = v
     }

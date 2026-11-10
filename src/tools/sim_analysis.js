@@ -2,12 +2,10 @@
 // dashboard) and sim_progress (the LOCAL progress-file window). They read the
 // data contract written by either sweep worker (point_meta.json /
 // sweep_progress.json) and never spawn a simulator. The collect/report pipeline
-// is pure JS since 2026-11-10, ported from src/scripts/common/common_*.py
-// (retired there under _dont_use_* names): the results.json / report HTML
-// shapes and the stdout line formats are preserved, with two review fixes
-// folded in — report inline-JSON '</' escaping + HTML text escaping (P1 #11)
-// and numeric point-dir ordering ("100" used to sort before "11"). safe_trash
-// lives with its implementation in trash.js.
+// is pure JS: results.json / report HTML shapes and stdout line formats follow
+// the contract, report inline-JSON '</' and HTML text are escaped against
+// injection, and point directories sort numerically ("11" before "100").
+// safe_trash lives with its implementation in trash.js.
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'

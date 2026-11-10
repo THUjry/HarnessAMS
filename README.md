@@ -18,12 +18,12 @@ src/                     dsh-harnessams — console plugin package:
                          index.js (host-half routes + model-tool registration, plain JS, no build chain),
                          server/ (host-half modules: workspace/checks/disk/project/machines/remote/assets/
                                  settings/selfcheck),
-                         tools/ + tool.js/py.js/batch.js/remote.js (generic batch + analysis model
-                         tools, moved from SmartAnaSim 2026-11-01; batch.js renamed from
-                         bsub.js 2026-11-10),
+                         tools/ + tool.js/py.js/batch.js/remote.js (generic remote batch + analysis/ops
+                         model tools),
                          client.js (browser half — single-file classic script on window.__ModuleLoader__),
                          assets/ (plotly.min.js + the vendored xterm bundle + THIRD_PARTY_NOTICES),
-                         scripts/ (generic analysis Python: collect/report/trash under common/)
+                         scripts/ (project self-check compute twins under selfcheck/;
+                                 retired _dont_use_* reference copies under common/)
 install_suite/           dsh-harnessams-suite — aggregate bundle (pure patch package)
 tests/                   unit tests (bare node --test, from the repo root)
 docs/                    plugin index, compatibility matrix
@@ -97,7 +97,7 @@ The worker scripts upload tree for both remote modes is the workspace `sim_scrip
 
 | Package | Ships beyond the entry JS | Deliberately NOT shipped |
 |---|---|---|
-| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js` (the 6 model tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`; the analysis pipeline is pure JS since 2026-11-10, trash since 2026-11-09); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/selfcheck/` (`selfcheck_verify.py` + `selfcheck_verify.mjs`, the self-check compute twins — same JSON contract); `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` + `golden/`, a 36-file analytic 3×3 psfascii dataset that replays the pipeline without a simulator) | `scripts/common/` (retired `_dont_use_*.py` copies of the JS-ported analysis pipeline), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
+| `dsh-harnessams` (`src/`) | `client.js` (browser half, combo-loaded as-is); `server/` (host-half modules); `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js` (the 6 model tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/`safe_trash`; the analysis pipeline and trash are pure JS); `cordis.patch.yml` (bundle patch); `assets/plotly.min.js` (about 4.6 MB, offline report rendering and `/harnessams/assets/` in-app serving) + the vendored xterm bundle (`assets/xterm.js`/`xterm.css`/`xterm-addon-fit.js`/`xterm-addon-search.js` — @xterm/xterm 5.5.0, served from `/harnessams/assets/` for the task-sidebar remote terminal) + `assets/THIRD_PARTY_NOTICES.md` (Plotly and xterm attributions); `scripts/selfcheck/` (`selfcheck_verify.py` + `selfcheck_verify.mjs`, the self-check compute twins — same JSON contract); `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` + `golden/`, a 36-file analytic 3×3 psfascii dataset that replays the pipeline without a simulator) | `scripts/common/` (`_dont_use_*` retired reference copies — never executed), `docs/`, `tests/`, the repo-root README/AGENTS/CHANGELOG |
 | `dsh-harnessams-suite` (`install_suite/`) | `cordis.patch.yml` only (pure patch package) | everything else |
 
 The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite installs get offline reports: report generators seed a single workspace-level copy from it (see `docs/decisions.md`, D-001). `PUBLISH.md` holds the must-contain / must-not-contain checks that guard each tarball.
@@ -138,7 +138,7 @@ Note: with the npm-installed CLI, `--profile web` already names the profile — 
 - DSH: `npm i -g @deepseek-ai/dsh` then `dsh --profile web`; **verified version 0.2.2-rc.1** (2026-11-10; previously 0.2.1-rc.2, 2026-10-25; developer preview — pin the version; before upgrading, check the upstream release notes and rerun the minimal regression);
 - dsh-remote: `dsh plugin --profile web add --save-exact dsh-remote@0.8.83` — required at runtime for remote projects/checks (consumed via the DSH tool shell, not a package dependency); **verified version 0.8.83** (2026-11-10; previously 0.8.66, 2026-10-31, source-audited; before upgrading, check the upstream release notes and rerun the minimal regression);
 - Beware: npm hosts an unrelated same-name package `dsh`; remove it first with `npm rm -g dsh` if present;
-- Simulation environment (SmartAnaSim): a local Spectre install is required for the `spectre_*` tools (commercial software, not bundled). The former ngspice + sky130 bundle (`LocalDesignExample/`) was removed on 2026-11-02 — restore it from this repo's `ngspice` branch if needed.
+- Simulation environment (SmartAnaSim): a local Spectre install is required for the `spectre_*` tools (commercial software, not bundled).
 
 ## Documentation
 

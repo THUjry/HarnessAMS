@@ -238,7 +238,7 @@ export function batchTools(ctx) {
         const jobId = args.job_id || job?.job_id
         if (!jobId) throw new Error('no job id: pass job_id or run batch_submit first')
         let scheduler = args.scheduler || job?.scheduler || 'lsf'
-        if (scheduler === 'none') scheduler = 'direct' // legacy job file from before the rename
+        if (scheduler === 'none') scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
         const r = await execRemote(ctx, target.agent,
           pollCommand({ remoteDir, jobId, scheduler }), { timeoutMs: 30_000 })
         if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)

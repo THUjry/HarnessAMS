@@ -1,5 +1,5 @@
-// dsh-remote machine registry access (the single remote channel since the 2026-10-26
-// rework removed nodes.yaml and the BatchMode ssh fallback). Two read-only channels,
+// dsh-remote machine registry access (the single remote channel — this plugin
+// keeps no server registry and no ssh fallback of its own). Two read-only channels,
 // tried independently — neither exposes credentials:
 //   1. the tool shell: ctx.tools.get('rw_machines') + ctx.tools.execute (the documented
 //      programmatic path). execute() REQUIRES a
@@ -8,7 +8,7 @@
 //      with a TEXT listing, not JSON — see parseRwMachinesText.
 //   2. same-origin HTTP GET /dsh-remote/machines (present when the plugin's web routes
 //      are mounted). That surface sits behind the DSH web auth gate (401 without the
-//      browser session credentials — verified 2026-10-25), so the incoming request's
+//      browser session credentials — verified), so the incoming request's
 //      cookie/authorization headers are forwarded; credential-less probes get a 401
 //      and fall through.
 // Mirror discovery (findMirrorForMachine) feeds the remote-project model (remote.js):
@@ -31,7 +31,7 @@ export function resultText(r) {
 }
 
 // Parse the rw_machines text listing (dsh-remote 0.8.54 format; group labels ride on
-// an extra line after the auth line and match no entry, unchanged 0.8.51→0.8.83, re-checked 2026-11-10):
+// an extra line after the auth line and match no entry, unchanged 0.8.51→0.8.83):
 //   - <id>  "<name>"  [native]  <user>@<host>:<port>  [CURRENT]
 //       auth: key:... + agent | NONE (...)  workspace=<path>
 // The workspace rides on the AUTH line following each header; the listing ends
@@ -110,7 +110,7 @@ async function viaHttp(req, fetchImpl = fetch) {
 }
 
 // Aggregate both channels with independent failures — a thrown tool shell must not hide
-// the HTTP channel (the flow bug that made the console show "not available" on 2026-10-25).
+// the HTTP channel (that flow bug made the console show "not available").
 export async function fetchMachines(tools, req, fetchImpl = fetch) {
   const shell = await viaToolShell(tools).catch((e) => ({ ok: false, reason: String(e?.message ?? e) }))
   if (shell.ok) return shell

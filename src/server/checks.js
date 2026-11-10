@@ -1,8 +1,8 @@
 // Health checks. Local items run directly on this machine. Remote items are the
 // Overview button set, each an independent one-click check executed through
-// dsh-remote's rw_exec tool shell — there is no ssh channel of our own anymore
-// (2026-10-26 rework; the former BatchMode fallback died with the nodes.yaml registry).
-// The buttons live in LOCAL projects only (remote projects get no sidebar, 2026-10-27):
+// dsh-remote's rw_exec tool shell — there is no ssh channel of our own (remote
+// connectivity is delegated entirely to dsh-remote).
+// The buttons live in LOCAL projects only (remote projects get no sidebar):
 // a run borrows a live session from the target machine's remote project (a DSH
 // workspace inside a dsh-remote mirror) as the agent context — that session's cwd
 // binds rw_exec to the machine without touching the global active machine.
@@ -78,7 +78,7 @@ export const REMOTE_CHECK_BUTTONS = [
 // rw_exec has no machine parameter — it binds from the calling session's cwd (a cwd
 // inside a local mirror resolves to that mirror's machine). The caller passes the
 // remote project's OWN live session as the agent context (dsh-remote 0.8.54 bindingFor,
-// unchanged 0.8.51→0.8.83, re-checked 2026-11-10, reads exec.agent.session.header.cwd). A fabricated bare
+// unchanged 0.8.51→0.8.83, reads exec.agent.session.header.cwd). A fabricated bare
 // {header:{cwd}} object does NOT work — the tool pipeline validates the session against
 // the live session store (`session "undefined" is not live in this store`), which is why
 // a real session object is required. The agent wrapper carries BOTH `session` and
@@ -212,7 +212,7 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
     const e = await execViaToolShell(tools, agent, 'LSF jobs', 'timeout 10 bjobs -a 2>&1', channel,
       { maxLines: 14, maxChars: 900, judge: (o) => o.trim().length > 0, raw: true })
     // LSF's bjobs exits 255 with "No job found" when the queue is simply empty —
-    // a healthy state, not a check failure (verified live 2026-10-26).
+    // a healthy state, not a check failure (verified live).
     if (!e.ok && /No (unfinished )?job found/i.test(e.result ?? '')) { e.ok = true; e.detail = undefined }
     const parsed = e.ok ? parseBjobsRows(e.stdoutRaw) : null
     delete e.stdoutRaw
@@ -229,7 +229,7 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
     // Sweep progress files are the pipeline's own convention: every work dir with a
     // sweep_progress.json is one batch, and the file's top level carries a summary
     // (status / total_points / completed). `timeout 15` + head keep the walk bounded
-    // on NFS-scale workspaces (the du lesson from 2026-10-25).
+    // on NFS-scale workspaces (du on huge trees is slow — never call it here).
     const cmd = 'timeout 15 find ' + wsq + ' -maxdepth 4 -name sweep_progress.json 2>/dev/null'
       + ' | sort | head -50 | while IFS= read -r f; do d=$(dirname "$f");'
       + ` st=$(grep -o '"status": *"[a-z]*"' "$f" 2>/dev/null | head -1 | sed 's/.*"\\([a-z]*\\)"$/\\1/');`

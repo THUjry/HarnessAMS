@@ -1,4 +1,4 @@
-// Diagnosis-session surface (branch check-diagnose-session): prompt assembly and
+// Diagnosis-session surface: prompt assembly and
 // size caps (server/diagnose.js), the session-controller handoff, and the
 // POST /api/checks/analyze route (route-level, through the apply()-registered
 // handler, same discipline as dashboard.test.mjs). The client half is a

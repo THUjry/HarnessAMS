@@ -28,11 +28,9 @@ Checklist (per package, run from the package directory):
      `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` +
      `golden/` — 36 files, about 386 KB, the analytic 3×3 psfascii golden dataset),
      plus `package.json` (npm always includes it).
-   - Must NOT contain: `scripts/common/` (the retired `_dont_use_*.py` copies of the
-     analysis pipeline that became pure JS in `tools/sim_analysis.js` on 2026-11-10 —
+   - Must NOT contain: `scripts/common/` (the `_dont_use_*` retired reference copies —
      the `files` whitelist excludes the directory), any vendored simulator binaries or
-     PDK model files (the former `LocalDesignExample/` bundle was removed from the repo
-     on 2026-11-02 — it must not reappear in the tarball), `docs/`, `tests/`,
+     PDK model files, `docs/`, `tests/`,
      `install_suite/`, `.gitattributes`, or the repo-root README/AGENTS/CHANGELOG
      (running from `src/` keeps them out).
    - `dsh-harnessams-suite` (run in `install_suite/`) must contain exactly `cordis.patch.yml`

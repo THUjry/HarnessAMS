@@ -591,8 +591,8 @@ test('routes: project-settings GET/PUT happy path + guards', async () => {
   const noSession = await driveRoute(routes, getReq('/harnessams/api/project-settings?sessionId=zzz'))
   assert.equal(noSession.code, 404)
 
-  // restore-latest is gone (2026-11-09): a global "latest" run bled verdicts
-  // across projects, so an id-less GET is now a hard 400
+  // no global restore-latest: a global "latest" run would bleed verdicts
+  // across projects, so an id-less GET is a hard 400
   const noId = await driveRoute(routes, getReq('/harnessams/api/selfcheck'))
   assert.equal(noId.code, 400)
 
@@ -733,9 +733,9 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) pass
 })
 
 test('flow: spectre + remote — scheduler=direct fails → verdict fails (nothing forgives a primary failure)', async () => {
-  // Regression (2026-11-09): with scheduler=direct there is no fallback, and
-  // finalize used to forgive primary-attempt failures unconditionally — a
-  // broken direct submit still reported remote:'ok' / summary.ok:true.
+  // With scheduler=direct there is no fallback, and finalize must not forgive
+  // primary-attempt failures unconditionally — a broken direct submit would
+  // otherwise still report remote:'ok' / summary.ok:true.
   const f = await startFlow({
     settings: { run_mode: 'remote', machine_id: 'm1', scheduler: 'direct' },
     scenario: { directRunFail: true },

@@ -1,4 +1,4 @@
-// Check-failure diagnosis sessions (2026-11-01, branch check-diagnose-session):
+// Check-failure diagnosis sessions:
 // when an Overview check reports problems, the client can hand them to a freshly
 // created DSH session instead of the old copy-to-clipboard flow. The host half
 // assembles an English prompt from the failed entries and drives the DSH
@@ -9,7 +9,7 @@
 // that machine), prompt() delivers the diagnosis text as the first user turn
 // (the controller auto-resolves/starts the agent), rename() is cosmetic.
 // Deliberately PRIVATE: no ctx service key and no model tool is registered for
-// this — other plugins cannot route through it (by design, 2026-11-01).
+// this — other plugins cannot route through it (by design).
 import { randomUUID } from 'node:crypto'
 
 // Prompt-size guards: a check run can carry wide tables, but the diagnosis
