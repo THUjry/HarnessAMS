@@ -1,4 +1,4 @@
-// Thin dsh-remote shell used by the generic bsub tools.
+// Thin dsh-remote shell used by the generic batch tools.
 //
 // Coupling contract (dsh-remote 0.8.83 since 2026-11-10, exact-pinned in the web
 // profile; binding/machines/promotion-marker templates re-verified against the

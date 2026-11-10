@@ -46,7 +46,7 @@ import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { progressPayload, progressSummaryPayload } from './server/progress.js'
 import { registerTools } from './tool.js'
-import { batchTools } from './tools/bsub.js'
+import { batchTools } from './tools/batch.js'
 import { sharedTools } from './tools/shared.js'
 
 export const name = 'dsh-harnessams'

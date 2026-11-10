@@ -2,7 +2,7 @@
 // the same worker directly on the remote host (scheduler=direct, the node-local
 // foreground mode), then poll and fetch artifacts. Nothing in this file names a
 // simulator — a Spectre run is just a worker choice; the worker tree comes from
-// the workspace sim_scripts_dir (see ../bsub.js).
+// the workspace sim_scripts_dir (see ../batch.js).
 import fs from 'node:fs'
 import path from 'node:path'
 import { readJsonIfExists, resolveDir } from '../py.js'
@@ -13,7 +13,7 @@ import {
   listCommand, parseJobId, parsePollOutput, parseRemoteList, pluginScripts,
   pollCommand, postSubmitCommand, readJob, readWorkspaceConfig, remoteJoin,
   resolveRemoteDir, sanitizeRel, simScriptsDir, templateUploadPlan, writeJob,
-} from '../bsub.js'
+} from '../batch.js'
 
 function totalFromConfig(runDir) {
   const cfg = readJsonIfExists(path.join(runDir, 'sweep_config.json'))
@@ -38,7 +38,7 @@ export function batchTools(ctx) {
         + 'then either runs the chosen worker under bsub (scheduler="lsf", default) or directly on the target host '
         + '(scheduler="direct", node-local foreground). The worker path is scripts-root-relative (e.g. '
         + '"spectre/spectre_sweep_worker.py") or absolute on the remote; worker_args are passed through. '
-        + 'Writes .bsub_job.json in the run directory for batch_poll/batch_fetch. '
+        + 'Writes .batch_job.json in the run directory for batch_poll/batch_fetch. '
         + 'Requires a live session in the target machine\'s remote project (or a caller session already inside it).',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
@@ -156,7 +156,7 @@ export function batchTools(ctx) {
             remote_dir: remoteDir,
             scripts_dir: scriptsRoot,
             warnings: [],
-            job_file: path.join(runDir, '.bsub_job.json'),
+            job_file: path.join(runDir, '.batch_job.json'),
             output: (ran.stdout || '').trim().slice(0, 4000),
           }
         }
@@ -211,7 +211,7 @@ export function batchTools(ctx) {
           remote_dir: remoteDir,
           scripts_dir: scriptsRoot,
           warnings,
-          job_file: path.join(runDir, '.bsub_job.json'),
+          job_file: path.join(runDir, '.batch_job.json'),
           output: (submitted.stdout || '').trim().slice(0, 2000),
         }
       },
@@ -220,10 +220,10 @@ export function batchTools(ctx) {
       name: 'batch_poll',
       description: 'Poll a remote batch submitted by batch_submit: bjobs state plus the batch\'s own progress '
         + '(point_meta.json count, sweep_progress.json summary, errlog tail). The machine, directory and job id '
-        + 'default to <run_dir>/.bsub_job.json. A finished job that left the queue is reported as completed when '
+        + 'default to <run_dir>/.batch_job.json. A finished job that left the queue is reported as completed when '
         + 'all point_meta.json files exist.',
       parameters: {
-        run_dir: { type: 'string', required: true, description: 'Local run directory holding .bsub_job.json' },
+        run_dir: { type: 'string', required: true, description: 'Local run directory holding .batch_job.json' },
         machine_id: { type: 'string', description: 'Override the machine id/name from the job file' },
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the LSF job id' },
@@ -283,7 +283,7 @@ export function batchTools(ctx) {
         if (!packed.ok) {
           throw new Error(`remote packing failed: ${(packed.stderr || packed.stdout || packed.text).slice(0, 800)}`)
         }
-        const archiveRemote = remoteJoin(remoteDir, '.bsub_fetch.tgz')
+        const archiveRemote = remoteJoin(remoteDir, '.batch_fetch.tgz')
         const archiveLocal = path.join(runDir, `fetch_${jobId}.tgz`)
         const dl = await downloadFile(ctx, target.agent, archiveRemote, archiveLocal)
         if (!dl.ok) throw new Error(`archive download failed: ${dl.text.slice(0, 800)}`)

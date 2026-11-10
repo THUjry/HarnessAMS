@@ -18,7 +18,7 @@
     "tools/",
     "tool.js",
     "py.js",
-    "bsub.js",
+    "batch.js",
     "remote.js",
     "trash.js",
     "cordis.patch.yml",

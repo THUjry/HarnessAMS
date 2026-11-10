@@ -16,7 +16,7 @@ import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { resolveTarget } from '../src/remote.js'
-import { parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/bsub.js'
+import { parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
 import { makeMirrorHome } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
@@ -205,7 +205,7 @@ test('batch_submit uploads the worker scripts tree and run files, then records t
     assert.equal(res.remote_dir, '/home/op/sim/batch1')
     assert.equal(res.state, 'running')
 
-    const job = JSON.parse(fs.readFileSync(path.join(run, '.bsub_job.json'), 'utf8'))
+    const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
     assert.equal(job.job_id, '777')
     assert.equal(job.total_points, 2)
     assert.equal(job.remote_dir, '/home/op/sim/batch1')
@@ -258,7 +258,7 @@ test('batch_submit scheduler=direct runs the worker directly on the host (no bsu
     assert.equal(res.scheduler, 'direct')
     assert.equal(res.state, 'completed')
 
-    const job = JSON.parse(fs.readFileSync(path.join(run, '.bsub_job.json'), 'utf8'))
+    const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
     assert.equal(job.scheduler, 'direct')
     assert.equal(job.queue, null)
     assert.match(job.job_id, /^direct-/)
@@ -280,7 +280,7 @@ test('batch_poll reads the job file and reports completed', async () => {
   const env = setupMirror()
   const run = makeRunDir()
   try {
-    fs.writeFileSync(path.join(run, '.bsub_job.json'), JSON.stringify({
+    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
       machine_id: 'node1', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
     }))
     const ctx = makeCtx({ mirror: env.mirror, poll: { meta: 2, total: 2 } })
@@ -299,7 +299,7 @@ test('batch_fetch downloads the archive and extracts it into the run directory',
   const run = makeRunDir()
   const archive = await makeArchive()
   try {
-    fs.writeFileSync(path.join(run, '.bsub_job.json'), JSON.stringify({
+    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
       machine_id: 'node1', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
     }))
     const ctx = makeCtx({ mirror: env.mirror, archive })
@@ -320,7 +320,7 @@ test('batch_fetch downloads the archive and extracts it into the run directory',
   }
 })
 
-test('bsub tools reject escaped paths, missing mirrors and missing live sessions', async () => {
+test('batch tools reject escaped paths, missing mirrors and missing live sessions', async () => {
   const env = setupMirror()
   try {
     const ctx = makeCtx({ mirror: env.mirror })
