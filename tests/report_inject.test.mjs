@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { sharedTools, findTasksStore, registerReportIntoTask } from '../src/tools/shared.js'
+import { analysisTools, findTasksStore, registerReportIntoTask } from '../src/tools/sim_analysis.js'
 import { makeTool } from '../src/tool.js'
 
 const TASK_STORE = {
@@ -140,7 +140,7 @@ test('inject: sim_analysis e2e — collects, generates the report and registers 
       params: { vgs: 0.7 }, signals: { gain: 65.0 },
     }), 'utf8')
 
-    const tool = makeTool(sharedTools().find((d) => d.name === 'sim_analysis'))
+    const tool = makeTool(analysisTools().find((d) => d.name === 'sim_analysis'))
     const res = await tool.execute({ run_dir: top, report: true, task: 'OTA 装配验证' })
     assert.equal(res.ok, true)
     assert.equal(res.simulator, 'spectre')
@@ -152,6 +152,10 @@ test('inject: sim_analysis e2e — collects, generates the report and registers 
 
     const reportOnDisk = await readFile(res.report_path, 'utf8') // throws if missing
     assert.match(reportOnDisk, /<!DOCTYPE html>/)
+    // stdout line contract kept from the Python pipeline (report path parsed
+    // from the tool result now, but the lines stay model-facing output)
+    assert.match(res.output, /\[collect\] spectre: 2 success \/ 0 partial \/ 0 failed -> /)
+    assert.match(res.output, /\[report\] 1 round\(s\) -> /)
     const store = JSON.parse(await readFile(path.join(storeDir, 'tasks.json'), 'utf8'))
     assert.equal(store.tasks[0].reports.length, 1)
     assert.equal(store.tasks[0].reports[0].path, path.resolve(res.report_path))
@@ -179,6 +183,46 @@ test('inject: sim_analysis e2e — collects, generates the report and registers 
     await assert.rejects(() => tool.execute({
       run_dir: top, report: true, out: path.join(ws, 'elsewhere.json'),
     }), /requires the default results\.json location/)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('sim_analysis: numeric point ordering (>=100 dirs) and report inline-JSON escaping', async () => {
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-order-'))
+  try {
+    const top = path.join(ws, 'demoT', 'sweep', 'Round1', 'top')
+    // lexicographic order would be 02, 100, 11 — numeric must win
+    for (const [dir, idx, gain] of [['02', 2, 10.0], ['100', 100, 20.0], ['11', 11, 15.0]]) {
+      await mkdir(path.join(top, dir), { recursive: true })
+      await writeFile(path.join(top, dir, 'point_meta.json'), JSON.stringify({
+        point_index: idx, point_name: dir, status: 'success',
+        params: { vgs: 0.6 }, signals: { gain },
+      }), 'utf8')
+    }
+    // hostile testbench name: '</' must never survive inside the inline MANIFEST
+    await writeFile(path.join(top, 'cell_meta.json'), JSON.stringify({
+      testbench: 'amp</script><script>alert(1)</script>',
+      pdk: { name: 'sky130' },
+    }), 'utf8')
+
+    const tool = makeTool(analysisTools().find((d) => d.name === 'sim_analysis'))
+    const res = await tool.execute({ run_dir: top, report: true })
+    assert.equal(res.ok, true)
+
+    const results = JSON.parse(await readFile(path.join(top, 'results.json'), 'utf8'))
+    assert.deepEqual(results.points.map((p) => p.index), [2, 11, 100]) // numeric order
+    assert.deepEqual(results.summary.gain, { min: 10, max: 20, mean: 15, n: 3 })
+
+    // P1 #11: the inline MANIFEST line breaks '</' as '<\/' so the round title
+    // cannot terminate the inline script; the EXTERNAL data script keeps the
+    // raw title (it cannot inject there) — that boundary is the contract.
+    const html = await readFile(res.report_path, 'utf8')
+    const inline = html.split('\n').find((l) => l.includes('const MANIFEST')) ?? ''
+    assert.ok(inline.includes('"Round1 - amp<\\/script><script>alert(1)<\\/script>"'), inline)
+    assert.ok(!inline.includes('amp</script>'), inline)
+    const data = await readFile(path.join(ws, 'demoT', 'Analysis', 'data', 'Round1.js'), 'utf8')
+    assert.ok(data.includes('amp</script>'))
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

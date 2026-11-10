@@ -4,6 +4,10 @@ All notable changes are documented here. The format follows [Keep a Changelog](h
 
 ## [Unreleased]
 
+### Changed — 2026-11-10 (analysis pipeline Python → JS)
+
+- **sim_analysis 的 collect/report 流水线整体 JS 化**（`src/tools/shared.js` 改名 `src/tools/sim_analysis.js`，导出 `sharedTools` → `analysisTools`）：不再 spawn Python。两个分析脚本的行为逐项移植——results.json/report HTML 形状、`[collect]`/`[report]` stdout 行、退出码语义（无点/全失败仍报错）、utf-8-sig BOM 容错、plotly 工作区单副本种子链路全部保留（A/B 回归：原版 Python 与新 JS 双跑，results.json 与 data/Round\*.js 载荷 deepEqual、HTML 归一化后逐字节一致、stdout 逐行一致）。safe_trash 工具定义随其机制移入 `src/trash.js`（新增 `safeTrashTool()`）；`py.js`/`runPython` 仅余 selfcheck 消费者。两个已记账审查项随迁移落地：**P1 #11**（报告内联注入 `</script>` 可执行任意 JS——内联 MANIFEST JSON `</` 转义＋页内 innerHTML 文本转义＋项目名 HTML 转义）与**点目录 ≥100 后字典序乱序**（"100"＜"11"，排序键改数值）。`src/scripts/common/` 三件退役为 `_dont_use_*.py` 留档、不随 npm 包发布（`files` 白名单排除 `scripts/common/`，PUBLISH.md 检查同步）；与 SmartAnaSim 副本 "keep all copies identical" 条款废止——SAS 侧 `common_workspace.py` 自此为唯一活本、独立演进。测试 97 → 98 全绿（新增转义＋排序断言）。
+
 ### Added — 2026-11-10 (execution-modes documentation)
 
 - README gains **"Simulation execution modes"**: the three worker-host modes (local = the DSH host itself via `spectre_run_sweep`; direct = the SSH target node's local foreground via `batch_submit(scheduler="direct")`; lsf = the target cluster's LSF queue via `scheduler="lsf"`), each with its own annotated tool-call sequence. The local section states the path runs with the SmartAnaSim plugin alone (no top-level AMS needed) and pins the `spectre_run_sweep` overall timeout at 1200 s (matches SmartAnaSim's default change of the same day). The plugin-index row's stale `bsub_*` mention is fixed to `batch_*`.
