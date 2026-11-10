@@ -58,8 +58,9 @@ The plugin surfaces itself inside the DSH Web client (no separate page URL):
    management (add/remove/credentials) and **remote file browsing/editing stay in
    dsh-remote itself** — HarnessAMS deliberately does not duplicate them.
 
-   **Credential storage** (dsh-remote 0.8.66, source audited 2026-10-31; credential
-   logic identical to 0.8.54): for
+   **Credential storage** (dsh-remote 0.8.83 as of 2026-11-10; credential logic
+   source-audited at 0.8.66 on 2026-10-31, identical to 0.8.54; the 0.8.67→0.8.83
+   sync study found no credential-path changes): for
    security, tick "encrypt saved password" when saving a machine — the password then
    lives in the OS credential store (Windows DPAPI / macOS keychain / libsecret) and
    never in a plaintext file, and since 0.8.54 a failed keychain write refuses to
@@ -178,7 +179,7 @@ must-contain / must-not-contain checks that guard each tarball.
 ### Path A (standard, recommended): per-plugin install
 
 ```powershell
-dsh plugin --profile web add --save-exact dsh-remote@0.8.66    # remote-projects prerequisite — runtime tool-shell consumer, deliberately NOT an npm dependency
+dsh plugin --profile web add --save-exact dsh-remote@0.8.83    # remote-projects prerequisite — runtime tool-shell consumer, deliberately NOT an npm dependency
 dsh plugin --profile web add dsh-harnessams dsh-harnessams-smart-ana-sim
 dsh --profile web    # restart the profile after installing: bundle membership is a startup boundary
 ```
@@ -186,7 +187,7 @@ dsh --profile web    # restart the profile after installing: bundle membership i
 ### Path B (convenience): aggregate bundle, one command (first-party plugins only)
 
 ```powershell
-dsh plugin --profile web add --save-exact dsh-remote@0.8.66    # remote-projects prerequisite — NOT part of the suite bundle
+dsh plugin --profile web add --save-exact dsh-remote@0.8.83    # remote-projects prerequisite — NOT part of the suite bundle
 dsh plugin --profile web add dsh-harnessams-suite
 dsh --profile web --dump-config    # confirm the layers and rows appear as expected
 ```
@@ -199,15 +200,15 @@ Write a `cordis.yml` inside the plugin repo (`name` pointing to the absolute pat
 dsh --profile web --patch <path-to>\cordis.yml --port 3080 --no-open
 ```
 
-The web profile must already have dsh-remote exact-pinned for remote projects — `dsh plugin --profile web add --save-exact dsh-remote@0.8.66` (runtime tool-shell consumer, deliberately NOT an npm dependency).
+The web profile must already have dsh-remote exact-pinned for remote projects — `dsh plugin --profile web add --save-exact dsh-remote@0.8.83` (runtime tool-shell consumer, deliberately NOT an npm dependency).
 
-Note: with the npm-installed CLI, `--profile web` already names the profile — do **not** append a positional `web` argument (the launcher rejects it with `too many arguments`); flags after the launcher options (such as `--port` / `--open`) reach the web app. Verified against `@deepseek-ai/dsh@0.2.1-rc.2` installed from npm (2026-10-25).
+Note: with the npm-installed CLI, `--profile web` already names the profile — do **not** append a positional `web` argument (the launcher rejects it with `too many arguments`); flags after the launcher options (such as `--port` / `--open`) reach the web app. Verified against `@deepseek-ai/dsh@0.2.1-rc.2` installed from npm (2026-10-25); re-verified on 0.2.2-rc.1 (2026-11-10).
 
 ## Environment
 
-- Node.js >= 22.19 (verified on v24.22.1);
-- DSH: `npm i -g @deepseek-ai/dsh` then `dsh --profile web`; **verified version 0.2.1-rc.2** (developer preview — pin the version; before upgrading, check the upstream release notes and rerun the minimal regression);
-- dsh-remote: `dsh plugin --profile web add --save-exact dsh-remote@0.8.66` — required at runtime for remote projects/checks (consumed via the DSH tool shell, not a package dependency); **verified version 0.8.66** (2026-10-31, source-audited; before upgrading, check the upstream release notes and rerun the minimal regression);
+- Node.js >= 24.9 (DSH 0.2.2 floor; verified on v24.22.1);
+- DSH: `npm i -g @deepseek-ai/dsh` then `dsh --profile web`; **verified version 0.2.2-rc.1** (2026-11-10; previously 0.2.1-rc.2, 2026-10-25; developer preview — pin the version; before upgrading, check the upstream release notes and rerun the minimal regression);
+- dsh-remote: `dsh plugin --profile web add --save-exact dsh-remote@0.8.83` — required at runtime for remote projects/checks (consumed via the DSH tool shell, not a package dependency); **verified version 0.8.83** (2026-11-10; previously 0.8.66, 2026-10-31, source-audited; before upgrading, check the upstream release notes and rerun the minimal regression);
 - Beware: npm hosts an unrelated same-name package `dsh`; remove it first with `npm rm -g dsh` if present;
 - Simulation environment (SmartAnaSim): a local Spectre install is required for the `spectre_*` tools (commercial software, not bundled). The former ngspice + sky130 bundle (`LocalDesignExample/`) was removed on 2026-11-02 — restore it from this repo's `ngspice` branch if needed.
 

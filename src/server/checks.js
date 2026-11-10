@@ -78,7 +78,7 @@ export const REMOTE_CHECK_BUTTONS = [
 // rw_exec has no machine parameter — it binds from the calling session's cwd (a cwd
 // inside a local mirror resolves to that mirror's machine). The caller passes the
 // remote project's OWN live session as the agent context (dsh-remote 0.8.54 bindingFor,
-// unchanged since 0.8.51, reads exec.agent.session.header.cwd). A fabricated bare
+// unchanged 0.8.51→0.8.83, re-checked 2026-11-10, reads exec.agent.session.header.cwd). A fabricated bare
 // {header:{cwd}} object does NOT work — the tool pipeline validates the session against
 // the live session store (`session "undefined" is not live in this store`), which is why
 // a real session object is required. The agent wrapper carries BOTH `session` and

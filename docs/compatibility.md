@@ -5,4 +5,5 @@
 
 | DSH version | dsh-harnessams | dsh-harnessams-smart-ana-sim | dsh-harnessams-suite | Notes |
 |---|---|---|---|---|
-| 0.2.1-rc.2 | 0.1.0 (in development) | 0.1.0 (in development) | 0.1.0 (in development) | Pinned target; verified 2026-10-25 (dev-mount + routes + local checks smoke-tested) |
+| 0.2.2-rc.1 | 0.1.0 (in development) | 0.1.0 (in development) | 0.1.0 (in development) | Current pinned target; verified 2026-11-10 (dev-mount + routes + tool registration + local checks API + three-tier UI smoke; engines.dsh re-pinned 0.2.1-rc.2→0.2.2-rc.1 same day) |
+| 0.2.1-rc.2 | 0.1.0 (in development) | 0.1.0 (in development) | 0.1.0 (in development) | Pinned target 2026-10-25→2026-11-10 (dev-mount + routes + local checks smoke-tested); NOT compatible with engines.dsh exact pin against 0.2.2 hosts — rows get disabled at startup |
