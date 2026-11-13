@@ -4,7 +4,12 @@
 // profile; binding/machines/promotion-marker templates re-verified against the
 // v0.8.83 upstream tag per the project's upgrade checklist):
 //   - only rw_machines / rw_exec / rw_upload / rw_download are consumed;
-//   - ctx.tools.execute REQUIRES callId + AbortSignal;
+//   - ctx.tools.execute takes the batch contract (verified against
+//     @deepseek-ai/dsh-tools 0.2.2-rc.1): { calls: [{type,id,name,
+//     arguments(JSON string)}], signal, agent? } in, { results: [{callId,
+//     result}] } out — see callTool; the 0.2.1-rc.2 single-call shape
+//     {callId,name,arguments} now crashes on calls.map wrapped as an opaque
+//     "Tool batch execution failed";
 //   - those tools bind to a machine from the calling session's cwd inside a
 //     dsh-remote mirror, so a real live session must be passed as the agent
 //     context (a fabricated session does not survive the tool pipeline);
@@ -29,6 +34,13 @@ export function resultText(r) {
   if (r.value && typeof r.value === 'object' && typeof r.value.text === 'string') return r.value.text
   if (Array.isArray(r.content)) return r.content.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n')
   return ''
+}
+
+// Unwrap host pipeline errors: ToolBatchExecutionError carries the real failure on
+// .cause ("Tool batch execution failed" alone hides it).
+function errDetail(e) {
+  const msg = String(e?.message ?? e)
+  return e?.cause?.message ? `${msg} (${e.cause.message})` : msg
 }
 
 // Parse the rw_machines text listing (dsh-remote 0.8.54+): each entry is a header
@@ -183,16 +195,23 @@ export async function callTool(ctx, name, args, { agent, timeoutMs = 40_000 } = 
   const def = ctx?.tools?.get?.(name)
   if (!def) return { isError: true, text: `${name} is not registered (install/enable dsh-remote)` }
   try {
-    const r = await ctx.tools.execute({
-      callId: 'hams-sim-' + crypto.randomUUID(),
-      name,
-      arguments: args,
+    // Batch contract (dsh-tools 0.2.2-rc.1, see header): one-call batch in,
+    // results[0].result out.
+    const batch = await ctx.tools.execute({
+      calls: [{
+        type: 'tool-call',
+        id: 'hams-sim-' + crypto.randomUUID(),
+        name,
+        arguments: JSON.stringify(args ?? {}),
+      }],
       signal: AbortSignal.timeout(timeoutMs),
       ...(agent ? { agent } : {}),
     })
-    return { isError: !!r?.isError, text: resultText(r) }
+    const r = batch?.results?.[0]?.result
+    if (!r) return { isError: true, text: `${name}: ToolBatchResult carried no result entry` }
+    return { isError: !!r.isError, text: resultText(r) }
   } catch (e) {
-    return { isError: true, text: String(e?.message ?? e) }
+    return { isError: true, text: errDetail(e) }
   }
 }
 

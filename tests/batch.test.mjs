@@ -85,36 +85,41 @@ function makeCtx({ mirror, sessions = null, poll = {}, archive = null, failUploa
       get: (name) => (['rw_machines', 'rw_exec', 'rw_upload', 'rw_download'].includes(name)
         ? { name } : undefined),
       execute: async (input) => {
-        calls.push(input)
+        // ToolBatchInput (dsh-tools 0.2.2-rc.1): unwrap the one call so recorded
+        // entries keep the {name, arguments(object), agent} view the assertions read.
+        const call = input.calls[0]
+        const view = { name: call.name, arguments: JSON.parse(call.arguments || '{}'), agent: input.agent }
+        calls.push(view)
+        const reply = (result) => ({ results: [{ callId: call.id, result }] })
         // Regression: the borrowed live session must reach the tool pipeline as
         // exec.agent = { session } (dsh-remote reads agent.session.header.cwd).
         // A nested { agent: { session } } silently breaks every rw_* call.
-        if (input.name !== 'rw_machines') {
-          assert.equal(typeof input.agent?.session?.header?.cwd, 'string',
-            `${input.name}: agent context must expose session.header.cwd`)
+        if (view.name !== 'rw_machines') {
+          assert.equal(typeof view.agent?.session?.header?.cwd, 'string',
+            `${view.name}: agent context must expose session.header.cwd`)
         }
-        const a = input.arguments || {}
-        if (input.name === 'rw_machines') return text(MACHINES_TEXT)
-        if (input.name === 'rw_upload') {
-          if (failUpload) return { isError: true, content: [{ type: 'text', text: 'upload denied' }] }
-          return text(`uploaded 12 bytes from ${a.localPath} → ${a.path}`)
+        const a = view.arguments || {}
+        if (view.name === 'rw_machines') return reply(text(MACHINES_TEXT))
+        if (view.name === 'rw_upload') {
+          if (failUpload) return reply({ isError: true, content: [{ type: 'text', text: 'upload denied' }] })
+          return reply(text(`uploaded 12 bytes from ${a.localPath} → ${a.path}`))
         }
-        if (input.name === 'rw_download') {
+        if (view.name === 'rw_download') {
           if (archive) fs.copyFileSync(archive, a.localPath)
-          return text(`downloaded bytes from ${a.path} → ${a.localPath}`)
+          return reply(text(`downloaded bytes from ${a.path} → ${a.localPath}`))
         }
         const cmd = String(a.command || '')
-        if (cmd.includes('__BJOB__')) return text(pollText(poll))
-        if (cmd.includes('sleep 1; bjobs')) return text('777 RUN\n__STARTED__\n')
+        if (cmd.includes('__BJOB__')) return reply(text(pollText(poll)))
+        if (cmd.includes('sleep 1; bjobs')) return reply(text('777 RUN\n__STARTED__\n'))
         if (cmd.includes('bsub -q')) {
-          return text('Job <777> is submitted to queue <normal>.\n')
+          return reply(text('Job <777> is submitted to queue <normal>.\n'))
         }
-        if (cmd.includes('tar czf .batch_fetch.tgz')) return text('512\n')
+        if (cmd.includes('tar czf .batch_fetch.tgz')) return reply(text('512\n'))
         if (cmd.includes('| sort | head -200')) {
-          return text('./00/point_meta.json\n./00/netlist.scs.raw/sp.sp\n')
+          return reply(text('./00/point_meta.json\n./00/netlist.scs.raw/sp.sp\n'))
         }
-        if (cmd.includes('wc -l')) return text(`${existing}\n`)
-        return text('')
+        if (cmd.includes('wc -l')) return reply(text(`${existing}\n`))
+        return reply(text(''))
       },
     },
   }

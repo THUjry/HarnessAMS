@@ -10,7 +10,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { sanitizeFailed, buildDiagnosisPrompt, createDiagnosisSession } from '../src/server/diagnose.js'
-import { registerRoutes, callRoute, callPost, makeMirrorHome, setDSHHome, clientSrc, assertDictKeys } from './helpers.mjs'
+import { registerRoutes, callRoute, callPost, makeMirrorHome, setDSHHome, clientSrc, assertDictKeys, batchOf } from './helpers.mjs'
 
 test('diagnose: sanitizeFailed caps entries and text, drops unknown fields', () => {
   const big = 'x'.repeat(5000)
@@ -190,7 +190,7 @@ test('diagnose route: remote check anchors the machine remote-project workspace;
       tools: {
         register: () => {},
         get: (n) => (n === 'rw_machines' ? {} : undefined),
-        execute: async () => ({ value: MACHINES_TEXT, content: [] }),
+        execute: async () => batchOf({ value: MACHINES_TEXT, content: [] }),
       },
       get: (n) => (n === 'sessionController' ? controller : null),
     })
