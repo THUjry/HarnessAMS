@@ -22,6 +22,22 @@ export function assertValidShell(cmd) {
   execFileSync('bash', ['-n', '-c', cmd], { stdio: 'pipe' })
 }
 
+// ---- tool batch contract (dsh-tools 0.2.2-rc.1) ---------------------------
+// ctx.tools.execute speaks ToolBatchInput/ToolBatchResult: {calls:[{type,id,name,
+// arguments(JSON string)}],signal,agent?} in, {results:[{callId,result}]} out.
+// batchOf() shapes a one-call host reply; firstCall() reads the single call back
+// out of a captured input (arguments parsed back to an object).
+export function batchOf(result) {
+  return { results: [{ callId: 'test-call', result }] }
+}
+
+export function firstCall(input) {
+  const call = input?.calls?.[0]
+  if (!call) throw new Error('expected a ToolBatchInput with exactly one call')
+  return { id: call.id, type: call.type, name: call.name,
+    arguments: JSON.parse(call.arguments || '{}'), agent: input.agent }
+}
+
 // ---- route driver ---------------------------------------------------------
 export function fakeRes() {
   return { code: 0, body: '', writeHead(c) { this.code = c }, end(b) { this.body = String(b ?? '') } }

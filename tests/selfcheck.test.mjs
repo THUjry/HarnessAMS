@@ -239,43 +239,50 @@ function makeHarness({ scenario = {} }) {
       return undefined
     },
     execute: async (input) => {
-      execLog.push(input)
-      const name = input.name
-      const args = input.arguments ?? {}
+      // ToolBatchInput (dsh-tools 0.2.2-rc.1): record the unwrapped single call so
+      // execLog assertions keep reading {name, arguments(object), agent}; id/signal
+      // ride along from the call/batch for the contract pin below.
+      const call = input.calls[0]
+      const view = { id: call.id, name: call.name,
+        arguments: JSON.parse(call.arguments || '{}'), agent: input.agent, signal: input.signal }
+      execLog.push(view)
+      const reply = (result) => ({ results: [{ callId: call.id, result }] })
+      const name = view.name
+      const args = view.arguments ?? {}
       if (name === 'rw_machines') {
-        return { isError: false, value: { text: '- m1 "node1" [native] op@192.0.2.10:22\n  auth: key workspace=/home/op/sim' } }
+        return reply({ isError: false, value: { text: '- m1 "node1" [native] op@192.0.2.10:22\n  auth: key workspace=/home/op/sim' } })
       }
       if (name === 'rw_exec') {
-        if (input.agent?.session?.header?.cwd == null) {
-          return { isError: true, value: { text: 'session "undefined" is not live in this store' } }
+        if (view.agent?.session?.header?.cwd == null) {
+          return reply({ isError: true, value: { text: 'session "undefined" is not live in this store' } })
         }
         const r = await rwExec(args.command)
-        return { isError: false, value: { text: r.text } }
+        return reply({ isError: false, value: { text: r.text } })
       }
       if (name === 'rw_upload') {
         uploads.push({ localPath: args.localPath, path: args.path })
-        return { isError: false, value: { text: `uploaded 128 bytes to ${args.path}\n[exit code: 0]` } }
+        return reply({ isError: false, value: { text: `uploaded 128 bytes to ${args.path}\n[exit code: 0]` } })
       }
       if (name === 'rw_download') {
-        return { isError: false, value: { text: (await rwDownload(args)).text } }
+        return reply({ isError: false, value: { text: (await rwDownload(args)).text } })
       }
       if (spectre[name]) {
         try {
           const result = await spectre[name](args)
-          return { isError: false, value: { text: JSON.stringify(result) } }
+          return reply({ isError: false, value: { text: JSON.stringify(result) } })
         } catch (e) {
-          return { isError: true, value: { text: String(e?.message ?? e) } }
+          return reply({ isError: true, value: { text: String(e?.message ?? e) } })
         }
       }
       if (batchTools.has(name)) {
         try {
           const result = await batchTools.get(name).execute(args, {})
-          return { isError: false, value: { text: JSON.stringify(result) } }
+          return reply({ isError: false, value: { text: JSON.stringify(result) } })
         } catch (e) {
-          return { isError: true, value: { text: String(e?.message ?? e) } }
+          return reply({ isError: true, value: { text: String(e?.message ?? e) } })
         }
       }
-      return { isError: true, value: { text: `${name} is not registered` } }
+      return reply({ isError: true, value: { text: `${name} is not registered` } })
     },
   }
 
@@ -720,7 +727,7 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) pass
     for (const e of execs) {
       assert.equal(e.arguments.promoteOnTimeout, false)
       assert.equal(typeof e.agent?.session?.header?.cwd, 'string')
-      assert.ok(e.callId && e.signal instanceof AbortSignal)
+      assert.ok(e.id && e.signal instanceof AbortSignal) // batch call id + batch signal
     }
     // remote compute chose node for the js channel
     const verifyCmd = rwExecCommands.find((c) => c.includes('selfcheck_verify.mjs'))

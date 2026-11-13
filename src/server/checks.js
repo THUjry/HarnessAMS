@@ -16,7 +16,7 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { resultText } from './machines.js'
+import { resultText, executeSingle, errDetail } from './machines.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -93,6 +93,9 @@ export const REMOTE_CHECK_BUTTONS = [
 // moved to the background would keep running on the remote with nobody to collect
 // it. parseRwExecText still recognizes the promotion marker defensively (other
 // callers / older dsh-remote versions) so a still-running command is never judged ok.
+// The tools.execute call itself goes through executeSingle (the dsh-tools 0.2.2-rc.1
+// batch contract — see machines.js); that host coupling bit once when 0.2.1-rc.2's
+// single-call shape stopped being accepted.
 const REMOTE_EXEC_TIMEOUT_MS = 40000
 const REMOTE_EXEC_SIGNAL_MARGIN_MS = 30000
 export function parseRwExecText(text) {
@@ -122,15 +125,15 @@ async function execViaToolShell(tools, agent, item, cmd, channel, { maxLines = 3
   const t0 = Date.now()
   const entry = { item, cmd, channel, ms: 0, ok: false }
   try {
-    const r = await tools.execute({
-      callId: 'harnessams-check-' + Math.random().toString(36).slice(2, 8),
-      name: 'rw_exec',
-      arguments: { command: cmd, timeoutMs: REMOTE_EXEC_TIMEOUT_MS, promoteOnTimeout: false },
-      signal: AbortSignal.timeout(REMOTE_EXEC_TIMEOUT_MS + REMOTE_EXEC_SIGNAL_MARGIN_MS),
-      ...(agent ? { agent } : {}),
-    })
+    const r = await executeSingle(tools, 'rw_exec',
+      { command: cmd, timeoutMs: REMOTE_EXEC_TIMEOUT_MS, promoteOnTimeout: false },
+      {
+        callId: 'harnessams-check-' + Math.random().toString(36).slice(2, 8),
+        signal: AbortSignal.timeout(REMOTE_EXEC_TIMEOUT_MS + REMOTE_EXEC_SIGNAL_MARGIN_MS),
+        agent,
+      })
     const text = resultText(r)
-    if (r?.isError) {
+    if (r.isError) {
       entry.detail = text.slice(0, 400) || 'rw_exec returned an error'
       return entry
     }
@@ -145,7 +148,7 @@ async function execViaToolShell(tools, agent, item, cmd, channel, { maxLines = 3
       entry.detail = entry.detail.slice(0, 300)
     }
   } catch (e) {
-    entry.detail = String(e?.message ?? e).slice(0, 300)
+    entry.detail = errDetail(e).slice(0, 300)
   }
   entry.ms = Date.now() - t0
   return entry

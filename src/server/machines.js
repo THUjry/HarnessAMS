@@ -2,10 +2,14 @@
 // keeps no server registry and no ssh fallback of its own). Two read-only channels,
 // tried independently — neither exposes credentials:
 //   1. the tool shell: ctx.tools.get('rw_machines') + ctx.tools.execute (the documented
-//      programmatic path). execute() REQUIRES a
-//      callId + AbortSignal (verified against @deepseek-ai/dsh-tools 0.2.1-rc.2: without
-//      a signal the pipeline crashes reading `signal.aborted`), and rw_machines answers
-//      with a TEXT listing, not JSON — see parseRwMachinesText.
+//      programmatic path). execute() takes the BATCH contract (verified against
+//      @deepseek-ai/dsh-tools 0.2.2-rc.1): the input is { calls: [{type,id,name,
+//      arguments(JSON string)}], signal, agent? } and the reply is { results: [{callId,
+//      result}] } — see executeSingle. A signal is still required (without one the
+//      pipeline crashes reading `signal.aborted`), and the 0.2.1-rc.2 single-call shape
+//      {callId,name,arguments} now crashes on calls.map wrapped as an opaque
+//      "Tool batch execution failed". rw_machines answers with a TEXT listing, not
+//      JSON — see parseRwMachinesText.
 //   2. same-origin HTTP GET /dsh-remote/machines (present when the plugin's web routes
 //      are mounted). That surface sits behind the DSH web auth gate (401 without the
 //      browser session credentials — verified), so the incoming request's
@@ -28,6 +32,33 @@ export function resultText(r) {
   if (r.value && typeof r.value === 'object' && typeof r.value.text === 'string') return r.value.text
   if (Array.isArray(r.content)) return r.content.map((b) => (b && typeof b.text === 'string' ? b.text : '')).join('\n')
   return ''
+}
+
+// One tool call through the batch contract (see header): wrap {name, args} as a
+// one-element calls[] and read results[0].result back out. This is the only shape
+// dsh-tools 0.2.2-rc.1 accepts — keep every programmatic tool call on this funnel.
+export async function executeSingle(tools, name, args, { callId, signal, agent } = {}) {
+  const batch = await tools.execute({
+    calls: [{
+      type: 'tool-call',
+      id: callId ?? 'harnessams-' + Math.random().toString(36).slice(2, 8),
+      name,
+      arguments: JSON.stringify(args ?? {}),
+    }],
+    signal,
+    ...(agent ? { agent } : {}),
+  })
+  const first = batch?.results?.[0]?.result
+  if (first == null) throw new Error(`${name}: ToolBatchResult carried no result entry`)
+  return first
+}
+
+// Surface a wrapped pipeline error's inner cause: host-side failures arrive as
+// ToolBatchExecutionError("Tool batch execution failed") with the real error on
+// .cause — without this the check detail hides what actually broke.
+export function errDetail(e) {
+  const msg = String(e?.message ?? e)
+  return e?.cause?.message ? `${msg} (${e.cause.message})` : msg
 }
 
 // Parse the rw_machines text listing (dsh-remote 0.8.54 format; group labels ride on
@@ -80,16 +111,14 @@ async function viaToolShell(tools) {
   if (!def) return { ok: false, reason: 'rw_machines tool not registered (dsh-remote not installed?)' }
   let r
   try {
-    r = await tools.execute({
+    r = await executeSingle(tools, 'rw_machines', {}, {
       callId: 'harnessams-machines-' + Math.random().toString(36).slice(2, 8),
-      name: 'rw_machines',
-      arguments: {},
       signal: AbortSignal.timeout(8000),
     })
   } catch (e) {
-    return { ok: false, reason: 'rw_machines execute failed: ' + String(e?.message ?? e) }
+    return { ok: false, reason: 'rw_machines execute failed: ' + errDetail(e) }
   }
-  if (r?.isError) return { ok: false, reason: 'rw_machines returned an error' }
+  if (r.isError) return { ok: false, reason: 'rw_machines returned an error' }
   const machines = parseRwMachinesText(resultText(r))
   if (!machines.length) return { ok: false, reason: 'rw_machines listing empty or not parseable' }
   return { ok: true, machines, source: 'tool shell (rw_machines)' }

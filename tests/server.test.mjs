@@ -7,7 +7,7 @@ import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { assertValidShell } from './helpers.mjs'
+import { assertValidShell, batchOf, firstCall } from './helpers.mjs'
 import { sessionProject, readTasks, writeTasks, tasksPath } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { resultText, parseRwMachinesText, fetchMachines, findMirrorForMachine, sessionInMirror } from '../src/server/machines.js'
@@ -136,16 +136,24 @@ test('machines: resultText extracts the tool result payload', () => {
   assert.equal(resultText(null), '')
 })
 
-test('machines: execute must carry callId+signal; text listing wins over HTTP', async () => {
+test('machines: execute must carry the batch contract; text listing wins over HTTP', async () => {
   const seen = []
   const tools = {
     get: (name) => (name === 'rw_machines' ? { name } : undefined),
     execute: async (input) => {
       seen.push(input)
-      // regression pin: the tool pipeline crashes reading signal.aborted without these
-      assert.ok(input.callId, 'callId required')
+      // regression pin: dsh-tools 0.2.2-rc.1 takes ToolBatchInput — the 0.2.1-rc.2
+      // single-call shape {callId,name,arguments} crashes on calls.map wrapped as
+      // "Tool batch execution failed", and without a signal the pipeline crashes
+      // reading `signal.aborted`
+      assert.ok(Array.isArray(input.calls) && input.calls.length === 1, 'one-entry calls[] required')
+      const call = input.calls[0]
+      assert.equal(call.type, 'tool-call')
+      assert.equal(call.name, 'rw_machines')
+      assert.ok(call.id, 'call id required')
+      assert.deepEqual(JSON.parse(call.arguments || '{}'), {})
       assert.ok(input.signal instanceof AbortSignal, 'AbortSignal required')
-      return { isError: false, value: { text: RW_MACHINES_TEXT }, content: [] }
+      return batchOf({ isError: false, value: { text: RW_MACHINES_TEXT }, content: [] })
     },
   }
   const r = await fetchMachines(tools, { headers: { host: '127.0.0.1:3187' } }, async () => { throw new Error('HTTP must not be reached') })
@@ -385,7 +393,7 @@ test('checks: runRemoteCheckButton load runs with the borrowed session agent', a
     get: (name) => (name === 'rw_exec' ? { name } : undefined),
     execute: async (input) => {
       inputs.push(input)
-      return { isError: false, value: { text: '0.42 0.51 0.55 3/900 12345\n48\n[exit code: 0]' }, content: [] }
+      return batchOf({ isError: false, value: { text: '0.42 0.51 0.55 3/900 12345\n48\n[exit code: 0]' }, content: [] })
     },
   }
   const agent = { session: { header: { cwd: 'MIRROR/DIR' } } }
@@ -397,16 +405,17 @@ test('checks: runRemoteCheckButton load runs with the borrowed session agent', a
   assert.deepEqual(r.results[0].rows, [['0.42', '0.51', '0.55', '3/900', '48']])
   assert.match(r.results[0].result, /load 0\.42 \/ 48 cpu/)
   assert.equal(inputs[0].agent.session.header.cwd, 'MIRROR/DIR') // binding context
-  assert.equal(inputs[0].arguments.promoteOnTimeout, false) // no background-job owner needed
-  assert.equal(inputs[0].arguments.timeoutMs, 40000)
-  assert.ok(inputs[0].signal instanceof AbortSignal && inputs[0].callId)
-  assert.equal(inputs[0].name, 'rw_exec')
+  const call = firstCall(inputs[0]) // batch contract: {name, arguments(object)}
+  assert.equal(call.name, 'rw_exec')
+  assert.equal(call.arguments.promoteOnTimeout, false) // no background-job owner needed
+  assert.equal(call.arguments.timeoutMs, 40000)
+  assert.ok(inputs[0].signal instanceof AbortSignal && call.id !== undefined)
 })
 
 test('checks: runRemoteCheckButton jobs surfaces a missing bjobs and an empty queue', async () => {
   const tools = {
     get: () => ({}),
-    execute: async () => ({ isError: false, value: { text: 'bash: bjobs: command not found\n[exit code: 127]' }, content: [] }),
+    execute: async () => batchOf({ isError: false, value: { text: 'bash: bjobs: command not found\n[exit code: 127]' }, content: [] }),
   }
   const r = await runRemoteCheckButton(tools, 'jobs', {})
   assert.equal(r.channel, 'dsh-remote (active machine)') // no agent -> active machine
@@ -418,7 +427,7 @@ test('checks: runRemoteCheckButton jobs surfaces a missing bjobs and an empty qu
   // LSF bjobs exits 255 with "No job found" on an empty queue — healthy, not a failure
   const tools2 = {
     get: () => ({}),
-    execute: async () => ({ isError: false, value: { text: 'No job found\n[exit code: 255]' }, content: [] }),
+    execute: async () => batchOf({ isError: false, value: { text: 'No job found\n[exit code: 255]' }, content: [] }),
   }
   const r2 = await runRemoteCheckButton(tools2, 'jobs', {})
   assert.equal(r2.results[0].ok, true)
@@ -437,7 +446,7 @@ test('checks: runRemoteCheckButton jobs parses bjobs -a into columned rows', asy
   ].join('\n')
   const tools = {
     get: () => ({}),
-    execute: async () => ({ isError: false, value: { text: bjobsOut + '\n[exit code: 0]' }, content: [] }),
+    execute: async () => batchOf({ isError: false, value: { text: bjobsOut + '\n[exit code: 0]' }, content: [] }),
   }
   const r = await runRemoteCheckButton(tools, 'jobs', { remotePath: '/w' })
   const e = r.results[0]
@@ -459,10 +468,10 @@ test('checks: runRemoteCheckButton batches lists progress files with $ROOT paths
     get: () => ({}),
     execute: async (input) => {
       inputs.push(input)
-      return { isError: false, value: { text:
+      return batchOf({ isError: false, value: { text:
         '/home/op/sim/AutoAnalog/b1  [completed] 32/32\n'
         + '/home/op/sim/AutoAnalog/b2  [running] 4/16\n'
-        + '/elsewhere/b3  [failed] 1/8\n[exit code: 0]' }, content: [] }
+        + '/elsewhere/b3  [failed] 1/8\n[exit code: 0]' }, content: [] })
     },
   }
   const r = await runRemoteCheckButton(tools, 'batches', { remotePath: '/home/op/sim/AutoAnalog' })
@@ -475,10 +484,10 @@ test('checks: runRemoteCheckButton batches lists progress files with $ROOT paths
     ['/elsewhere/b3', 'failed', '1/8'], // outside the scope — verbatim
   ])
   assert.match(e.cmd, /find "\/home\/op\/sim\/AutoAnalog" -maxdepth 4 -name sweep_progress\.json/)
-  assertValidShell(inputs[0].arguments.command)
+  assertValidShell(firstCall(inputs[0]).arguments.command)
 
   // empty result is still a pass — it reports "none found", no table
-  const tools2 = { get: () => ({}), execute: async () => ({ isError: false, value: { text: '[exit code: 0]' }, content: [] }) }
+  const tools2 = { get: () => ({}), execute: async () => batchOf({ isError: false, value: { text: '[exit code: 0]' }, content: [] }) }
   const r2 = await runRemoteCheckButton(tools2, 'batches', { remotePath: '/w' })
   assert.ok(r2.results[0].ok)
   assert.match(r2.results[0].result, /no sweep_progress\.json found/)
@@ -499,11 +508,11 @@ test('checks: runRemoteCheckButton scripts compares the nested local tree agains
       get: () => ({}),
       execute: async (input) => {
         inputs.push(input)
-        return { isError: false, value: { text:
+        return batchOf({ isError: false, value: { text:
           md5('AAA') + '  spectre/a.py\n'
           + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  snp/b.py\n'
           + '__REMOTE_PY__\nspectre/a.py\nsnp/b.py\ncommon/c.py\n[exit code: 0]',
-        }, content: [] }
+        }, content: [] })
       },
     }
     const r = await runRemoteCheckButton(tools, 'scripts',
@@ -521,10 +530,10 @@ test('checks: runRemoteCheckButton scripts compares the nested local tree agains
     assert.match(e.detail, /snp\/b\.py — differs/)
     assert.match(e.detail, /common\/c\.py — only-remote/)
     // relative POSIX paths, recursive remote listing, default root = remote workspace
-    assert.match(inputs[0].arguments.command,
+    assert.match(firstCall(inputs[0]).arguments.command,
       /cd "\/home\/op\/sim" && md5sum "snp\/b\.py" "spectre\/a\.py"/)
-    assert.match(inputs[0].arguments.command, /find \. -maxdepth 4 -name '\*\.py'/)
-    assertValidShell(inputs[0].arguments.command)
+    assert.match(firstCall(inputs[0]).arguments.command, /find \. -maxdepth 4 -name '\*\.py'/)
+    assertValidShell(firstCall(inputs[0]).arguments.command)
 
     // an explicit remote_scripts_dir (a REMOTE absolute path) replaces the workspace root
     const rRoot = await runRemoteCheckButton(tools, 'scripts',
@@ -540,7 +549,7 @@ test('checks: runRemoteCheckButton scripts compares the nested local tree agains
 })
 
 test('checks: unknown button and missing rw_exec are hard errors', async () => {
-  const tools = { get: () => ({}), execute: async () => ({ isError: false, value: { text: 'x' }, content: [] }) }
+  const tools = { get: () => ({}), execute: async () => batchOf({ isError: false, value: { text: 'x' }, content: [] }) }
   await assert.rejects(() => runRemoteCheckButton(tools, 'nope', {}), /unknown check button/)
   await assert.rejects(() => runRemoteCheckButton({ get: () => undefined }, 'load', {}), /rw_exec tool not registered/)
 })
