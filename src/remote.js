@@ -1,8 +1,10 @@
 // Thin dsh-remote shell used by the generic batch tools.
 //
-// Coupling contract (dsh-remote 0.8.83, exact-pinned in the web
+// Coupling contract (dsh-remote 0.8.94, exact-pinned in the web
 // profile; binding/machines/promotion-marker templates re-verified against the
-// v0.8.83 upstream tag per the project's upgrade checklist):
+// v0.8.94 upstream tag per the project's upgrade checklist; the four coupling
+// files are byte-identical 0.8.83→0.8.94, so every earlier 0.8.51→0.8.83
+// verification carries over):
 //   - only rw_machines / rw_exec / rw_upload / rw_download are consumed;
 //   - ctx.tools.execute takes the batch contract (verified against
 //     @deepseek-ai/dsh-tools 0.2.2-rc.1): { calls: [{type,id,name,

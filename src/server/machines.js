@@ -62,7 +62,7 @@ export function errDetail(e) {
 }
 
 // Parse the rw_machines text listing (dsh-remote 0.8.54 format; group labels ride on
-// an extra line after the auth line and match no entry, unchanged 0.8.51→0.8.83):
+// an extra line after the auth line and match no entry, unchanged 0.8.51→0.8.94):
 //   - <id>  "<name>"  [native]  <user>@<host>:<port>  [CURRENT]
 //       auth: key:... + agent | NONE (...)  workspace=<path>
 // The workspace rides on the AUTH line following each header; the listing ends
@@ -155,7 +155,7 @@ export function remoteWorkspacesRoot() {
 
 // Find the local mirror directory of a dsh-remote machine — the cwd that makes rw_exec
 // bind to that machine (dsh-remote resolves bindings by scanning the same meta files;
-// see lib/binding.js resolveMirror; identical in 0.8.54, unchanged 0.8.51→0.8.83). Read-only: the meta carries no secrets.
+// see lib/binding.js resolveMirror; identical in 0.8.54, unchanged 0.8.51→0.8.94). Read-only: the meta carries no secrets.
 export function findMirrorForMachine(machine, root = remoteWorkspacesRoot()) {
   if (!machine?.host) return null
   const port = Number(machine.port) || 22
