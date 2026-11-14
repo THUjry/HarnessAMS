@@ -151,24 +151,50 @@ export function templateUploadPlan(runDir, files, config) {
   return files
 }
 
+// LSF submit, idempotent against dsh-ssh's broken-connection replay (a replayed
+// exec must never double-submit): a .hams_submitted marker carries the original
+// bsub output and is READ BACK on replay (not skipped — the caller still gets
+// its job id); flock serializes concurrent first attempts so two submissions
+// can never both miss the marker. The marker is written only when bsub exits 0,
+// so a failed submit stays retryable.
 export function buildSubmitCommand({ remoteDir, queue, jobName, python, workerPath, workerArgs }) {
   const args = (workerArgs || []).map(String)
   if (!args.includes('--work-dir')) args.push('--work-dir', remoteDir)
-  const parts = ['cd', shq(remoteDir), '&&', 'bsub',
+  return [
+    'cd', shq(remoteDir), '|| exit 9;',
+    'if [ -f .hams_submitted ]; then cat .hams_submitted; exit 0; fi;',
+    'exec 9>.hams_submit.lock; flock 9;',
+    'if [ -f .hams_submitted ]; then cat .hams_submitted; exit 0; fi;',
+    'out=$(bsub',
     '-q', shq(queue || 'normal'),
     '-J', shq(jobName || 'harnessams'),
     '-o', 'bsub.out', '-e', 'bsub.err',
-    shq(python), shq(workerPath), ...args.map(shq)]
-  return parts.join(' ')
+    shq(python), shq(workerPath), ...args.map(shq),
+    '2>&1); rc=$?;',
+    'if [ "$rc" -eq 0 ]; then printf \'%s\\n\' "$out" | tee .hams_submitted;',
+    'else printf \'%s\\n\' "$out" >&2; fi;',
+    'exit "$rc"',
+  ].join(' ')
 }
 
 // scheduler=direct: run the SAME worker directly on the remote host (the
-// node-local foreground mode — no LSF involvement). The command is executed
-// synchronously through rw_exec, so a short batch returns its own progress.
+// node-local foreground mode — no LSF involvement), executed synchronously
+// through ssh_exec. Same guard family as the LSF submit: a completed run
+// short-circuits on the .hams_direct_done marker (read back, exit 0); a
+// still-running first attempt holds the flock so a replay queues behind it
+// instead of double-running; a dead first attempt releases the lock (its
+// holder was killed), letting the replay rerun. The execRemote `timeout -s
+// KILL` wrapper bounds any lock wait.
 export function buildDirectCommand({ remoteDir, python, workerPath, workerArgs }) {
   const args = (workerArgs || []).map(String)
   if (!args.includes('--work-dir')) args.push('--work-dir', remoteDir)
-  return ['cd', shq(remoteDir), '&&', shq(python), shq(workerPath), ...args.map(shq)].join(' ')
+  return [
+    'cd', shq(remoteDir), '|| exit 9;',
+    'if [ -f .hams_direct_done ]; then echo \'[hams] already completed (marker present)\'; exit 0; fi;',
+    'exec 9>.hams_direct.lock; flock 9;',
+    'if [ -f .hams_direct_done ]; then echo \'[hams] already completed (marker present)\'; exit 0; fi;',
+    shq(python), shq(workerPath), ...args.map(shq), '&& touch .hams_direct_done',
+  ].join(' ')
 }
 
 export function parseJobId(text) {
