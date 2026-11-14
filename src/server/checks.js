@@ -1,11 +1,6 @@
 // Health checks. Local items run directly on this machine. Remote items are the
-// Overview button set, each an independent one-click check executed through
-// dsh-remote's rw_exec tool shell — there is no ssh channel of our own (remote
-// connectivity is delegated entirely to dsh-remote).
-// The buttons live in LOCAL projects only (remote projects get no sidebar):
-// a run borrows a live session from the target machine's remote project (a DSH
-// workspace inside a dsh-remote mirror) as the agent context — that session's cwd
-// binds rw_exec to the machine without touching the global active machine.
+// Overview button set, each an independent one-click check executed through the
+// dsh-ssh tool shell (ssh_exec by alias — zero gating, no borrowed session).
 // Successful outputs are parsed into rows (string[][]) so the client renders proper
 // columned tables; when a parser declines, the entry keeps its raw text and the
 // client falls back to plain-text rendering.
@@ -16,7 +11,7 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { resultText, executeSingle, errDetail } from './machines.js'
+import { execRemote, shq } from '../remote.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -75,89 +70,27 @@ export const REMOTE_CHECK_BUTTONS = [
   { id: 'scripts', item: 'Script sync' },
 ]
 
-// rw_exec has no machine parameter — it binds from the calling session's cwd (a cwd
-// inside a local mirror resolves to that mirror's machine). The caller passes the
-// remote project's OWN live session as the agent context (dsh-remote 0.8.54 bindingFor,
-// unchanged 0.8.51→0.8.94, reads exec.agent.session.header.cwd). A fabricated bare
-// {header:{cwd}} object does NOT work — the tool pipeline validates the session against
-// the live session store (`session "undefined" is not live in this store`), which is why
-// a real session object is required. The agent wrapper carries BOTH `session` and
-// `id`: rw_exec takes the background-job owner from `exec.agent.id`, and a wrapper
-// without it fails the whole call before the command runs. Coupling points to
-// re-verify when dsh-remote updates: that wrapper shape, the cwd shape and the
-// rw_exec result text format parsed below. Per-command budget: we ask rw_exec for
-// REMOTE_EXEC_TIMEOUT_MS (above dsh-remote's 20 s default) and keep our AbortSignal
-// REMOTE_EXEC_SIGNAL_MARGIN_MS above that, so the tool's in-band timeout marker
-// surfaces instead of a client-side abort. Promotion is disabled
-// (`promoteOnTimeout: false`): a borrowed agent has no job controller, so a command
-// moved to the background would keep running on the remote with nobody to collect
-// it. parseRwExecText still recognizes the promotion marker defensively (other
-// callers / older dsh-remote versions) so a still-running command is never judged ok.
-// The tools.execute call itself goes through executeSingle (the dsh-tools 0.2.2-rc.1
-// batch contract — see machines.js); that host coupling bit once when 0.2.1-rc.2's
-// single-call shape stopped being accepted.
+// ssh_exec by alias through the execRemote funnel (../remote.js): the command
+// is wrapped in a remote `timeout -s KILL` there, structured results come back
+// as { stdout, stderr, exitCode, timedOut }, and channel-open failures carry a
+// suspected-MaxSessions annotation. Per-command budget: REMOTE_EXEC_TIMEOUT_MS.
 const REMOTE_EXEC_TIMEOUT_MS = 40000
-const REMOTE_EXEC_SIGNAL_MARGIN_MS = 30000
-export function parseRwExecText(text) {
-  let raw = String(text ?? '')
-  // Promotion (dsh-remote 0.8.53+): the ENTIRE result becomes the marker plus a
-  // job_output/job_kill guidance line — no stdout, no stderr, no exit marker. The
-  // command keeps running on the remote, so this must never read as a clean exit.
-  const promoted = raw.match(/\[still running after \d+ms; moved to background job ([^\]]+)\]/)
-  if (promoted) return { stdout: '', stderr: '', exitCode: 0, timedOut: false, promotedJob: promoted[1] }
-  // rw_exec appends the trailing markers to the END of the joined text — after the
-  // stderr section — so strip them before splitting stdout from stderr.
-  const timedOut = /\[command timed out after \d+ms\]/.test(raw)
-  raw = raw.replace(/\[command timed out after \d+ms\]\s*$/, '').replace(/\[cancelled[^\]]*\]\s*$/, '')
-  let exitCode = 0
-  const m = raw.match(/\[exit code: (-?\d+)\]\s*$/)
-  if (m) { exitCode = Number(m[1]); raw = raw.slice(0, m.index) }
-  else if (/\[exit code:/.test(raw)) exitCode = 1 // marker present but malformed — treat as failure
-  let stdout = raw, stderr = ''
-  const errAt = stdout.indexOf('-- stderr --')
-  if (errAt >= 0) { stderr = stdout.slice(errAt + '-- stderr --'.length).trim(); stdout = stdout.slice(0, errAt) }
-  return { stdout: stdout.trimEnd(), stderr, exitCode, timedOut, promotedJob: '' }
-}
 
-// One rw_exec call → one result entry. opts.raw keeps the full stdout on the entry
-// (stdoutRaw) for callers that parse the output themselves.
-async function execViaToolShell(tools, agent, item, cmd, channel, { maxLines = 3, maxChars = 200, judge, raw = false } = {}) {
+// One ssh_exec call → one result entry. opts.raw keeps the full stdout on the
+// entry (stdoutRaw) for callers that parse the output themselves.
+async function execViaToolShell(ctx, alias, item, cmd, channel, { maxLines = 3, maxChars = 200, judge, raw = false } = {}) {
   const t0 = Date.now()
   const entry = { item, cmd, channel, ms: 0, ok: false }
-  try {
-    const r = await executeSingle(tools, 'rw_exec',
-      { command: cmd, timeoutMs: REMOTE_EXEC_TIMEOUT_MS, promoteOnTimeout: false },
-      {
-        callId: 'harnessams-check-' + Math.random().toString(36).slice(2, 8),
-        signal: AbortSignal.timeout(REMOTE_EXEC_TIMEOUT_MS + REMOTE_EXEC_SIGNAL_MARGIN_MS),
-        agent,
-      })
-    const text = resultText(r)
-    if (r.isError) {
-      entry.detail = text.slice(0, 400) || 'rw_exec returned an error'
-      return entry
-    }
-    const p = parseRwExecText(text)
-    entry.ok = p.exitCode === 0 && !p.timedOut && !p.promotedJob && (!judge || judge(p.stdout))
-    if (raw) entry.stdoutRaw = p.stdout.slice(0, 8000)
-    entry.result = (p.stdout || '').trim().split(/\r?\n/).slice(0, maxLines).join(' | ').slice(0, maxChars)
-    if (!entry.ok) {
-      entry.detail = p.promotedJob
-        ? `moved to background job ${p.promotedJob} (command still running on the remote)`
-        : (p.timedOut ? 'timed out; ' : '') + (p.stderr || `exit code ${p.exitCode}`)
-      entry.detail = entry.detail.slice(0, 300)
-    }
-  } catch (e) {
-    entry.detail = errDetail(e).slice(0, 300)
+  const r = await execRemote(ctx, alias, cmd, { timeoutMs: REMOTE_EXEC_TIMEOUT_MS })
+  entry.ok = r.ok && (!judge || judge(r.stdout))
+  if (raw) entry.stdoutRaw = (r.stdout || '').slice(0, 8000)
+  entry.result = (r.stdout || '').trim().split(/\r?\n/).slice(0, maxLines).join(' | ').slice(0, maxChars)
+  if (!entry.ok) {
+    entry.detail = (r.timedOut ? 'timed out; ' : '') + (r.stderr || `exit code ${r.exitCode}`)
+    entry.detail = String(entry.detail).slice(0, 300)
   }
   entry.ms = Date.now() - t0
   return entry
-}
-
-// Double-quote a shell word (remote paths/files): escape the characters bash treats
-// specially inside double quotes.
-function shq(s) {
-  return '"' + String(s ?? '').replace(/([$"\\`])/g, '\\$1') + '"'
 }
 
 // Recursively hash a local pipeline-scripts tree: relative POSIX path -> md5.
@@ -186,21 +119,20 @@ function collectScriptFiles(dir, limit = 50) {
   return out
 }
 
-// Run one Overview button. opts: { agent, remotePath, machine, ws }. Returns
+// Run one Overview button. opts: { machine, ws } where machine is a listMachines
+// record (alias + configured workspace root). Returns
 // { channel, results: [entry...] } — results is an array so every button renders in
 // the same results table.
-export async function runRemoteCheckButton(tools, id, opts = {}) {
-  if (!tools?.get?.('rw_exec')) throw new Error('rw_exec tool not registered (dsh-remote not installed?)')
-  if (opts.agent !== undefined && typeof opts.agent?.session?.header?.cwd !== 'string') {
-    throw new Error('runRemoteCheckButton: opts.agent must wrap a session with header.cwd')
-  }
-  const agent = opts.agent ?? undefined
-  const channel = agent ? 'dsh-remote (remote project session)' : 'dsh-remote (active machine)'
-  const wsPath = opts.remotePath || opts.machine?.workspace || '$HOME'
+export async function runRemoteCheckButton(ctx, id, opts = {}) {
+  if (!ctx?.tools?.get?.('ssh_exec')) throw new Error('ssh_exec tool not registered (@linxin666/dsh-ssh not installed?)')
+  const alias = opts.machine?.alias ?? opts.machine?.id
+  if (!alias) throw new Error('runRemoteCheckButton: opts.machine (a dsh-ssh host record) is required')
+  const channel = `dsh-ssh (${alias})`
+  const wsPath = opts.machine?.workspace || '$HOME'
   const wsq = shq(wsPath)
 
   if (id === 'load') {
-    const e = await execViaToolShell(tools, agent, 'Load', 'cat /proc/loadavg && nproc', channel,
+    const e = await execViaToolShell(ctx, alias, 'Load', 'cat /proc/loadavg && nproc', channel,
       { maxLines: 2, maxChars: 120, judge: (o) => o.trim().length > 0, raw: true })
     const row = parseLoadRow(e.stdoutRaw)
     delete e.stdoutRaw
@@ -212,7 +144,7 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
     // No head cap on the pipe: it would mask bjobs' own exit code (127 missing
     // binary, 255 empty queue) behind head's 0. The 8000-char stdoutRaw cap bounds
     // the parse instead; totals undercount past it and the entry is marked truncated.
-    const e = await execViaToolShell(tools, agent, 'LSF jobs', 'timeout 10 bjobs -a 2>&1', channel,
+    const e = await execViaToolShell(ctx, alias, 'LSF jobs', 'timeout 10 bjobs -a 2>&1', channel,
       { maxLines: 14, maxChars: 900, judge: (o) => o.trim().length > 0, raw: true })
     // LSF's bjobs exits 255 with "No job found" when the queue is simply empty —
     // a healthy state, not a check failure (verified live).
@@ -240,7 +172,7 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
       + ` com=$(grep -o '"completed": *[0-9]*' "$f" 2>/dev/null | head -1 | grep -o '[0-9]*$');`
       + ` printf '%s  [%s] %s/%s\\n' "$d" "\${st:-?}" "\${com:-?}" "\${tot:-?}";`
       + ' done'
-    const e = await execViaToolShell(tools, agent, 'Batch dirs', cmd, channel,
+    const e = await execViaToolShell(ctx, alias, 'Batch dirs', cmd, channel,
       { maxLines: 15, maxChars: 1200, judge: () => true, raw: true })
     const rows = parseBatchRows(e.stdoutRaw, wsPath)
     delete e.stdoutRaw
@@ -267,7 +199,7 @@ export async function runRemoteCheckButton(tools, id, opts = {}) {
     const cmd = 'cd ' + shq(remoteBase) + ' && md5sum ' + names.map(shq).join(' ') + ' 2>/dev/null'
       + '; echo __REMOTE_PY__; find . -maxdepth 4 -name \'*.py\' -not -path \'*/__pycache__/*\''
       + ' | sed \'s|^\\./||\' | sort | head -50'
-    const e = await execViaToolShell(tools, agent, 'Script sync', cmd, channel, { raw: true })
+    const e = await execViaToolShell(ctx, alias, 'Script sync', cmd, channel, { raw: true })
     if (!e.ok) { delete e.stdoutRaw; return { channel, results: [e] } }
     const rawOut = e.stdoutRaw ?? ''
     delete e.stdoutRaw

@@ -28,7 +28,7 @@
 //
 // Tool calls go through the registered tool surface (ctx.tools.execute via
 // callTool) — SmartAnaSim's spectre_* tools, this plugin's batch_* tools and
-// dsh-remote's rw_* — but verdicts are read from DISK ARTIFACTS
+// @linxin666/dsh-ssh's ssh_* — but verdicts are read from DISK ARTIFACTS
 // (sweep_progress.json / psf_index.json / .batch_job.json) wherever possible:
 // the pipeline's serialization of model-tool results is a launch-class TODO and
 // artifacts are the ground truth anyway (self-check spirit).
@@ -42,8 +42,7 @@ import { callTool, execRemote, uploadFile, downloadFile, shq } from '../remote.j
 import { readJob, readWorkspaceConfig, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
 import { readSettings } from './settings.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
-import { fetchMachines, sessionInMirror } from './machines.js'
-import { findRemoteProjectForMachine } from './remote.js'
+import { fetchMachines } from './machines.js'
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..') // src/
 export const SELFCHECK_ASSETS = path.join(PKG_ROOT, 'selfcheck')
@@ -150,7 +149,7 @@ function checkBudget(run) {
 // Prompt for the auto diagnosis sessions (English body, answer-language line)
 // ---------------------------------------------------------------------------
 
-export function buildSelfcheckPrompt({ scope, runDir, machine, remotePath, mirrorDir, projectTitle, failed, lang }) {
+export function buildSelfcheckPrompt({ scope, runDir, machine, remotePath, projectTitle, failed, lang }) {
   const lines = []
   lines.push('You are the diagnostic agent of the HarnessAMS workbench.')
   lines.push('')
@@ -158,9 +157,8 @@ export function buildSelfcheckPrompt({ scope, runDir, machine, remotePath, mirro
   lines.push(`- Self-check settings: mode=${scope?.mode} simulator=${scope?.simulator} `
     + `scheduler=${scope?.scheduler ?? 'n/a'} compute=local:${scope?.compute_local}/remote:${scope?.compute_remote}`)
   if (machine) {
-    lines.push(`- Machine: ${machine.name || machine.host} (${machine.username ? machine.username + '@' : ''}${machine.host}:${machine.port ?? 22})`)
-    if (remotePath) lines.push(`- Remote workspace path: ${remotePath}`)
-    if (mirrorDir) lines.push(`- Local mirror of that workspace: ${mirrorDir}`)
+    lines.push(`- Machine: ${machine.name || machine.host} (${machine.username ? machine.username + '@' : ''}${machine.host}:${machine.port ?? 22}, dsh-ssh alias "${machine.alias ?? machine.id}")`)
+    if (remotePath) lines.push(`- Remote root: ${remotePath}`)
   } else {
     lines.push('- Machine: local (this host)')
   }
@@ -184,11 +182,11 @@ export function buildSelfcheckPrompt({ scope, runDir, machine, remotePath, mirro
   lines.push('Instructions:')
   lines.push('- READ-ONLY diagnosis: do not create, modify, move, or delete anything.')
   if (machine) {
-    lines.push('- This session was created inside the machine\'s remote-project workspace, so dsh-remote binds its remote tools to that machine: you may run read-only commands on it (e.g. via the rw_* tools) to verify. If a remote tool errors out, say so and analyze from the evidence above instead.')
+    lines.push(`- The dsh-ssh plugin is installed, so you may run read-only commands on that machine via ssh_exec (alias "${machine.name || machine.host}") to verify. If a remote tool errors out, say so and analyze from the evidence above instead.`)
   } else {
     lines.push('- You may run read-only local commands to verify (the workspace is this machine\'s HarnessAMS workspace).')
   }
-  lines.push('- The likely fault families: missing simulator/python/node executable, dsh-remote connectivity or permissions (upload/write), LSF submission/queue, netlist/parse errors, compute-script numeric drift. Identify which one this is.')
+  lines.push('- The likely fault families: missing simulator/python/node executable, dsh-ssh connectivity or permissions (upload/write), LSF submission/queue, netlist/parse errors, compute-script numeric drift. Identify which one this is.')
   lines.push('- Give: (1) the most likely root cause, (2) the evidence for it, (3) the next concrete read-only command(s) to confirm, and, when obvious, (4) what a fix would look like — without applying it.')
   lines.push('- Keep the answer compact and structured.')
   lines.push('')
@@ -200,9 +198,8 @@ async function diagnoseSteps(run, steps, trigger) {
   const failed = steps.filter((s) => s && s.ok === false)
   if (!failed.length) return
   for (const s of failed) run._priv.diagnosed.add(s)
-  const { ctx, settings, machine, hit, localWorkspaceId, lang, project } = run._priv
-  const allRemote = machine && failed.every((s) => s.section === 'remote')
-  const workspaceId = allRemote ? hit.ws.id : localWorkspaceId
+  const { ctx, settings, machine, localWorkspaceId, lang, project } = run._priv
+  const workspaceId = localWorkspaceId
   const record = { trigger, status: 'failed', sessionId: null, error: null,
     title: 'HarnessAMS diagnosis: selfcheck @ ' + (machine ? (machine.name || machine.host) : 'local') }
   if (!workspaceId) {
@@ -214,9 +211,8 @@ async function diagnoseSteps(run, steps, trigger) {
   const prompt = buildSelfcheckPrompt({
     scope: run.scope,
     runDir: run.runDir,
-    machine: allRemote ? machine : null,
-    remotePath: allRemote ? hit.rp.remotePath : null,
-    mirrorDir: allRemote ? hit.rp.mirrorDir : null,
+    machine: machine ?? null,
+    remotePath: machine?.workspace ?? null,
     projectTitle: project?.title,
     failed,
     lang,
@@ -242,31 +238,19 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
   }
 
   let machine = null
-  let hit = null
-  let agent = null
+  let alias = null
   let remoteBase = null
   if (settings.run_mode === 'remote') {
-    const list = await fetchMachines(ctx.tools, req)
-    if (!list.ok) return { error: `dsh-remote machines unavailable: ${list.reason}`, code: 503 }
+    const list = await fetchMachines(ctx.tools)
+    if (!list.ok) return { error: `dsh-ssh hosts unavailable: ${list.reason}`, code: 503 }
     machine = list.machines.find((m) => m.id === settings.machine_id || m.name === settings.machine_id) || null
-    if (!machine) return { error: `no such dsh-remote machine: ${settings.machine_id}`, code: 404 }
-    hit = findRemoteProjectForMachine(ctx, machine)
-    if (!hit) {
-      return {
-        error: `no remote project for machine ${machine.name ?? machine.host} — create one from the HarnessAMS console page first`,
-        code: 409,
-      }
+    if (!machine) return { error: `no such dsh-ssh host: ${settings.machine_id}`, code: 404 }
+    if (!machine.workspace) {
+      return { error: `no remote root configured for ${machine.id} — set remote_machines["${machine.id}"] in harnessams.json`, code: 409 }
     }
-    const wrapped = sessionInMirror(ctx, hit.rp.mirrorDir)
-    if (!wrapped) {
-      return {
-        error: `no live session in the remote project "${hit.ws.title ?? hit.ws.path}" — switch to it once so a session keeps the connection, then retry`,
-        code: 409,
-      }
-    }
-    agent = wrapped.agent
+    alias = machine.id
     try {
-      remoteBase = resolveRemoteDir(hit.rp.remotePath, settings.remote_dir)
+      remoteBase = resolveRemoteDir(machine.workspace, settings.remote_dir)
     } catch (e) {
       return { error: String(e?.message ?? e), code: 400 }
     }
@@ -301,7 +285,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
     summary: null,
     diagnoses: [],
     _priv: {
-      ctx, sessionId, settings, project, lang, ws, machine, hit, agent, remoteBase,
+      ctx, sessionId, settings, project, lang, ws, machine, alias, remoteBase,
       localWorkspaceId, deadline: Date.now() + TOTAL_BUDGET_MS, current: null,
       diagnosed: new Set(),
     },
@@ -534,7 +518,7 @@ function skipRestForUnprepared(run, mode, sim, reason) {
     skipStep(run, { section, item: `remote parse + verify (${run._priv.settings.compute_script_remote})`, settingColumn: 'compute_remote' }, reason)
     skipStep(run, { section, item: 'batch_fetch + local cross-check', settingColumn: 'compute_remote' }, reason)
   } else {
-    skipStep(run, { section, item: 'golden upload (rw_upload)', settingColumn: 'machine' }, reason)
+    skipStep(run, { section, item: 'golden upload (ssh_upload)', settingColumn: 'machine' }, reason)
     skipStep(run, { section, item: `remote parse + verify (${run._priv.settings.compute_script_remote})`, settingColumn: 'compute_remote' }, reason)
     skipStep(run, { section, item: 'artifact download + local cross-check', settingColumn: 'compute_remote' }, reason)
   }
@@ -738,7 +722,7 @@ async function remoteSpectreChain(run) {
 }
 
 async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
-  const { ctx, settings, agent } = run._priv
+  const { ctx, settings, alias } = run._priv
   const lang = settings.compute_script_remote
   const wsConfig = readWorkspaceConfig().config
   const remotePython = wsConfig.remote_python || 'python3'
@@ -762,7 +746,7 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
         remoteDir: dir, parserPath, python: job?.remote_python ?? remotePython,
         node: remoteNode, lang, topo,
       })
-      const r = await execRemote(ctx, agent, cmd, { timeoutMs: 180_000 })
+      const r = await execRemote(ctx, alias, cmd, { timeoutMs: 180_000 })
       const json = parseMarkerJson(r.stdout)
       results[topo] = json
       const sum = verifySummary(topo, json, { prefix: false })
@@ -799,13 +783,13 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
           continue
         }
       } else {
-        // golden/direct mode: plain rw_download of the psf CSVs the remote parse produced
+        // golden/direct mode: plain ssh_download of the psf CSVs the remote parse produced
         const dir = remoteJoin(run._priv.remoteBase, run.id, topo)
         await fsp.mkdir(path.join(staging, 'psf'), { recursive: true })
         let got = 0
         for (let i = 0; i < 9; i++) {
           const name = `${String(i).padStart(2, '0')}_psf.csv`
-          const dl = await downloadFile(ctx, agent, remoteJoin(dir, 'psf', name), path.join(staging, 'psf', name))
+          const dl = await downloadFile(ctx, alias, remoteJoin(dir, 'psf', name), path.join(staging, 'psf', name))
           if (dl.ok) got += 1
         }
         if (got !== 9) {
@@ -826,13 +810,13 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
 }
 
 async function remoteGoldenChain(run) {
-  const { ctx, agent, settings } = run._priv
+  const { ctx, alias, settings } = run._priv
 
   // RN1 — upload the golden run trees + the verify flavors + the standalone
   // psf parser (spectre_psf_parse.py is stdlib-only, so it runs from the batch
   // dir without the whole scripts tree)
   const uploadStep = await timedStep(run, {
-    section: 'remote', item: 'golden upload (rw_upload)', settingColumn: 'machine',
+    section: 'remote', item: 'golden upload (ssh_upload)', settingColumn: 'machine',
   }, async () => {
     checkBudget(run)
     let parserSrc
@@ -862,7 +846,7 @@ async function remoteGoldenChain(run) {
         const target = path.join(staging, ...rel.split('/'))
         await fsp.mkdir(path.dirname(target), { recursive: true })
         await fsp.copyFile(local, target)
-        const up = await uploadFile(ctx, agent, local, remoteJoin(dir, rel))
+        const up = await uploadFile(ctx, alias, local, remoteJoin(dir, rel))
         if (up.ok) uploaded += 1
         else failed.push(`${topo}/${rel}: ${up.text.slice(0, 120)}`)
       }

@@ -88,7 +88,7 @@ export function validateSettings(input) {
     }
   }
   if (out.run_mode === 'remote' && !out.machine_id) {
-    return { error: 'run_mode=remote requires machine_id (pick a dsh-remote machine)' }
+    return { error: 'run_mode=remote requires machine_id (pick a dsh-ssh host alias)' }
   }
   return { settings: out }
 }
