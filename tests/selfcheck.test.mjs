@@ -4,8 +4,9 @@
 // The flows call startSelfcheck() DIRECTLY with a temp workspace config (the
 // route-level ws discovery is global state; guards are covered separately) and
 // drive a mock ctx.tools shell that:
-//   - answers rw_* (dsh-remote) with scripted text — every rw_exec command is
-//     bash -n validated here, same as server.test.mjs;
+//   - answers ssh_* (@linxin666/dsh-ssh) with scripted structured values —
+//     every ssh_exec command (wrapped in `timeout -s KILL ... sh -c "…"`)
+//     is bash -n validated here, same as server.test.mjs;
 //   - runs the REAL batch_* tools (makeTool(toolDefinitions(ctx))) so submit/
 //     poll/fetch logic is exercised for real against the mocked remote;
 //   - fakes the SmartAnaSim spectre_* boundary: assemble runs the real bundled
@@ -27,7 +28,7 @@ import { makeTool } from '../src/tool.js'
 import { defaultSettings, readSettings, validateSettings, writeSettings, settingsPath } from '../src/server/settings.js'
 import { startSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR } from '../src/server/selfcheck.js'
 import { verifyRun, siValue } from '../src/scripts/selfcheck/selfcheck_verify.mjs'
-import { assertValidShell, callRoute, getReq, makeMirrorHome, setDSHHome, clientSrc, assertDictKeys } from './helpers.mjs'
+import { assertValidShell, callRoute, getReq, setRemoteMachines, clientSrc, assertDictKeys } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -38,8 +39,10 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
 const rwExecCommands = []
 function guardShell(cmd) {
-  rwExecCommands.push(cmd)
+  // cmd arrives wrapped by execRemote (timeout -s KILL … sh -c "<cmd>") —
+  // validate the wrapper as-is, record it flattened for the payload assertions.
   assertValidShell(cmd)
+  rwExecCommands.push(String(cmd).replace(/\\"/g, '"'))
 }
 
 async function tmpDir() {
@@ -105,7 +108,7 @@ function remoteVerifyJson(topo) {
 function pollText() {
   return '__BJOB__\n4242 DONE node5\n__META__\n9\n__DIRS__\n9\n__PROG__\n'
     + JSON.stringify({ status: 'completed', total_points: 9, succeeded: 9, failed: 0 })
-    + '\n__ERR__\n\n[exit code: 0]'
+    + '\n__ERR__\n'
 }
 
 // ---------------------------------------------------------------------------
@@ -160,30 +163,32 @@ function makeHarness({ scenario = {} }) {
     },
   }
 
-  async function rwExec(command) {
+  // ssh_exec behavior script: commands arrive wrapped by execRemote; routing
+  // matches substrings inside the wrapper and answers with structured values.
+  async function sshExec(command) {
     guardShell(command)
     if (command.includes('bsub -q')) {
-      if (scenario.lsfSubmitFail) return { text: 'bsub: queue not available\n[exit code: 1]' }
-      return { text: 'Job <4242> is submitted to queue <normal>\n[exit code: 0]' }
+      if (scenario.lsfSubmitFail) return { success: false, exitCode: 1, timedOut: false, stdout: '', stderr: 'bsub: queue not available\n', durationMs: 3 }
+      return { success: true, exitCode: 0, timedOut: false, stdout: 'Job <4242> is submitted to queue <normal>\n', stderr: '', durationMs: 3 }
     }
     if (command.includes('spectre_sweep_worker.py')) {
-      if (scenario.directRunFail) return { text: 'worker crashed\n[exit code: 2]' }
-      return { text: '[sweep] done: 9 success / 0 partial / 0 failed\n[exit code: 0]' }
+      if (scenario.directRunFail) return { success: false, exitCode: 2, timedOut: false, stdout: '', stderr: 'worker crashed\n', durationMs: 3 }
+      return { success: true, exitCode: 0, timedOut: false, stdout: '[sweep] done: 9 success / 0 partial / 0 failed\n', stderr: '', durationMs: 3 }
     }
     if (command.includes('__BJOB__')) {
-      if (scenario.pollFail) return { text: 'bjobs: rejected\n[exit code: 255]' }
-      return { text: pollText() }
+      if (scenario.pollFail) return { success: false, exitCode: 255, timedOut: false, stdout: 'bjobs: rejected\n', stderr: '', durationMs: 3 }
+      return { success: true, exitCode: 0, timedOut: false, stdout: pollText(), stderr: '', durationMs: 3 }
     }
     if (command.includes('test -f errlog.txt')) {
-      return { text: '__STARTED__\n[exit code: 0]' }
+      return { success: true, exitCode: 0, timedOut: false, stdout: '__STARTED__\n', stderr: '', durationMs: 3 }
     }
     if (command.includes('spectre_psf_parse.py')) {
-      if (scenario.remoteVerifyFail) return { text: 'remote python exploded\n[exit code: 1]' }
+      if (scenario.remoteVerifyFail) return { success: false, exitCode: 1, timedOut: false, stdout: '', stderr: 'remote python exploded\n', durationMs: 3 }
       const topo = /--topo (lpf|hpf)/.exec(command)?.[1] ?? 'lpf'
-      return { text: `[selfcheck] ${JSON.stringify(remoteVerifyJson(topo))}\n[exit code: 0]` }
+      return { success: true, exitCode: 0, timedOut: false, stdout: `[selfcheck] ${JSON.stringify(remoteVerifyJson(topo))}\n`, stderr: '', durationMs: 3 }
     }
-    if (command.includes('wc -l')) return { text: '0\n[exit code: 0]' }
-    if (command.includes('tar czf')) return { text: '1024\n[exit code: 0]' } // fetch pack (archive itself is garbage → extraction falls back)
+    if (command.includes('wc -l')) return { success: true, exitCode: 0, timedOut: false, stdout: '0\n', stderr: '', durationMs: 3 }
+    if (command.includes('tar czf')) return { success: true, exitCode: 0, timedOut: false, stdout: '1024\n', stderr: '', durationMs: 3 } // fetch pack (archive itself is garbage → extraction falls back)
     if (command.includes('head -200')) {
       // per-file fallback listing: point metas + psf CSVs
       const lines = []
@@ -191,19 +196,19 @@ function makeHarness({ scenario = {} }) {
         const n = String(i).padStart(2, '0')
         lines.push(`./${n}/point_meta.json`, `./psf/${n}_psf.csv`)
       }
-      return { text: lines.join('\n') + '\n[exit code: 0]' }
+      return { success: true, exitCode: 0, timedOut: false, stdout: lines.join('\n') + '\n', stderr: '', durationMs: 3 }
     }
-    return { text: '[exit code: 0]' }
+    return { success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 3 }
   }
 
-  async function rwDownload(args) {
+  async function sshDownload(args) {
     downloads.push(args)
-    const remote = String(args.path)
+    const remote = String(args.remotePath)
     const local = path.resolve(args.localPath)
     await fsp.mkdir(path.dirname(local), { recursive: true })
     if (remote.endsWith('.tgz')) {
       await fsp.writeFile(local, Buffer.from('not-a-real-tgz')) // forces the per-file fallback
-      return { text: `downloaded ${remote}\n[exit code: 0]` }
+      return { ok: true, bytes: 16 }
     }
     const topo = /\/(lpf|hpf)(_|\b)/.exec(remote)?.[1] ?? 'lpf'
     if (remote.endsWith('point_meta.json')) {
@@ -227,44 +232,46 @@ function makeHarness({ scenario = {} }) {
     } else {
       await fsp.writeFile(local, '', 'utf8')
     }
-    return { text: `downloaded ${remote}\n[exit code: 0]` }
+    return { ok: true, bytes: 128 }
   }
 
+  const HOSTS = [
+    { alias: 'node1', host: '192.0.2.10', port: 22, user: 'op', auth: 'key', keyReady: true },
+    // mock-only alias: present in the registry, absent from remote_machines
+    { alias: 'lab9', host: '192.0.2.90', port: 22, user: 'op', auth: 'key', keyReady: true },
+  ]
   const tools = {
     register: () => {},
     get: (name) => {
-      if (name.startsWith('rw_')) return { name }
+      if (name.startsWith('ssh_')) return { name }
       if (batchTools.has(name)) return batchTools.get(name)
       if (spectre[name]) return { name }
       return undefined
     },
     execute: async (input) => {
-      // ToolBatchInput (dsh-tools 0.2.2-rc.1): record the unwrapped single call so
-      // execLog assertions keep reading {name, arguments(object), agent}; id/signal
-      // ride along from the call/batch for the contract pin below.
+      // ToolBatchInput (dsh-tools 0.2.2-rc.x): record the unwrapped single call so
+      // execLog assertions keep reading {name, arguments(object)}; id/signal ride
+      // along from the call/batch for the contract pin below.
       const call = input.calls[0]
       const view = { id: call.id, name: call.name,
-        arguments: JSON.parse(call.arguments || '{}'), agent: input.agent, signal: input.signal }
+        arguments: JSON.parse(call.arguments || '{}'), signal: input.signal }
       execLog.push(view)
       const reply = (result) => ({ results: [{ callId: call.id, result }] })
       const name = view.name
       const args = view.arguments ?? {}
-      if (name === 'rw_machines') {
-        return reply({ isError: false, value: { text: '- m1 "node1" [native] op@192.0.2.10:22\n  auth: key workspace=/home/op/sim' } })
+      if (name === 'ssh_list') {
+        return reply({ isError: false, value: { hosts: HOSTS } })
       }
-      if (name === 'rw_exec') {
-        if (view.agent?.session?.header?.cwd == null) {
-          return reply({ isError: true, value: { text: 'session "undefined" is not live in this store' } })
-        }
-        const r = await rwExec(args.command)
-        return reply({ isError: false, value: { text: r.text } })
+      if (name === 'ssh_exec') {
+        const v = await sshExec(args.command)
+        return reply({ isError: false, value: v })
       }
-      if (name === 'rw_upload') {
-        uploads.push({ localPath: args.localPath, path: args.path })
-        return reply({ isError: false, value: { text: `uploaded 128 bytes to ${args.path}\n[exit code: 0]` } })
+      if (name === 'ssh_upload') {
+        uploads.push({ localPath: args.localPath, remotePath: args.remotePath })
+        return reply({ isError: false, value: { ok: true, transferredBytes: 128, files: 1 } })
       }
-      if (name === 'rw_download') {
-        return reply({ isError: false, value: { text: (await rwDownload(args)).text } })
+      if (name === 'ssh_download') {
+        return reply({ isError: false, value: await sshDownload(args) })
       }
       if (spectre[name]) {
         try {
@@ -292,7 +299,6 @@ function makeHarness({ scenario = {} }) {
     tools,
     workspaceRegistry: { list: () => [] },
     get: (n) => {
-      if (n === 'sessions') return { list: () => scenario.sessions ?? [] }
       if (n === 'sessionController') {
         return {
           create: async ({ workspaceId }) => { scCalls.create.push(workspaceId); return { sessionId: 'diag-' + (scCalls.create.length) } },
@@ -310,24 +316,6 @@ function makeHarness({ scenario = {} }) {
     __resolveHang: () => { const r = hangResolve; hangResolve = null; r?.() },
   })
   return ctx
-}
-
-// Mirror + registry setup for remote flows (DSH_HOME layout, like diagnose.test.mjs).
-function setupRemoteEnv(ctx, sessionId, projectPath) {
-  const { home, mirror: mirrorDir } = makeMirrorHome({
-    host: '192.0.2.10', port: 22, user: 'op', remotePath: '/home/op/sim',
-    segments: ['h1', 'ws1'],
-  })
-  const restoreHome = setDSHHome(home)
-  ctx.workspaceRegistry.list = () => [
-    { id: 'ws-local', path: projectPath, title: 'Local project', sessionIds: [sessionId] },
-    { id: 'ws-remote', path: mirrorDir, title: 'node1 (remote)', sessionIds: ['sess-remote-1'] },
-  ]
-  return {
-    mirrorDir,
-    remotePath: '/home/op/sim',
-    restore: () => { restoreHome(); fs.rmSync(home, { recursive: true, force: true }) },
-  }
 }
 
 async function waitDone(runId, ws, timeoutMs = 60_000) {
@@ -371,16 +359,15 @@ async function startFlow({ scenario = {}, settings = {}, sessions, remote = fals
   const merged = { ...defaultSettings(), ...settings }
   await writeSettings(projectPath, merged)
 
-  let env = null
+  let restoreMachines = null
   if (remote) {
-    env = setupRemoteEnv(ctx, sessionId, projectPath)
-    // one live session inside the machine's mirror unless the scenario overrides
-    scenario.sessions = scenario.sessions ?? [{ id: 'sess-remote-1', header: { cwd: env.mirrorDir } }]
-  } else {
-    ctx.workspaceRegistry.list = () => [
-      { id: 'ws-local', path: projectPath, title: 'Local project', sessionIds: [sessionId] },
-    ]
+    // alias node1 -> remote root, hermetic via the env override (lab9 stays
+    // unconfigured for the no-root guard test)
+    restoreMachines = setRemoteMachines({ node1: '/home/op/sim' })
   }
+  ctx.workspaceRegistry.list = () => [
+    { id: 'ws-local', path: projectPath, title: 'Local project', sessionIds: [sessionId] },
+  ]
   const ws = { config: { workspace_root: wsRoot }, configPath: path.join(wsRoot, 'harnessams.json') }
   const start = await startSelfcheck(ctx, {
     sessionId,
@@ -390,7 +377,7 @@ async function startFlow({ scenario = {}, settings = {}, sessions, remote = fals
     req: {},
   })
   const restoreAll = () => {
-    env?.restore()
+    restoreMachines?.()
     if (prevScripts === undefined) delete process.env.HARNESSAMS_SIM_SCRIPTS_DIR
     else process.env.HARNESSAMS_SIM_SCRIPTS_DIR = prevScripts
   }
@@ -623,16 +610,6 @@ test('route: selfcheck POST rejects unknown session / remote project', async () 
 
   const unknown = await driveRoute(routes, body({ sessionId: 'ghost' }))
   assert.equal(unknown.code, 404)
-
-  // remote project: the session belongs to the workspace inside a dsh-remote mirror
-  const env = setupRemoteEnv(ctx, 's1', projectPath)
-  try {
-    const remote = await driveRoute(routes, body({ sessionId: 'sess-remote-1' }))
-    assert.equal(remote.code, 400)
-    assert.match(remote.body.error, /local project/)
-  } finally {
-    env.restore()
-  }
 })
 
 // ---------------------------------------------------------------------------
@@ -653,7 +630,7 @@ test('flow: simulator=none + local (python compute)', async () => {
     ])
     assert.ok(items.every(([, ok]) => ok === true), JSON.stringify(items))
     // local-only: not a single rw_* call happened
-    assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('rw_')).length, 0)
+    assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0)
     // artifacts landed under the workspace selfcheck root
     assert.ok(fs.existsSync(path.join(run.runDir, 'lpf', 'psf', '00_psf.csv')))
     assert.ok(fs.existsSync(path.join(run.runDir, 'selfcheck_run.json')))
@@ -693,7 +670,7 @@ test('flow: simulator=spectre + local', async () => {
 
 test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) passes', async () => {
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'm1', scheduler: 'lsf', compute_script_remote: 'js' },
+    settings: { run_mode: 'remote', machine_id: 'node1', scheduler: 'lsf', compute_script_remote: 'js' },
     scenario: { lsfSubmitFail: true },
     remote: true,
   })
@@ -721,21 +698,21 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) pass
     assert.match(prompt, /Answer in English\./)
     assert.equal(f.ctx.__scCalls.rename[0].title, 'HarnessAMS diagnosis: selfcheck @ node1')
 
-    // every rw_exec command went through bash -n and the borrow discipline
-    const execs = f.ctx.__execLog.filter((x) => x.name === 'rw_exec')
+    // every ssh_exec command went through bash -n and targeted the alias
+    const execs = f.ctx.__execLog.filter((x) => x.name === 'ssh_exec')
     assert.ok(execs.length > 0)
     for (const e of execs) {
-      assert.equal(e.arguments.promoteOnTimeout, false)
-      assert.equal(typeof e.agent?.session?.header?.cwd, 'string')
+      assert.equal(e.arguments.alias, 'node1') // zero gating: alias only
+      assert.match(e.arguments.command, /^timeout -s KILL \d+s sh -c /) // guaranteed-kill wrapper
       assert.ok(e.id && e.signal instanceof AbortSignal) // batch call id + batch signal
     }
     // remote compute chose node for the js channel
     const verifyCmd = rwExecCommands.find((c) => c.includes('selfcheck_verify.mjs'))
     assert.ok(verifyCmd, 'remote js verify command missing: ' + JSON.stringify(rwExecCommands))
-    assert.match(verifyCmd, /"?node"?\s+\.\/selfcheck_verify\.mjs --run-dir \. --topo (lpf|hpf)/)
+    assert.match(verifyCmd, /selfcheck_verify\.mjs --run-dir \. --topo (lpf|hpf)/)
 
     // R4 cross-check ran the local python verify on fetched artifacts
-    assert.ok(f.ctx.__downloads.some((d) => /_psf\.csv$/.test(d.path)))
+    assert.ok(f.ctx.__downloads.some((d) => /_psf\.csv$/.test(d.remotePath)))
   } finally { f.restoreAll() }
 })
 
@@ -744,7 +721,7 @@ test('flow: spectre + remote — scheduler=direct fails → verdict fails (nothi
   // primary-attempt failures unconditionally — a broken direct submit would
   // otherwise still report remote:'ok' / summary.ok:true.
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'm1', scheduler: 'direct' },
+    settings: { run_mode: 'remote', machine_id: 'node1', scheduler: 'direct' },
     scenario: { directRunFail: true },
     remote: true,
   })
@@ -763,7 +740,7 @@ test('flow: spectre + remote — scheduler=direct fails → verdict fails (nothi
 
 test('flow: spectre + remote — fallback also fails → final diagnosis covers the rest', async () => {
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'm1', scheduler: 'lsf' },
+    settings: { run_mode: 'remote', machine_id: 'node1', scheduler: 'lsf' },
     scenario: { lsfSubmitFail: true, directRunFail: true },
     remote: true,
   })
@@ -784,7 +761,7 @@ test('flow: spectre + remote — fallback also fails → final diagnosis covers 
 
 test('flow: none + remote — upload, remote compute (python), download + js cross-check', async () => {
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'm1', simulator: 'none', compute_script_local: 'js' },
+    settings: { run_mode: 'remote', machine_id: 'node1', simulator: 'none', compute_script_local: 'js' },
     remote: true,
   })
   try {
@@ -800,15 +777,15 @@ test('flow: none + remote — upload, remote compute (python), download + js cro
     assert.equal(uploads.length, expected,
       `expected ${expected} uploads (golden files + verify scripts + parser per topo)`)
     const PREFIX = '/home/op/sim/.harnessams/selfcheck/rc_'
-    assert.ok(uploads.every((u) => u.path.startsWith(PREFIX)),
-      'unexpected upload paths: ' + JSON.stringify(uploads.filter((u) => !u.path.startsWith(PREFIX)).map((u) => u.path)))
-    assert.ok(uploads.some((u) => u.path.endsWith('/spectre_psf_parse.py')))
+    assert.ok(uploads.every((u) => u.remotePath.startsWith(PREFIX)),
+      'unexpected upload paths: ' + JSON.stringify(uploads.filter((u) => !u.remotePath.startsWith(PREFIX)).map((u) => u.remotePath)))
+    assert.ok(uploads.some((u) => u.remotePath.endsWith('/spectre_psf_parse.py')))
     // remote verify command used python for compute_script_remote=python
     const verifyCmd = rwExecCommands.find((c) => c.includes('selfcheck_verify.py'))
     assert.ok(verifyCmd)
-    assert.match(verifyCmd, /\.\/spectre_psf_parse\.py --work-dir \. --format csv/)
+    assert.match(verifyCmd, /spectre_psf_parse\.py --work-dir \. --format csv/)
     // downloads: 9 CSVs per topo
-    assert.equal(f.ctx.__downloads.filter((d) => /_psf\.csv$/.test(d.path)).length, 18)
+    assert.equal(f.ctx.__downloads.filter((d) => /_psf\.csv$/.test(d.remotePath)).length, 18)
     const cross = run.steps.find((s) => /artifact download/.test(s.item))
     assert.equal(cross.ok, true)
     assert.match(cross.result, /local js/)
@@ -817,7 +794,7 @@ test('flow: none + remote — upload, remote compute (python), download + js cro
 
 test('flow: remote verify failure skips the cross-check step', async () => {
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'm1', simulator: 'none' },
+    settings: { run_mode: 'remote', machine_id: 'node1', simulator: 'none' },
     scenario: { remoteVerifyFail: true },
     remote: true,
   })
@@ -834,40 +811,30 @@ test('flow: remote verify failure skips the cross-check step', async () => {
 // 8) start guards + re-entry
 // ---------------------------------------------------------------------------
 
-test('start guards: unknown machine / no remote project / no live session', async () => {
+test('start guards: unknown machine / no remote root', async () => {
   const f1 = await startFlow({ settings: { run_mode: 'remote', machine_id: 'nope' }, remote: true })
   try {
     assert.equal(f1.start.code, 404)
+    assert.match(f1.start.error, /no such dsh-ssh host: nope/)
   } finally { f1.restoreAll() }
 
-  // machine exists but no workspace registered inside its mirror → 409
+  // alias present in the dsh-ssh registry but absent from remote_machines -> 409
   const tmp = await tmpDir()
   const projectPath = path.join(tmp, 'project')
   await fsp.mkdir(projectPath, { recursive: true })
   const ctx = makeHarness({})
-  const env = setupRemoteEnv(ctx, 's1', projectPath)
+  const restore = setRemoteMachines({ node1: '/home/op/sim' })
   try {
-    ctx.workspaceRegistry.list = () => [{ id: 'ws-local', path: projectPath, title: 'P', sessionIds: ['s1'] }]
-    await writeSettings(projectPath, { ...defaultSettings(), run_mode: 'remote', machine_id: 'm1' })
+    await writeSettings(projectPath, { ...defaultSettings(), run_mode: 'remote', machine_id: 'lab9' })
     const r = await startSelfcheck(ctx, {
       sessionId: 's1', project: { id: 'ws-local', path: projectPath, title: 'P' }, lang: 'en',
       ws: { config: { workspace_root: path.join(tmp, 'wsroot') } }, req: {},
     })
     assert.equal(r.code, 409)
-    assert.match(r.error, /no remote project/)
-
-    // remote project registered but no live session in it → 409
-    ctx.workspaceRegistry.list = () => [
-      { id: 'ws-local', path: projectPath, title: 'P', sessionIds: ['s1'] },
-      { id: 'ws-remote', path: env.mirrorDir, title: 'R', sessionIds: [] },
-    ]
-    const r2 = await startSelfcheck(ctx, {
-      sessionId: 's1', project: { id: 'ws-local', path: projectPath, title: 'P' }, lang: 'en',
-      ws: { config: { workspace_root: path.join(tmp, 'wsroot') } }, req: {},
-    })
-    assert.equal(r2.code, 409)
-    assert.match(r2.error, /no live session/)
-  } finally { env.restore() }
+    assert.match(r.error, /no remote root configured for lab9/)
+  } finally {
+    restore()
+  }
 })
 
 test('re-entry: a second start while running gets 409', async () => {
@@ -896,15 +863,16 @@ test('buildSelfcheckPrompt: english body, artifacts pointer, answer-language lin
   const p = buildSelfcheckPrompt({
     scope: { mode: 'remote', simulator: 'none', scheduler: null, compute_local: 'js', compute_remote: 'python' },
     runDir: 'C:/ws/selfcheck/rc_x',
-    machine: { name: 'node1', host: '192.0.2.10', port: 22, username: 'op' },
-    remotePath: '/home/op/sim', mirrorDir: 'C:/mirror', projectTitle: 'P',
+    machine: { id: 'node1', name: 'node1', host: '192.0.2.10', port: 22, username: 'op' },
+    remotePath: '/home/op/sim', projectTitle: 'P',
     failed: [{ section: 'remote', item: 'golden upload', ok: false, ms: 5, result: 'upload failed', detail: 'x'.repeat(3000) }],
     lang: 'zh',
   })
   assert.match(p, /diagnostic agent of the HarnessAMS workbench/)
   assert.match(p, /mode=remote simulator=none/)
   assert.match(p, /Run artifacts: C:\/ws\/selfcheck\/rc_x/)
-  assert.match(p, /Remote workspace path: \/home\/op\/sim/)
+  assert.match(p, /Remote root: \/home\/op\/sim/)
+  assert.match(p, /dsh-ssh alias "node1"/)
   assert.ok(p.length < 6000) // sanitize caps held
   assert.match(p, /Answer in Chinese\./)
 })
@@ -949,9 +917,8 @@ test('persist serialization: status file stays valid JSON through a run and matc
 test('client static contract: keys bilingual, endpoints wired, two-row table, poll', async () => {
   const src = await clientSrc()
   assertDictKeys(src, [
-    'pset.title', 'pset.dirLabel', 'pset.dirLocalHint', 'pset.dirRemoteRel', 'pset.browse',
-    'pset.browseTitle', 'pset.browseNoMirror', 'pset.browseUp', 'pset.browseHere',
-    'pset.currentMirrorDir', 'pset.pickSubdir', 'pset.colMode', 'pset.colMachine', 'pset.colSched',
+    'pset.title', 'pset.dirLabel', 'pset.dirLocalHint', 'pset.dirRemoteRel',
+    'pset.colMode', 'pset.colMachine', 'pset.colSched',
     'pset.colSim', 'pset.colCompLocal', 'pset.colCompRemote', 'pset.mode.local', 'pset.mode.remote',
     'pset.sched.lsf', 'pset.sched.direct', 'pset.sim.spectre', 'pset.sim.none', 'pset.comp.python',
     'pset.comp.js', 'pset.noMachine', 'pset.saveFailed',
@@ -963,7 +930,6 @@ test('client static contract: keys bilingual, endpoints wired, two-row table, po
   assert.ok(src.includes("API + '/selfcheck?id='"), 'client must poll /api/selfcheck by run id')
   assert.ok(src.includes('function ProjectSelfcheck('))
   assert.ok(src.includes('function SettingsTable('))
-  assert.ok(src.includes('function RemoteDirBrowse('))
   assert.ok(src.includes('function SelfcheckSteps('))
   assert.ok(src.includes('SETTING_COLS'), 'column config drives the two-row table')
   assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath })'), 'mounted in the Overview tab')

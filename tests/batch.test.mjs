@@ -1,11 +1,13 @@
-// Generic remote batch tools: target resolution, upload/submit/poll/fetch against
-// a mocked dsh-remote tool shell (no network, no SSH, no LSF required). The
-// scheduler=direct path is the node-local foreground mode (no bsub).
-// The worker-script upload tree comes from the workspace sim_scripts_dir; tests
-// point HARNESSAMS_SIM_SCRIPTS_DIR at a self-built fixture so they never depend
-// on the real SmartAnaSim checkout.
-// The rw_* text protocols (parseRwMachinesText / parseRwExecText) are covered by
-// the fuller contract suite in server.test.mjs.
+// Generic remote batch tools: machine resolution, upload/submit/poll/fetch against
+// a mocked @linxin666/dsh-ssh tool shell (structured values, no network, no SSH, no
+// LSF required). The scheduler=direct path is the node-local foreground mode (no
+// bsub). The worker-script upload tree comes from the workspace sim_scripts_dir;
+// tests point HARNESSAMS_SIM_SCRIPTS_DIR at a self-built fixture and
+// HARNESSAMS_REMOTE_MACHINES at an inline alias->root map so they never depend on
+// the real SmartAnaSim checkout or the real harnessams.json.
+// The ssh_exec wrapping (timeout -s KILL) and the value shapes live in
+// remote.test.mjs / server.test.mjs; submit/direct idempotency guards are asserted
+// here against the generated commands.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
@@ -15,12 +17,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { resolveTarget } from '../src/remote.js'
-import { parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
-import { makeMirrorHome } from './helpers.mjs'
+import { resolveMachine } from '../src/remote.js'
+import { buildDirectCommand, buildSubmitCommand, parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
+import { setRemoteMachines } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
-const OLD_DSH_HOME = process.env.DSH_HOME
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
 
 function tmp(prefix) {
@@ -45,81 +46,75 @@ function makeScriptsRoot() {
 const SCRIPTS_ROOT = makeScriptsRoot()
 process.env.HARNESSAMS_SIM_SCRIPTS_DIR = SCRIPTS_ROOT
 
-function setupMirror() {
-  const { home, mirror } = makeMirrorHome({
-    host: '192.0.2.11', port: 22, user: 'op', remotePath: '/home/op/sim',
-    segments: ['node1-192.0.2.11-22', 'sim'],
-  })
-  process.env.DSH_HOME = home
-  return { home, mirror }
-}
+const REMOTE_ROOT = '/home/op/sim'
+
+// Remote-root map for the whole file (alias node1 -> REMOTE_ROOT). Set for the
+// process lifetime — the reject test clears it briefly and restores inline.
+setRemoteMachines({ node1: REMOTE_ROOT })
 
 function restoreEnv() {
-  if (OLD_DSH_HOME === undefined) delete process.env.DSH_HOME
-  else process.env.DSH_HOME = OLD_DSH_HOME
+  setRemoteMachines({ node1: REMOTE_ROOT })
   if (OLD_SIM_SCRIPTS === undefined) process.env.HARNESSAMS_SIM_SCRIPTS_DIR = SCRIPTS_ROOT
   else process.env.HARNESSAMS_SIM_SCRIPTS_DIR = OLD_SIM_SCRIPTS
 }
 
-const MACHINES_TEXT = '- node1  "node1"  [native]  op@192.0.2.11:22  [CURRENT]\n'
-  + '    auth: key:secret workspace=/home/op/sim\n'
+const HOSTS = [
+  { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true },
+  // an alias present in the dsh-ssh registry but absent from remote_machines —
+  // the "configured host, no remote root" display state
+  { alias: 'lab9', host: '192.0.2.99', port: 22, user: 'op', auth: 'key', keyReady: true },
+]
 
-function pollText({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN' } = {}) {
+function pollValue({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN' } = {}) {
   const prog = JSON.stringify({
     status, total_points: total, completed: meta, succeeded: meta, failed: 0,
     simulator: 'spectre', compute_node: 'node3',
   })
-  return `__BJOB__\n${bjobs}\n__META__\n${meta}\n__DIRS__\n${meta}\n`
+  const stdout = `__BJOB__\n${bjobs}\n__META__\n${meta}\n__DIRS__\n${meta}\n`
     + `__PROG__\n${prog}\n__ERR__\n`
+  return { success: true, exitCode: 0, timedOut: false, stdout, stderr: '', durationMs: 3 }
 }
 
-function makeCtx({ mirror, sessions = null, poll = {}, archive = null, failUpload = false,
-  existing = 0 } = {}) {
+// The ssh_* tool shell mock: structured values per the installed dsh-ssh
+// src/tools.ts (ssh_exec failures are values, not throws). Commands arrive
+// already wrapped by execRemote (timeout -s KILL ... -- sh -c "..."); routing
+// matches substrings inside the wrapper, exactly like the assertions below.
+function makeCtx({ poll = {}, archive = null, failUpload = false, existing = 0 } = {}) {
   const calls = []
-  const live = sessions ?? [{ header: { cwd: mirror } }]
-  const text = (s) => ({ isError: false, content: [{ type: 'text', text: s }] })
+  const ok = (value) => ({ isError: false, value })
   return {
     calls,
-    get: (name) => (name === 'sessions' ? { list: () => live } : undefined),
     tools: {
-      get: (name) => (['rw_machines', 'rw_exec', 'rw_upload', 'rw_download'].includes(name)
+      get: (name) => (['ssh_list', 'ssh_exec', 'ssh_upload', 'ssh_download'].includes(name)
         ? { name } : undefined),
       execute: async (input) => {
-        // ToolBatchInput (dsh-tools 0.2.2-rc.1): unwrap the one call so recorded
-        // entries keep the {name, arguments(object), agent} view the assertions read.
         const call = input.calls[0]
-        const view = { name: call.name, arguments: JSON.parse(call.arguments || '{}'), agent: input.agent }
+        const view = { name: call.name, arguments: JSON.parse(call.arguments || '{}') }
         calls.push(view)
         const reply = (result) => ({ results: [{ callId: call.id, result }] })
-        // Regression: the borrowed live session must reach the tool pipeline as
-        // exec.agent = { session } (dsh-remote reads agent.session.header.cwd).
-        // A nested { agent: { session } } silently breaks every rw_* call.
-        if (view.name !== 'rw_machines') {
-          assert.equal(typeof view.agent?.session?.header?.cwd, 'string',
-            `${view.name}: agent context must expose session.header.cwd`)
-        }
         const a = view.arguments || {}
-        if (view.name === 'rw_machines') return reply(text(MACHINES_TEXT))
-        if (view.name === 'rw_upload') {
-          if (failUpload) return reply({ isError: true, content: [{ type: 'text', text: 'upload denied' }] })
-          return reply(text(`uploaded 12 bytes from ${a.localPath} → ${a.path}`))
+        if (view.name === 'ssh_list') return reply(ok({ hosts: HOSTS }))
+        if (view.name === 'ssh_upload') {
+          if (failUpload) return reply(ok({ ok: false, error: 'upload denied' }))
+          return reply(ok({ ok: true, transferredBytes: 12, files: 1 }))
         }
-        if (view.name === 'rw_download') {
+        if (view.name === 'ssh_download') {
           if (archive) fs.copyFileSync(archive, a.localPath)
-          return reply(text(`downloaded bytes from ${a.path} → ${a.localPath}`))
+          return reply(ok({ ok: true, bytes: 512 }))
         }
+        assert.equal(a.alias, 'node1', `${view.name}: ssh_* calls target the alias`)
         const cmd = String(a.command || '')
-        if (cmd.includes('__BJOB__')) return reply(text(pollText(poll)))
-        if (cmd.includes('sleep 1; bjobs')) return reply(text('777 RUN\n__STARTED__\n'))
+        if (cmd.includes('__BJOB__')) return reply(ok(pollValue(poll)))
+        if (cmd.includes('sleep 1; bjobs')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: '777 RUN\n__STARTED__\n', stderr: '', durationMs: 3 }))
         if (cmd.includes('bsub -q')) {
-          return reply(text('Job <777> is submitted to queue <normal>.\n'))
+          return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: 'Job <777> is submitted to queue <normal>.\n', stderr: '', durationMs: 3 }))
         }
-        if (cmd.includes('tar czf .batch_fetch.tgz')) return reply(text('512\n'))
+        if (cmd.includes('tar czf .batch_fetch.tgz')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: '512\n', stderr: '', durationMs: 3 }))
         if (cmd.includes('| sort | head -200')) {
-          return reply(text('./00/point_meta.json\n./00/netlist.scs.raw/sp.sp\n'))
+          return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: './00/point_meta.json\n./00/netlist.scs.raw/sp.sp\n', stderr: '', durationMs: 3 }))
         }
-        if (cmd.includes('wc -l')) return reply(text(`${existing}\n`))
-        return reply(text(''))
+        if (cmd.includes('wc -l')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: `${existing}\n`, stderr: '', durationMs: 3 }))
+        return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 3 }))
       },
     },
   }
@@ -184,20 +179,40 @@ test('path guards and poll parsing', () => {
   assert.throws(() => sanitizeRel('../x.py'), /unsafe relative path/)
   assert.throws(() => resolveRemoteDir('/home/op/sim', '../evil'), /escapes the remote workspace/)
   assert.equal(resolveRemoteDir('/home/op/sim', 'batch1'), '/home/op/sim/batch1')
-  const parsed = parsePollOutput(pollText({ meta: 2, total: 2 }), { total: 2 })
+  const parsed = parsePollOutput(pollValue({ meta: 2, total: 2 }).stdout, { total: 2 })
   assert.equal(parsed.state, 'completed')
   assert.equal(parsed.completed, 2)
-  const empty = parsePollOutput(pollText({ meta: 2, bjobs: 'No job found' }), { total: 2 })
+  const empty = parsePollOutput(pollValue({ meta: 2, bjobs: 'No job found' }).stdout, { total: 2 })
   assert.equal(empty.state, 'completed')
-  const running = parsePollOutput(pollText({ meta: 1, total: 2, status: 'running' }), { total: 2 })
+  const running = parsePollOutput(pollValue({ meta: 1, total: 2, status: 'running' }).stdout, { total: 2 })
   assert.equal(running.state, 'running')
 })
 
+test('submit/direct commands carry the replay idempotency guards', () => {
+  const submit = buildSubmitCommand({
+    remoteDir: '/home/op/sim/batch1', python: 'python3',
+    workerPath: '/root/.harnessams/scripts/spectre/spectre_sweep_worker.py', workerArgs: [],
+  })
+  // marker read-back (twice: fast path + inside the flock) + flock + write-on-success
+  assert.ok((submit.match(/cat \.hams_submitted/g) ?? []).length >= 2, 'marker must be read back, not skipped')
+  assert.ok(submit.includes('flock 9'), 'flock serializes concurrent first attempts')
+  assert.ok(submit.includes('| tee .hams_submitted'), 'marker written with the bsub output')
+  assert.ok(submit.includes('"$rc" -eq 0'), 'marker only written when bsub exits 0')
+
+  const direct = buildDirectCommand({
+    remoteDir: '/home/op/sim/fore', python: 'python3',
+    workerPath: '/root/.harnessams/scripts/spectre/spectre_sweep_worker.py', workerArgs: [],
+  })
+  assert.ok(!direct.includes('bsub'))
+  assert.ok((direct.match(/\.hams_direct_done/g) ?? []).length >= 3, 'done marker checked twice + touched')
+  assert.ok(direct.includes('flock 9'), 'direct also serializes replays behind a live run')
+  assert.ok(direct.includes('&& touch .hams_direct_done'), 'marker written only on worker success')
+})
+
 test('batch_submit uploads the worker scripts tree and run files, then records the job', async () => {
-  const env = setupMirror()
   const run = makeRunDir()
   try {
-    const ctx = makeCtx({ mirror: env.mirror })
+    const ctx = makeCtx()
     const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run,
       remote_dir: 'batch1',
@@ -216,28 +231,31 @@ test('batch_submit uploads the worker scripts tree and run files, then records t
     assert.equal(job.remote_dir, '/home/op/sim/batch1')
 
     // fixture tree = 3 scripts (common x2 + spectre worker) + 2 run files
-    const uploads = ctx.calls.filter((c) => c.name === 'rw_upload')
-      .map((c) => c.arguments.path)
+    const uploads = ctx.calls.filter((c) => c.name === 'ssh_upload')
+      .map((c) => c.arguments.remotePath)
     assert.ok(uploads.includes('/home/op/sim/.harnessams/scripts/spectre/spectre_sweep_worker.py'))
     assert.ok(uploads.includes('/home/op/sim/.harnessams/scripts/common/common_sweep_engine.py'))
     assert.ok(uploads.includes('/home/op/sim/batch1/template.scs'))
     assert.ok(uploads.includes('/home/op/sim/batch1/sweep_config.json'))
     assert.equal(uploads.length, 5, uploads.join('\n'))
 
-    const bsub = ctx.calls.find((c) => c.name === 'rw_exec'
+    const bsub = ctx.calls.find((c) => c.name === 'ssh_exec'
       && String(c.arguments.command).includes('bsub -q'))
     assert.ok(bsub, 'bsub command sent')
-    assert.match(bsub.arguments.command, /"--work-dir" "\/home\/op\/sim\/batch1"/)
-    assert.match(bsub.arguments.command, /spectre_sweep_worker\.py/)
+    // execRemote wraps commands as `timeout … -- sh -c "<cmd>"` with the inner
+    // double quotes escaped; flatten the escapes before asserting on the payload
+    const flat = String(bsub.arguments.command).replace(/\\"/g, '"')
+    assert.match(flat, /"--work-dir" "\/home\/op\/sim\/batch1"/)
+    assert.match(flat, /spectre_sweep_worker\.py/)
+    assert.match(flat, /\.hams_submitted/, 'LSF submit carries the marker guard')
   } finally {
     restoreEnv()
   }
 })
 
 test('batch_submit rejects a worker outside the scripts root with guidance', async () => {
-  const env = setupMirror()
   try {
-    const ctx = makeCtx({ mirror: env.mirror })
+    const ctx = makeCtx()
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/no_such_worker.py',
@@ -248,10 +266,9 @@ test('batch_submit rejects a worker outside the scripts root with guidance', asy
 })
 
 test('batch_submit scheduler=direct runs the worker directly on the host (no bsub)', async () => {
-  const env = setupMirror()
   const run = makeRunDir()
   try {
-    const ctx = makeCtx({ mirror: env.mirror })
+    const ctx = makeCtx()
     const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run,
       remote_dir: 'fore',
@@ -269,12 +286,13 @@ test('batch_submit scheduler=direct runs the worker directly on the host (no bsu
     assert.match(job.job_id, /^direct-/)
     assert.equal(job.remote_dir, '/home/op/sim/fore')
 
-    const commands = ctx.calls.filter((c) => c.name === 'rw_exec')
-      .map((c) => String(c.arguments.command))
+    const commands = ctx.calls.filter((c) => c.name === 'ssh_exec')
+      .map((c) => String(c.arguments.command).replace(/\\"/g, '"'))
     const direct = commands.find((c) => c.includes('spectre_sweep_worker.py'))
     assert.ok(direct, 'direct worker command sent')
     assert.ok(!direct.includes('bsub'))
     assert.match(direct, /"--work-dir" "\/home\/op\/sim\/fore"/)
+    assert.ok(direct.includes('.hams_direct_done'), 'direct carries the done-marker guard')
     assert.ok(!commands.some((c) => c.includes('bsub -q')), 'no bsub invocation')
   } finally {
     restoreEnv()
@@ -282,13 +300,12 @@ test('batch_submit scheduler=direct runs the worker directly on the host (no bsu
 })
 
 test('batch_poll reads the job file and reports completed', async () => {
-  const env = setupMirror()
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
       machine_id: 'node1', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
     }))
-    const ctx = makeCtx({ mirror: env.mirror, poll: { meta: 2, total: 2 } })
+    const ctx = makeCtx({ poll: { meta: 2, total: 2 } })
     const res = await tool(ctx, 'batch_poll').execute({ run_dir: run }, {})
     assert.equal(res.ok, true)
     assert.equal(res.state, 'completed')
@@ -300,14 +317,13 @@ test('batch_poll reads the job file and reports completed', async () => {
 })
 
 test('batch_fetch downloads the archive and extracts it into the run directory', async () => {
-  const env = setupMirror()
   const run = makeRunDir()
   const archive = await makeArchive()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
       machine_id: 'node1', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
     }))
-    const ctx = makeCtx({ mirror: env.mirror, archive })
+    const ctx = makeCtx({ archive })
     const res = await tool(ctx, 'batch_fetch').execute({
       run_dir: run,
       includes: ['*/point_meta.json', '*/netlist.scs.raw/sp.sp', 'sweep_progress.json'],
@@ -325,10 +341,9 @@ test('batch_fetch downloads the archive and extracts it into the run directory',
   }
 })
 
-test('batch tools reject escaped paths, missing mirrors and missing live sessions', async () => {
-  const env = setupMirror()
+test('batch tools reject escaped paths and unresolvable machines', async () => {
   try {
-    const ctx = makeCtx({ mirror: env.mirror })
+    const ctx = makeCtx()
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1', worker: '../evil.py',
     }, {}), /unsafe relative path/)
@@ -344,29 +359,30 @@ test('batch tools reject escaped paths, missing mirrors and missing live session
       remote_scripts_dir: '/tmp/elsewhere', sync_scripts: true,
     }, {}), /remote_scripts_dir must be under the remote workspace/)
 
-    const empty = makeCtx({ mirror: env.mirror })
-    empty.get = () => ({ list: () => [] })
-    await assert.rejects(() => tool(empty, 'batch_submit').execute({
-      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
+    // machine_id is now a required dsh-ssh alias (no mirror-session fallback);
+    // the schema layer rejects the call before execute() ever runs
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
+      run_dir: makeRunDir(), remote_dir: 'batch1',
       worker: 'spectre/spectre_sweep_worker.py',
-    }, {}), /no live session/)
+    }, {}), /missing required property "machine_id"/)
 
-    process.env.DSH_HOME = tmp('hams-empty-')
-    const noMirror = makeCtx({ mirror: env.mirror })
-    await assert.rejects(() => resolveTarget(noMirror, {}, 'node1'), /no local mirror/)
+    await assert.rejects(() => resolveMachine(makeCtx(), 'ghost'), /no such dsh-ssh host: ghost/)
+
+    // alias exists in the dsh-ssh registry but has no remote root configured
+    // (lab9 is mock-only, so the real harnessams.json cannot mask this branch)
+    await assert.rejects(() => resolveMachine(makeCtx(), 'lab9'), /no remote root configured for host lab9/)
   } finally {
     restoreEnv()
   }
 })
 
 test('batch_submit enforces the template.scs upload convention', async () => {
-  const env = setupMirror()
   try {
     const run = makeRunDir({
       template: 'template_thorough.scs',
       config: { netlist_template: 'template_thorough.scs', parameters: { SW: [0, 1] } },
     })
-    const ctx = makeCtx({ mirror: env.mirror })
+    const ctx = makeCtx()
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: run, remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
@@ -377,8 +393,8 @@ test('batch_submit enforces the template.scs upload convention', async () => {
       run_dir: run2, remote_dir: 'batch2', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {})
-    const uploads = ctx.calls.filter((c) => c.name === 'rw_upload')
-      .map((c) => c.arguments.path)
+    const uploads = ctx.calls.filter((c) => c.name === 'ssh_upload')
+      .map((c) => c.arguments.remotePath)
     assert.ok(uploads.includes('/home/op/sim/batch2/template.scs'), uploads.join('\n'))
   } finally {
     restoreEnv()
@@ -386,15 +402,14 @@ test('batch_submit enforces the template.scs upload convention', async () => {
 })
 
 test('batch_submit surfaces upload failures and refuses to clobber a batch', async () => {
-  const env = setupMirror()
   try {
-    const ctx = makeCtx({ mirror: env.mirror, failUpload: true })
+    const ctx = makeCtx({ failUpload: true })
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /upload failed/)
 
-    const clobberCtx = makeCtx({ mirror: env.mirror, existing: 3 })
+    const clobberCtx = makeCtx({ existing: 3 })
     await assert.rejects(() => tool(clobberCtx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
       worker: 'spectre/spectre_sweep_worker.py',
