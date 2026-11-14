@@ -16,7 +16,7 @@
     "dsh-harnessams-smart-ana-sim": "0.1.0"
   },
   "engines": {
-    "dsh": "0.2.2-rc.1"
+    "dsh": "0.2.2-rc.3"
   },
   "license": "MIT",
   "repository": {

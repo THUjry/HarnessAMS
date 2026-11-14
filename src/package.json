@@ -1,7 +1,7 @@
 {
   "name": "dsh-harnessams",
   "version": "0.1.0",
-  "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-project task sidebar) plus remote projects over dsh-remote, per-project health checks, disk usage, digital assets, the generic remote batch channel (batch_submit/batch_poll/batch_fetch) and the simulator-agnostic analysis tools (collect/progress/report/trash)",
+  "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-project task sidebar) plus remote machines over @linxin666/dsh-ssh, per-project health checks, disk usage, digital assets, the generic remote batch channel (batch_submit/batch_poll/batch_fetch) and the simulator-agnostic analysis tools (collect/progress/report/trash)",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -43,7 +43,7 @@
     }
   },
   "engines": {
-    "dsh": "0.2.2-rc.1"
+    "dsh": "0.2.2-rc.3"
   },
   "license": "MIT",
   "repository": {
@@ -56,8 +56,8 @@
     "@deepseek-ai/dsh-client-locale": ">=0.1.2-rc.1 <0.3.0"
   },
   "devDependencies": {
-    "@deepseek-ai/dsh-host-webserver": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-client-ui-renderer": "0.2.2-rc.1",
-    "@deepseek-ai/dsh-client-locale": "0.2.2-rc.1"
+    "@deepseek-ai/dsh-host-webserver": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-renderer": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-locale": "0.2.2-rc.3"
   }
 }
