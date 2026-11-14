@@ -1,6 +1,7 @@
 // Workspace configuration: locating the runtime harnessams.json and resolving its
-// relative path fields. (There is no server-registry file — remote connectivity is
-// delegated entirely to dsh-remote.)
+// relative path fields. (Remote connectivity is delegated entirely to
+// @linxin666/dsh-ssh; each alias's remote root rides in the same file under
+// `remote_machines` — a remote absolute path map, never resolved locally.)
 import fs from 'node:fs'
 import path from 'node:path'
 import os from 'node:os'

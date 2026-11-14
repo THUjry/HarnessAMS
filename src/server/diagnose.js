@@ -4,10 +4,11 @@
 // assembles an English prompt from the failed entries and drives the DSH
 // session controller (ctx service `sessionController`, same registry as the
 // `sessions` service this plugin already consumes lazily): create() binds the
-// new session to a workspace (a machine's remote-project workspace for remote
-// checks — its cwd inside the mirror is what binds dsh-remote's rw_* tools to
-// that machine), prompt() delivers the diagnosis text as the first user turn
-// (the controller auto-resolves/starts the agent), rename() is cosmetic.
+// new session to the current project's workspace, prompt() delivers the
+// diagnosis text as the first user turn (the controller auto-resolves/starts
+// the agent), rename() is cosmetic. Remote checks carry the machine's dsh-ssh
+// alias in the prompt — ssh_exec has zero gating, so no workspace anchoring is
+// needed to run verification commands on the machine.
 // Deliberately PRIVATE: no ctx service key and no model tool is registered for
 // this — other plugins cannot route through it (by design).
 import { randomUUID } from 'node:crypto'
@@ -49,7 +50,7 @@ export function sanitizeFailed(failed) {
 // The prompt body is English by convention (server strings and model-facing
 // text stay English per the UI spec); only the final line asks the agent to
 // answer in the user's current UI language (client sends `lang`).
-export function buildDiagnosisPrompt({ check, machine, remotePath, mirrorDir, projectTitle, failed, lang, auto }) {
+export function buildDiagnosisPrompt({ check, machine, remotePath, projectTitle, failed, lang, auto }) {
   const label = { local: 'Local environment', load: 'Load', jobs: 'LSF jobs', batches: 'Batch dirs', scripts: 'Script sync' }[check] ?? check
   const lines = []
   lines.push('You are the diagnostic agent of the HarnessAMS workbench.')
@@ -58,9 +59,8 @@ export function buildDiagnosisPrompt({ check, machine, remotePath, mirrorDir, pr
   lines.push(`- Check: ${label} (id: ${check})`)
   lines.push(`- Trigger: ${auto ? 'automatic — the check run ended with failed entries' : 'user button on the check results'}`)
   if (machine) {
-    lines.push(`- Machine: ${machine.name || machine.host} (${machine.username ? machine.username + '@' : ''}${machine.host}:${machine.port ?? 22})`)
-    if (remotePath) lines.push(`- Remote workspace path: ${remotePath}`)
-    if (mirrorDir) lines.push(`- Local mirror of that workspace (this session's cwd sits inside it): ${mirrorDir}`)
+    lines.push(`- Machine: ${machine.name || machine.host} (${machine.username ? machine.username + '@' : ''}${machine.host}:${machine.port ?? 22}, dsh-ssh alias "${machine.alias ?? machine.id}")`)
+    if (remotePath) lines.push(`- Remote root: ${remotePath}`)
   } else {
     lines.push('- Machine: local (this host)')
   }
@@ -87,7 +87,7 @@ export function buildDiagnosisPrompt({ check, machine, remotePath, mirrorDir, pr
   lines.push('Instructions:')
   lines.push('- READ-ONLY diagnosis: do not create, modify, move, or delete anything.')
   if (machine) {
-    lines.push('- This session was created inside the machine\'s remote-project workspace, so dsh-remote binds its remote tools to that machine: you may run read-only commands on it (e.g. via the rw_* tools) to verify. If a remote tool errors out, say so and analyze from the evidence above instead.')
+    lines.push(`- The dsh-ssh plugin is installed, so you may run read-only commands on that machine via ssh_exec (alias "${machine.name || machine.host}") to verify. If a remote tool errors out, say so and analyze from the evidence above instead.`)
   } else {
     lines.push('- You may run read-only local commands to verify (the workspace is this machine\'s HarnessAMS workspace).')
   }

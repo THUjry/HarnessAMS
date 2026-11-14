@@ -1,34 +1,45 @@
-// Thin dsh-remote shell used by the generic batch tools.
+// Thin @linxin666/dsh-ssh shell used by the generic batch tools and the remote
+// server surfaces (the single remote channel since the dsh-remote retirement,
+// 2026-11-14; selection evidence = docs/sshStudy/dsh-remote替代选型结论20261113.md).
 //
-// Coupling contract (dsh-remote 0.8.94, exact-pinned in the web
-// profile; binding/machines/promotion-marker templates re-verified against the
-// v0.8.94 upstream tag per the project's upgrade checklist; the four coupling
-// files are byte-identical 0.8.83→0.8.94, so every earlier 0.8.51→0.8.83
-// verification carries over):
-//   - only rw_machines / rw_exec / rw_upload / rw_download are consumed;
+// Coupling contract (@linxin666/dsh-ssh 0.4.18, exact-pinned in the web
+// profile; tool shapes re-verified against the installed package's src/tools.ts):
+//   - only ssh_list / ssh_exec / ssh_upload / ssh_download are consumed;
+//   - zero gating: no agent/binding context is needed — every call targets an
+//     `alias` configured in $DSH_HOME/dsh-ssh.json (the dsh-ssh host registry);
 //   - ctx.tools.execute takes the batch contract (verified against
-//     @deepseek-ai/dsh-tools 0.2.2-rc.1): { calls: [{type,id,name,
-//     arguments(JSON string)}], signal, agent? } in, { results: [{callId,
-//     result}] } out — see callTool; the 0.2.1-rc.2 single-call shape
-//     {callId,name,arguments} now crashes on calls.map wrapped as an opaque
-//     "Tool batch execution failed";
-//   - those tools bind to a machine from the calling session's cwd inside a
-//     dsh-remote mirror, so a real live session must be passed as the agent
-//     context (a fabricated session does not survive the tool pipeline);
-//   - rw_machines answers with a TEXT listing (workspace rides on the auth line);
-//   - rw_exec appends result markers to the END of the text (see parseRwExecText);
-//   - rw_upload / rw_download move a single file each and enforce the remote
-//     sandbox write fence (a workspace-write session may only write under the
-//     mirror's remotePath).
+//     @deepseek-ai/dsh-tools 0.2.2-rc.1 AND 0.2.2-rc.3 by tarball diff): {
+//     calls: [{type,id,name,arguments(JSON string)}], signal } in,
+//     { results: [{callId,result}] } out — see callTool; a tool's structured
+//     JSON value rides on result.value (ToolExecutionSuccess.value);
+//   - ssh_list → value { hosts: [{alias,host,port,user,auth,keyReady,…}] };
+//   - ssh_exec → value { success, exitCode|null, timedOut, stdout, stderr,
+//     durationMs, error? } — connect/execution failures are VALUES, not throws
+//     (only tool-pipeline problems throw);
+//   - ssh_upload → value { ok, transferredBytes?, files?, error? } (single
+//     file per call; parent directories are auto-created remotely);
+//   - ssh_download → value { ok, bytes?, error? } (single file only);
+//   - the remote root per alias is NOT dsh-ssh data: it comes from the
+//     workspace harnessams.json `remote_machines` map (alias → absolute remote
+//     path), merged into the machine records by listMachines.
 //
-// Mirror discovery (findMirrorForMachine / findEnclosingMirror) reproduces
-// dsh-remote's `$DSH_HOME/remote-workspaces` layout by convention; it does not
-// import dsh-remote internals (separate npm package).
+// Hardening owned by this funnel (selection-doc §6/§7 mitigations):
+//   - every exec is wrapped in `timeout -s KILL <N>s -- sh -c …` so the remote
+//     process is guaranteed to die at the deadline (dsh-ssh's own kill on
+//     timeout is best-effort: stream KILL + channel close, connection kept);
+//   - dsh-ssh replays a broken-connection exec up to 3 times and each replay
+//     resets the command budget — the outer AbortSignal covers
+//     3 × (deadline + connect), the only hard stop in town;
+//   - transfers never replay (sftp.ts has zero retry), so an interrupted
+//     upload/download surfaces as a plain failure the caller may retry;
+//   - ssh2 channel-open failures carry no MaxSessions wording, so open-failure
+//     error shapes get a "suspected MaxSessions" annotation (visible-and-
+//     attributable ruling, 2026-11-13: no waiting, no semaphore).
 import crypto from 'node:crypto'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
+import { findWorkspaceConfig } from './server/workspace.js'
 
+// Extract the text payload of a ToolExecutionResult: value may be the raw
+// string or a {text} object; content is a ContentBlock[] of {type:'text'}.
 export function resultText(r) {
   if (r == null) return ''
   if (typeof r === 'string') return r
@@ -38,167 +49,42 @@ export function resultText(r) {
   return ''
 }
 
-// Unwrap host pipeline errors: ToolBatchExecutionError carries the real failure on
-// .cause ("Tool batch execution failed" alone hides it).
+// Extract the structured JSON value of a successful ToolExecutionResult (the
+// ssh_* tools declare output schemas, so their values are objects).
+export function resultValue(r) {
+  if (r == null || r.isError) return null
+  return r.value !== undefined ? r.value : null
+}
+
+// Unwrap host pipeline errors: ToolBatchExecutionError carries the real failure
+// on .cause ("Tool batch execution failed" alone hides it).
 function errDetail(e) {
   const msg = String(e?.message ?? e)
   return e?.cause?.message ? `${msg} (${e.cause.message})` : msg
 }
 
-// Parse the rw_machines text listing (dsh-remote 0.8.54+): each entry is a header
-// line plus an auth line carrying `workspace=<path>`; group labels are extra lines
-// that match no entry, and the listing ends with a rw_connect hint line.
-export function parseRwMachinesText(text) {
-  const machines = []
-  const lines = String(text ?? '').split(/\r?\n/)
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i]
-    if (!line.startsWith('- ')) continue
-    const m = line.match(/^-\s+(\S+)\s+"([^"]*)"\s+\[([^\]]*)\]\s*([^@\s]*)@(\S+):(\d+)\s*(.*)$/)
-    if (!m) continue
-    const [, id, name, , username, host, port, tail] = m
-    const ws = (lines[i + 1] ?? '').match(/workspace=(\S+)/) ?? String(tail).match(/workspace=(\S+)/)
-    machines.push({
-      id,
-      name: name || host,
-      host,
-      port: Number(port) || 22,
-      username: username || '',
-      current: /\[CURRENT\]/.test(tail),
-      workspace: ws ? ws[1] : undefined,
-    })
-  }
-  return machines
-}
-
-export function remoteWorkspacesRoot() {
-  return path.join(process.env.DSH_HOME ?? path.join(os.homedir(), '.dsh'), 'remote-workspaces')
-}
-
-function readMirrorMeta(dir) {
-  try {
-    const meta = JSON.parse(fs.readFileSync(path.join(dir, '.dsh-remote-meta.json'), 'utf8'))
-    if (!meta?.host) return null
-    return {
-      mirrorDir: dir,
-      host: String(meta.host),
-      port: Number(meta.port) || 22,
-      username: String(meta.username ?? ''),
-      remotePath: String(meta.remotePath ?? ''),
-    }
-  } catch {
-    return null
-  }
-}
-
-export function findMirrorForMachine(machine, root = remoteWorkspacesRoot()) {
-  if (!machine?.host) return null
-  const port = Number(machine.port) || 22
-  const user = String(machine.username ?? '').toLowerCase()
-  let hostDirs = []
-  try { hostDirs = fs.readdirSync(root, { withFileTypes: true }) } catch { return null }
-  for (const hd of hostDirs) {
-    if (!hd.isDirectory()) continue
-    let entries = []
-    try { entries = fs.readdirSync(path.join(root, hd.name), { withFileTypes: true }) } catch { continue }
-    for (const e of entries) {
-      if (!e.isDirectory()) continue
-      const meta = readMirrorMeta(path.join(root, hd.name, e.name))
-      if (!meta) continue
-      if (meta.host.toLowerCase() !== String(machine.host).toLowerCase()) continue
-      if (meta.port !== port) continue
-      if (user && meta.username && meta.username.toLowerCase() !== user) continue
-      return meta
-    }
-  }
-  return null
-}
-
-// A DSH workspace inside a dsh-remote mirror IS a remote project: walk up from a
-// session cwd to the nearest .dsh-remote-meta.json.
-export function findEnclosingMirror(startDir) {
-  if (!startDir) return null
-  let d = path.resolve(String(startDir))
-  for (let i = 0; i < 32; i++) {
-    const meta = readMirrorMeta(d)
-    if (meta) return meta
-    const parent = path.dirname(d)
-    if (parent === d) break
-    d = parent
-  }
-  return null
-}
-
-// Borrow a live session whose cwd sits inside the mirror (the agent context that
-// makes rw_exec / rw_upload / rw_download bind to that machine).
-export function sessionInMirror(ctx, mirrorDir) {
-  if (!mirrorDir) return null
-  const sessions = typeof ctx?.get === 'function' ? ctx.get('sessions') : null
-  if (!sessions || typeof sessions.list !== 'function') return null
-  let live = []
-  try { live = sessions.list() } catch { return null }
-  const norm = (p) => String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-  const root = norm(mirrorDir)
-  for (const s of live) {
-    const cwd = norm(s?.header?.cwd)
-    // The session id rides along as `id`: the tool pipeline and dsh-remote's
-    // rw_exec owner both read exec.agent.id, so a nested { agent: { session } }
-    // is rejected before the command ever runs.
-    if (cwd && (cwd === root || cwd.startsWith(root + '/'))) return { id: s.id, session: s }
-  }
-  return null
-}
-
-export function callerSession(execCtx) {
-  const session = execCtx?.agent?.session
-  return session && typeof session?.header?.cwd === 'string' ? session : null
-}
-
-export async function listMachines(ctx, timeoutMs = 10_000) {
-  const def = ctx?.tools?.get?.('rw_machines')
-  if (!def) return { ok: false, machines: [], reason: 'rw_machines is not registered (dsh-remote not installed?)' }
-  const r = await callTool(ctx, 'rw_machines', {}, { timeoutMs })
-  if (r.isError) return { ok: false, machines: [], reason: r.text || 'rw_machines failed' }
-  const machines = parseRwMachinesText(r.text)
-  if (!machines.length) return { ok: false, machines: [], reason: 'rw_machines listing empty or not parseable' }
-  return { ok: true, machines }
+// ssh2 raises channel-open failures as "Open failed: <reason>" strings with no
+// MaxSessions wording; the common server-side reason for a burst of those is
+// the per-connection session limit. Annotate the shape (never swallow it).
+const CHANNEL_OPEN_FAILURE = /open (failure|failed)|administratively prohibited|channel (open|failure)|session open (refused|failed)/i
+export function attributeSshError(text) {
+  const t = String(text ?? '')
+  return CHANNEL_OPEN_FAILURE.test(t)
+    ? `${t} [suspected MaxSessions (concurrent channel limit on one SSH connection) — retry serially]`
+    : t
 }
 
 export function shq(s) {
   return '"' + String(s ?? '').replace(/([$"\\`])/g, '\\$1') + '"'
 }
 
-// rw_exec result text (dsh-remote formatExecResult): the trailing markers come
-// after the stderr section. 0.8.53+ may replace the whole text with a promotion
-// marker when the command outlives its timeout (never a clean exit).
-export function parseRwExecText(text) {
-  let raw = String(text ?? '')
-  const promoted = raw.match(/\[still running after \d+ms; moved to background job ([^\]]+)\]/)
-  if (promoted) {
-    return { stdout: '', stderr: '', exitCode: 0, timedOut: false, promotedJob: promoted[1] }
-  }
-  const timedOut = /\[command timed out after \d+ms\]/.test(raw)
-  raw = raw.replace(/\[command timed out after \d+ms\]\s*$/, '').replace(/\[cancelled[^\]]*\]\s*$/, '')
-  let exitCode = 0
-  const m = raw.match(/\[exit code: (-?\d+)\]\s*$/)
-  if (m) { exitCode = Number(m[1]); raw = raw.slice(0, m.index) }
-  else if (/\[exit code:/.test(raw)) exitCode = 1
-  let stdout = raw
-  let stderr = ''
-  const at = stdout.indexOf('-- stderr --')
-  if (at >= 0) {
-    stderr = stdout.slice(at + '-- stderr --'.length).trim()
-    stdout = stdout.slice(0, at)
-  }
-  return { stdout: stdout.trimEnd(), stderr, exitCode, timedOut, promotedJob: '' }
-}
-
-export async function callTool(ctx, name, args, { agent, timeoutMs = 40_000 } = {}) {
+// The one programmatic tool-call funnel (batch contract, see header). Returns
+// { isError, text, value } — never throws; pipeline errors land in .text with
+// their cause unwrapped and channel-open shapes annotated.
+export async function callTool(ctx, name, args, { timeoutMs = 40_000 } = {}) {
   const def = ctx?.tools?.get?.(name)
-  if (!def) return { isError: true, text: `${name} is not registered (install/enable dsh-remote)` }
+  if (!def) return { isError: true, text: `${name} is not registered (install/enable @linxin666/dsh-ssh)`, value: null }
   try {
-    // Batch contract (dsh-tools 0.2.2-rc.1, see header): one-call batch in,
-    // results[0].result out.
     const batch = await ctx.tools.execute({
       calls: [{
         type: 'tool-call',
@@ -207,91 +93,156 @@ export async function callTool(ctx, name, args, { agent, timeoutMs = 40_000 } = 
         arguments: JSON.stringify(args ?? {}),
       }],
       signal: AbortSignal.timeout(timeoutMs),
-      ...(agent ? { agent } : {}),
     })
     const r = batch?.results?.[0]?.result
-    if (!r) return { isError: true, text: `${name}: ToolBatchResult carried no result entry` }
-    return { isError: !!r.isError, text: resultText(r) }
+    if (!r) return { isError: true, text: `${name}: ToolBatchResult carried no result entry`, value: null }
+    return { isError: !!r.isError, text: resultText(r), value: resultValue(r) }
   } catch (e) {
-    return { isError: true, text: errDetail(e) }
+    return { isError: true, text: attributeSshError(errDetail(e)), value: null }
   }
 }
 
-export async function execRemote(ctx, agent, command, { timeoutMs = 40_000 } = {}) {
-  // promoteOnTimeout=false keeps every command on the borrowed session's plain
-  // foreground exec path. The promotion path needs a job controller FOR THAT
-  // AGENT, which a borrowed session (a subagent, or an idle remote project
-  // session) may not have — and these batch commands are bounded anyway.
-  const r = await callTool(ctx, 'rw_exec',
-    { command, timeoutMs, promoteOnTimeout: false },
-    { agent, timeoutMs: timeoutMs + 30_000 })
-  if (r.isError) return { ok: false, isError: true, text: r.text, stdout: '', stderr: r.text,
-    exitCode: -1, timedOut: false, promotedJob: '' }
-  const parsed = parseRwExecText(r.text)
+// The remote root per alias: harnessams.json `remote_machines` (alias →
+// absolute remote path). Hand-edited like the rest of that file; read-only
+// here. Returns a Map (empty when unconfigured — machines then surface as
+// "no remote root" instead of failing the whole listing). The
+// HARNESSAMS_REMOTE_MACHINES env override (inline JSON map, same shape) exists
+// for tests/hermetic layouts, mirroring HARNESSAMS_SIM_SCRIPTS_DIR.
+export function readRemoteMachines() {
+  let map = null
+  if (process.env.HARNESSAMS_REMOTE_MACHINES) {
+    try { map = JSON.parse(process.env.HARNESSAMS_REMOTE_MACHINES) } catch { map = null }
+  } else {
+    map = findWorkspaceConfig()?.config?.remote_machines
+  }
+  if (!map || typeof map !== 'object' || Array.isArray(map)) return new Map()
+  const out = new Map()
+  for (const [alias, root] of Object.entries(map)) {
+    if (typeof root === 'string' && root.trim()) out.set(alias, root.trim().replace(/\\/g, '/'))
+  }
+  return out
+}
+
+// ssh_list → machine records. Identity is the alias (id === name === alias);
+// `workspace` carries the configured remote root (undefined = not configured
+// in harnessams.json, `configured` flags it for the UI).
+export async function listMachines(ctx, timeoutMs = 10_000) {
+  const def = ctx?.tools?.get?.('ssh_list')
+  if (!def) return { ok: false, machines: [], reason: 'ssh_list is not registered (@linxin666/dsh-ssh not installed?)' }
+  const r = await callTool(ctx, 'ssh_list', {}, { timeoutMs })
+  if (r.isError) return { ok: false, machines: [], reason: attributeSshError(r.text || 'ssh_list failed') }
+  const hosts = Array.isArray(r.value?.hosts) ? r.value.hosts : []
+  if (!hosts.length) {
+    return { ok: false, machines: [], reason: 'no hosts configured in dsh-ssh (add aliases in its panel or ~/.dsh/dsh-ssh.json)' }
+  }
+  const roots = readRemoteMachines()
+  const machines = hosts.map((h) => {
+    const alias = String(h?.alias ?? '')
+    return {
+      id: alias,
+      name: alias,
+      alias,
+      host: String(h?.host ?? alias),
+      port: Number(h?.port) || 22,
+      username: String(h?.user ?? ''),
+      auth: String(h?.auth ?? ''),
+      keyReady: !!h?.keyReady,
+      workspace: roots.get(alias),
+      configured: roots.has(alias),
+    }
+  })
+  return { ok: true, machines }
+}
+
+// ssh_exec funnel: guaranteed-kill wrapper + structured result normalization.
+// `machine` is the alias string or a listMachines record. The command always
+// runs as `timeout -s KILL <N>s -- sh -c <command>` remotely, so exit 137
+// (128+SIGKILL) is the remote deadline firing, not a command failure.
+export async function execRemote(ctx, machine, command, { timeoutMs = 40_000 } = {}) {
+  const alias = typeof machine === 'string' ? machine : (machine?.alias ?? machine?.id)
+  if (!alias) return { ok: false, isError: true, text: 'no machine alias', stdout: '', stderr: 'no machine alias', exitCode: -1, timedOut: false }
+  const seconds = Math.max(1, Math.ceil(timeoutMs / 1000))
+  // no `--` separator: busybox-flavored `timeout` (node1) treats it as the
+  // command itself ("failed to run command '--'", live-sampled 2026-11-14);
+  // GNU coreutils accepts the plain form equally.
+  const wrapped = `timeout -s KILL ${seconds}s sh -c ${shq(command)}`
+  const r = await callTool(ctx, 'ssh_exec',
+    // Tool-level budget sits above the remote deadline so the wrapper's exit
+    // code comes back as a value; the outer signal covers 3 broken-connection
+    // replays (each replay re-runs the wrapped command, so each costs at most
+    // deadline + connect).
+    { alias, command: wrapped, timeoutMs: timeoutMs + 90_000 },
+    { timeoutMs: 3 * (timeoutMs + 90_000) + 60_000 })
+  if (r.isError) {
+    const text = attributeSshError(r.text)
+    return { ok: false, isError: true, text, stdout: '', stderr: text, exitCode: -1, timedOut: false }
+  }
+  const v = (r.value && typeof r.value === 'object') ? r.value : {}
+  const stdout = String(v.stdout ?? '')
+  const stderrRaw = String(v.stderr ?? '')
+  // Connection/channel errors ride on value.error with success:false (the tool
+  // layer catches them into the value) — the MaxSessions shape lives here too
+  // (live-sampled on node1: "(SSH) Channel open failure: open failed").
+  const errorText = v.error != null ? attributeSshError(String(v.error)) : ''
+  const killed = Number(v.exitCode) === 137
+  const timedOut = !!v.timedOut || killed
+  const ok = v.success === true && !timedOut
   return {
-    ok: parsed.exitCode === 0 && !parsed.timedOut && !parsed.promotedJob,
+    ok,
     isError: false,
-    text: r.text,
-    ...parsed,
+    text: errorText || stdout,
+    stdout,
+    stderr: stderrRaw || errorText,
+    exitCode: v.exitCode ?? null,
+    timedOut,
   }
 }
 
-export async function uploadFile(ctx, agent, localPath, remotePath) {
-  const r = await callTool(ctx, 'rw_upload', { localPath, path: remotePath }, { agent, timeoutMs: 120_000 })
-  return { ok: !r.isError && /\buploaded\b/i.test(r.text), text: r.text }
-}
-
-export async function downloadFile(ctx, agent, remotePath, localPath) {
-  const r = await callTool(ctx, 'rw_download', { path: remotePath, localPath }, { agent, timeoutMs: 180_000 })
-  return { ok: !r.isError && /\bdownloaded\b/i.test(r.text), text: r.text }
-}
-
-// Resolve the machine, its local mirror, the remote workspace root, and the live
-// session used as the rw_* agent context.
-export async function resolveTarget(ctx, execCtx, machineId) {
-  if (machineId) {
-    const list = await listMachines(ctx)
-    if (!list.ok) throw new Error(`dsh-remote machines unavailable: ${list.reason}`)
-    const machine = list.machines.find((m) => m.id === machineId || m.name === machineId)
-    if (!machine) {
-      throw new Error(`no such dsh-remote machine: ${machineId} (known: `
-        + `${list.machines.map((m) => m.id).join(', ')})`)
-    }
-    const mirror = findMirrorForMachine(machine)
-    if (!mirror) {
-      throw new Error(`no local mirror for machine ${machine.name}: pick its remote workspace once in `
-        + 'dsh-remote (rw_pick_workspace), then retry')
-    }
-    if (!mirror.remotePath) throw new Error(`mirror ${mirror.mirrorDir} has no remotePath in its metadata`)
-    let agent = sessionInMirror(ctx, mirror.mirrorDir)
-    if (!agent) {
-      const caller = callerSession(execCtx)
-      if (caller) {
-        const enclosing = findEnclosingMirror(caller.header.cwd)
-        if (enclosing && path.resolve(enclosing.mirrorDir) === path.resolve(mirror.mirrorDir)) {
-          agent = { id: caller.id, session: caller }
-        }
-      }
-    }
-    if (!agent) {
-      throw new Error(`no live session in machine ${machine.name}'s remote project — open that remote `
-        + 'project once in dsh-remote so a session keeps the connection, then retry')
-    }
-    return { machine, mirror, remoteRoot: mirror.remotePath, agent }
-  }
-
-  const caller = callerSession(execCtx)
-  if (!caller) throw new Error('pass machine_id (or call this from a session inside a dsh-remote mirror)')
-  const mirror = findEnclosingMirror(caller.header.cwd)
-  if (!mirror) {
-    throw new Error('the calling session is not inside a dsh-remote mirror — pass machine_id')
-  }
-  if (!mirror.remotePath) throw new Error(`mirror ${mirror.mirrorDir} has no remotePath in its metadata`)
+// Single-file upload (dsh-ssh auto-creates parent directories remotely).
+export async function uploadFile(ctx, machine, localPath, remotePath) {
+  const alias = typeof machine === 'string' ? machine : (machine?.alias ?? machine?.id)
+  const r = await callTool(ctx, 'ssh_upload', { alias, localPath, remotePath }, { timeoutMs: 300_000 })
+  const v = (r.value && typeof r.value === 'object' && !r.isError) ? r.value : {}
+  const ok = !r.isError && v.ok === true
   return {
-    machine: { id: mirror.host, name: mirror.host, host: mirror.host,
-      port: mirror.port, username: mirror.username },
-    mirror,
-    remoteRoot: mirror.remotePath,
-    agent: { id: caller.id, session: caller },
+    ok,
+    text: ok
+      ? `uploaded ${v.files ?? 1} file(s), ${v.transferredBytes ?? 0} bytes`
+      : attributeSshError(String(v.error ?? r.text ?? 'upload failed')),
   }
+}
+
+// Single-file download (directories are not supported by dsh-ssh; the batch
+// channel tars remotely and downloads the one archive).
+export async function downloadFile(ctx, machine, remotePath, localPath) {
+  const alias = typeof machine === 'string' ? machine : (machine?.alias ?? machine?.id)
+  const r = await callTool(ctx, 'ssh_download', { alias, remotePath, localPath }, { timeoutMs: 300_000 })
+  const v = (r.value && typeof r.value === 'object' && !r.isError) ? r.value : {}
+  const ok = !r.isError && v.ok === true
+  return {
+    ok,
+    text: ok
+      ? `downloaded ${v.bytes ?? 0} bytes`
+      : attributeSshError(String(v.error ?? r.text ?? 'download failed')),
+  }
+}
+
+// Resolve an alias (machine_id) to { machine, alias, remoteRoot }: the machine
+// must exist in the dsh-ssh host registry AND carry a configured remote root
+// (harnessams.json remote_machines) — that root fences every remote_dir.
+export async function resolveMachine(ctx, machineId) {
+  if (!machineId) {
+    throw new Error('machine_id (a dsh-ssh alias) is required — see the machine card or ssh_list')
+  }
+  const list = await listMachines(ctx)
+  if (!list.ok) throw new Error(`dsh-ssh hosts unavailable: ${list.reason}`)
+  const machine = list.machines.find((m) => m.id === machineId || m.name === machineId)
+  if (!machine) {
+    throw new Error(`no such dsh-ssh host: ${machineId} (known: ${list.machines.map((m) => m.id).join(', ')})`)
+  }
+  if (!machine.workspace) {
+    throw new Error(`no remote root configured for host ${machine.id} — `
+      + `set remote_machines["${machine.id}"] in the workspace harnessams.json`)
+  }
+  return { machine, alias: machine.id, remoteRoot: machine.workspace }
 }

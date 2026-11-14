@@ -6,7 +6,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { readJsonIfExists, resolveDir } from '../py.js'
-import { downloadFile, execRemote, resolveTarget, shq, uploadFile } from '../remote.js'
+import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
 import {
   DEFAULT_INCLUDES, buildDirectCommand, buildSubmitCommand, collectRunFiles, countFetched,
   defaultRemotePython, defaultRemoteScriptsDir, extractArchive, fetchCommand,
@@ -33,19 +33,18 @@ export function batchTools(ctx) {
   return [
     {
       name: 'batch_submit',
-      description: 'Submit a remote batch through dsh-remote: uploads the run directory (template + '
+      description: 'Submit a remote batch through dsh-ssh: uploads the run directory (template + '
         + 'sweep_config.json + metadata) and the suite\'s worker scripts (the workspace sim_scripts_dir tree), '
         + 'then either runs the chosen worker under bsub (scheduler="lsf", default) or directly on the target host '
         + '(scheduler="direct", node-local foreground). The worker path is scripts-root-relative (e.g. '
         + '"spectre/spectre_sweep_worker.py") or absolute on the remote; worker_args are passed through. '
-        + 'Writes .batch_job.json in the run directory for batch_poll/batch_fetch. '
-        + 'Requires a live session in the target machine\'s remote project (or a caller session already inside it).',
+        + 'Writes .batch_job.json in the run directory for batch_poll/batch_fetch.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
-        remote_dir: { type: 'string', required: true, description: 'Remote batch directory: absolute, or relative to the mirror remotePath' },
+        remote_dir: { type: 'string', required: true, description: 'Remote batch directory: absolute, or relative to the machine\'s remote root (remote_machines in harnessams.json)' },
         worker: { type: 'string', required: true, description: 'Worker script relative to the scripts root (e.g. spectre/spectre_sweep_worker.py) or an absolute remote path' },
         worker_args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed to the worker (e.g. --config sweep_config.json --max-parallel 8)' },
-        machine_id: { type: 'string', description: 'dsh-remote machine id/name (default: the calling session must already be inside the mirror)' },
+        machine_id: { type: 'string', required: true, description: 'dsh-ssh host alias (ssh_list / the machine card); its remote root fences remote_dir' },
         remote_python: { type: 'string', description: 'Remote Python executable (default: workspace remote_python or python3; use the full path on clusters)' },
         remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remotePath>/.harnessams/scripts or workspace remote_scripts_dir)' },
         files: { type: 'array', items: { type: 'string' }, description: 'Run-dir files to upload (default: top-level regular files)' },
@@ -59,7 +58,7 @@ export function batchTools(ctx) {
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
-        const target = await resolveTarget(ctx, exec, args.machine_id)
+        const target = await resolveMachine(ctx, args.machine_id)
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)
         const wsConfig = readWorkspaceConfig().config
         const syncScripts = args.sync_scripts !== false
@@ -86,7 +85,7 @@ export function batchTools(ctx) {
           remoteWorker = remoteJoin(scriptsRoot, workerRel)
         }
 
-        const probe = await execRemote(ctx, target.agent,
+        const probe = await execRemote(ctx, target.alias,
           `ls -1 ${shq(remoteDir)}/*/point_meta.json 2>/dev/null | wc -l`, { timeoutMs: 30_000 })
         const existing = Number(String(probe.stdout ?? '').trim()) || 0
         if (existing > 0 && !args.overwrite) {
@@ -101,14 +100,14 @@ export function batchTools(ctx) {
         if (syncScripts) {
           for (const script of pluginScripts()) {
             const remote = remoteJoin(scriptsRoot, script.rel)
-            const up = await uploadFile(ctx, target.agent, script.local, remote)
+            const up = await uploadFile(ctx, target.alias, script.local, remote)
             if (!up.ok) throw new Error(`upload failed for ${script.rel}: ${up.text}`)
           }
         }
 
         for (const file of files) {
           const name = file.uploadName || file.name
-          const up = await uploadFile(ctx, target.agent, file.local, remoteJoin(remoteDir, name))
+          const up = await uploadFile(ctx, target.alias, file.local, remoteJoin(remoteDir, name))
           if (!up.ok) throw new Error(`upload failed for ${name}: ${up.text}`)
         }
 
@@ -127,7 +126,7 @@ export function batchTools(ctx) {
             workerPath: remoteWorker,
             workerArgs: args.worker_args || [],
           })
-          const ran = await execRemote(ctx, target.agent, command, { timeoutMs: 600_000 })
+          const ran = await execRemote(ctx, target.alias, command, { timeoutMs: 600_000 })
           const jobId = `direct-${Date.now()}`
           const job = {
             machine_id: args.machine_id || target.machine?.id || null,
@@ -168,7 +167,7 @@ export function batchTools(ctx) {
           workerPath: remoteWorker,
           workerArgs: args.worker_args || [],
         })
-        const submitted = await execRemote(ctx, target.agent, command, { timeoutMs: 90_000 })
+        const submitted = await execRemote(ctx, target.alias, command, { timeoutMs: 90_000 })
         if (!submitted.ok) {
           throw new Error(`bsub submission failed (exit ${submitted.exitCode}): `
             + `${(submitted.stderr || submitted.stdout || '').slice(0, 1200)}`)
@@ -179,7 +178,7 @@ export function batchTools(ctx) {
         }
 
         const warnings = []
-        const post = await execRemote(ctx, target.agent, postSubmitCommand(remoteDir, jobId),
+        const post = await execRemote(ctx, target.alias, postSubmitCommand(remoteDir, jobId),
           { timeoutMs: 30_000 })
         if (!post.ok) warnings.push(`post-submit verification failed: ${(post.stderr || post.text).slice(0, 300)}`)
         if (post.stdout.includes('__ERRLOG__')) {
@@ -224,7 +223,7 @@ export function batchTools(ctx) {
         + 'all point_meta.json files exist.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory holding .batch_job.json' },
-        machine_id: { type: 'string', description: 'Override the machine id/name from the job file' },
+        machine_id: { type: 'string', description: 'Override the dsh-ssh host alias from the job file' },
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the LSF job id' },
         scheduler: { type: 'string', enum: ['lsf', 'direct'], description: 'lsf (default) checks bjobs; direct relies on the batch progress files' },
@@ -233,13 +232,13 @@ export function batchTools(ctx) {
         const runDir = resolveDir(args.run_dir)
         const job = readJob(runDir)
         const machineId = args.machine_id || job?.machine_id || undefined
-        const target = await resolveTarget(ctx, exec, machineId)
+        const target = await resolveMachine(ctx, machineId)
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const jobId = args.job_id || job?.job_id
         if (!jobId) throw new Error('no job id: pass job_id or run batch_submit first')
         let scheduler = args.scheduler || job?.scheduler || 'lsf'
         if (scheduler === 'none') scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
-        const r = await execRemote(ctx, target.agent,
+        const r = await execRemote(ctx, target.alias,
           pollCommand({ remoteDir, jobId, scheduler }), { timeoutMs: 30_000 })
         if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
         const parsed = parsePollOutput(r.stdout, { total: job?.total_points })
@@ -256,7 +255,7 @@ export function batchTools(ctx) {
     {
       name: 'batch_fetch',
       description: 'Fetch artifacts from a remote batch: tar-gzips the requested files on the remote host, '
-        + 'downloads the archive over dsh-remote and extracts it into the local run directory (the archive is '
+        + 'downloads the archive over dsh-ssh and extracts it into the local run directory (the archive is '
         + 'kept as fetch_<job_id>.tgz). If tar is unavailable it falls back to a bounded per-file download. '
         + 'Afterwards sim_analysis / spectre_parse / snp_read can read the local run directory directly.',
       parameters: {
@@ -264,7 +263,7 @@ export function batchTools(ctx) {
         includes: { type: 'array', items: { type: 'string' },
           description: 'Files to fetch: names (point_meta.json) or paths (*/netlist.scs.raw/sp.sp); '
             + 'default point_meta.json, sweep_progress.json, errlog.txt, bsub.out, bsub.err' },
-        machine_id: { type: 'string', description: 'Override the machine id/name from the job file' },
+        machine_id: { type: 'string', description: 'Override the dsh-ssh host alias from the job file' },
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the LSF job id (also names the local archive)' },
       },
@@ -272,20 +271,20 @@ export function batchTools(ctx) {
         const runDir = resolveDir(args.run_dir)
         const job = readJob(runDir)
         const machineId = args.machine_id || job?.machine_id || undefined
-        const target = await resolveTarget(ctx, exec, machineId)
+        const target = await resolveMachine(ctx, machineId)
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const jobId = args.job_id || job?.job_id || 'manual'
         const includes = Array.isArray(args.includes) && args.includes.length
           ? args.includes.map(String) : DEFAULT_INCLUDES
 
-        const packed = await execRemote(ctx, target.agent,
+        const packed = await execRemote(ctx, target.alias,
           fetchCommand({ remoteDir, includes }), { timeoutMs: 120_000 })
         if (!packed.ok) {
           throw new Error(`remote packing failed: ${(packed.stderr || packed.stdout || packed.text).slice(0, 800)}`)
         }
         const archiveRemote = remoteJoin(remoteDir, '.batch_fetch.tgz')
         const archiveLocal = path.join(runDir, `fetch_${jobId}.tgz`)
-        const dl = await downloadFile(ctx, target.agent, archiveRemote, archiveLocal)
+        const dl = await downloadFile(ctx, target.alias, archiveRemote, archiveLocal)
         if (!dl.ok) throw new Error(`archive download failed: ${dl.text.slice(0, 800)}`)
 
         let mode = 'archive'
@@ -293,7 +292,7 @@ export function batchTools(ctx) {
           await extractArchive(archiveLocal, runDir)
         } catch (e) {
           mode = 'per-file fallback'
-          const listed = await execRemote(ctx, target.agent,
+          const listed = await execRemote(ctx, target.alias,
             listCommand({ remoteDir, includes }), { timeoutMs: 60_000 })
           const rels = parseRemoteList(listed.stdout)
           if (!rels.length) {
@@ -302,7 +301,7 @@ export function batchTools(ctx) {
           for (const rel of rels) {
             const safe = sanitizeRel(rel)
             const local = path.join(runDir, ...safe.split('/'))
-            const one = await downloadFile(ctx, target.agent, remoteJoin(remoteDir, safe), local)
+            const one = await downloadFile(ctx, target.alias, remoteJoin(remoteDir, safe), local)
             if (!one.ok) throw new Error(`per-file download failed for ${safe}: ${one.text}`)
           }
         }
