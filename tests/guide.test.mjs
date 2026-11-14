@@ -32,10 +32,12 @@ test('guide: bilingual copy — every key exactly twice, slurm marked not suppor
 })
 
 test('assets: vendored .js packages with license and copy locations, reports gone', () => {
-  for (const f of ['plotly.min.js', 'xterm.js', 'xterm-addon-fit.js', 'xterm-addon-search.js']) {
-    assert.ok(assetsSrc.includes(`file: '${f}'`), `assets.js must list ${f} as vendored`)
+  assert.ok(assetsSrc.includes("file: 'plotly.min.js'"), 'assets.js must list plotly.min.js as vendored')
+  // the vendored xterm bundle was removed with the dsh-remote terminal (2026-11-14)
+  for (const gone of ['xterm.js', 'xterm-addon-fit.js', 'xterm-addon-search.js']) {
+    assert.ok(!assetsSrc.includes(`'${gone}'`), `assets.js must no longer list ${gone}`)
   }
-  assert.equal((assetsSrc.match(/license: 'MIT'/g) ?? []).length, 4, 'all four vendored packages carry MIT')
+  assert.equal((assetsSrc.match(/license: 'MIT'/g) ?? []).length, 1, 'only plotly is vendored now')
   assert.ok(assetsSrc.includes('function scanCopies'), 'the bounded workspace copy scan must exist')
   assert.ok(assetsSrc.includes("'node_modules'") && assetsSrc.includes("startsWith('.')"), 'scan must skip node_modules and dot dirs')
   // the client consumes packages from /api/assets; the sweep-report listing is gone

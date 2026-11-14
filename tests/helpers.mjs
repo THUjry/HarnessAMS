@@ -5,8 +5,6 @@
 // Run: bare `node --test` from the repo root.
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { apply } from '../src/index.js'
 
@@ -83,24 +81,17 @@ export const callGet = (handler, url) => callRoute(handler, getReq(url))
 export const callPost = (handler, url, payload) => callRoute(handler, postReq(url, payload))
 export const callPut = (handler, url, payload) => callRoute(handler, putReq(url, payload))
 
-// ---- DSH_HOME mirror fixture ----------------------------------------------
-// remoteWorkspacesRoot() resolves mirrors under $DSH_HOME/remote-workspaces;
-// the .dsh-remote-meta.json shape is what the remote-project model matches on.
-export function makeMirrorHome({ host, port, user, remotePath, segments = ['m1', 'ws'] } = {}) {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'hams-dsh-'))
-  const mirror = path.join(home, 'remote-workspaces', ...segments)
-  fs.mkdirSync(mirror, { recursive: true })
-  fs.writeFileSync(path.join(mirror, '.dsh-remote-meta.json'),
-    JSON.stringify({ host, port, username: user, remotePath }))
-  return { home, mirror }
-}
-
-export function setDSHHome(home) {
-  const prev = process.env.DSH_HOME
-  process.env.DSH_HOME = home
+// ---- remote-machines env override -----------------------------------------
+// readRemoteMachines() reads the harnessams.json remote_machines map (or the
+// HARNESSAMS_REMOTE_MACHINES inline-JSON env override, which tests use to stay
+// hermetic); setRemoteMachines swaps that override and returns a restore fn.
+export function setRemoteMachines(map) {
+  const prev = process.env.HARNESSAMS_REMOTE_MACHINES
+  if (map === undefined) delete process.env.HARNESSAMS_REMOTE_MACHINES
+  else process.env.HARNESSAMS_REMOTE_MACHINES = JSON.stringify(map)
   return () => {
-    if (prev === undefined) delete process.env.DSH_HOME
-    else process.env.DSH_HOME = prev
+    if (prev === undefined) delete process.env.HARNESSAMS_REMOTE_MACHINES
+    else process.env.HARNESSAMS_REMOTE_MACHINES = prev
   }
 }
 

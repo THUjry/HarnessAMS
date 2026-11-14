@@ -10,7 +10,7 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { sanitizeFailed, buildDiagnosisPrompt, createDiagnosisSession } from '../src/server/diagnose.js'
-import { registerRoutes, callRoute, callPost, makeMirrorHome, setDSHHome, clientSrc, assertDictKeys, batchOf } from './helpers.mjs'
+import { registerRoutes, callRoute, callPost, clientSrc, assertDictKeys, batchOf } from './helpers.mjs'
 
 test('diagnose: sanitizeFailed caps entries and text, drops unknown fields', () => {
   const big = 'x'.repeat(5000)
@@ -32,9 +32,8 @@ test('diagnose: sanitizeFailed caps entries and text, drops unknown fields', () 
 test('diagnose: prompt body is English, context is complete, language line follows lang', () => {
   const base = {
     check: 'jobs',
-    machine: { id: 'm1', name: 'node1', host: '10.0.0.1', port: 22, username: 'user' },
+    machine: { id: 'node1', name: 'node1', host: '10.0.0.1', port: 22, username: 'user' },
     remotePath: '/home/user/sim',
-    mirrorDir: 'C:/u/.dsh/remote-workspaces/n1/2222/user/ws',
     projectTitle: 'broadband3 repro',
     failed: [{ item: 'LSF jobs', detail: 'bjobs: command not found' }],
   }
@@ -42,12 +41,12 @@ test('diagnose: prompt body is English, context is complete, language line follo
   const en = buildDiagnosisPrompt({ ...base, lang: 'en', auto: false })
   for (const p of [zh, en]) {
     assert.ok(p.includes('Check: LSF jobs (id: jobs)'))
-    assert.ok(p.includes('node1 (user@10.0.0.1:22)'))
-    assert.ok(p.includes('Remote workspace path: /home/user/sim'))
+    assert.ok(p.includes('node1 (user@10.0.0.1:22, dsh-ssh alias "node1")'))
+    assert.ok(p.includes('Remote root: /home/user/sim'))
     assert.ok(p.includes('Project: broadband3 repro'))
     assert.ok(p.includes('bjobs: command not found'))
     assert.ok(p.includes('READ-ONLY'))
-    assert.ok(p.includes('rw_*'))
+    assert.ok(p.includes('ssh_exec (alias "node1")'))
     assert.ok(p.endsWith('Answer in Chinese.') || p.endsWith('Answer in English.'))
   }
   assert.ok(zh.endsWith('Answer in Chinese.'))
@@ -57,7 +56,7 @@ test('diagnose: prompt body is English, context is complete, language line follo
 
   const local = buildDiagnosisPrompt({ check: 'local', failed: [{ item: 'Node', detail: 'boom' }], lang: 'zh' })
   assert.ok(local.includes('Machine: local (this host)'))
-  assert.ok(!local.includes('rw_*'))
+  assert.ok(!local.includes('ssh_exec'))
   const unknown = buildDiagnosisPrompt({ check: 'mystery', failed: [], lang: 'zh' })
   assert.ok(unknown.includes('Check: mystery (id: mystery)'))
 })
@@ -107,8 +106,10 @@ test('diagnose: createDiagnosisSession drives create→prompt→rename and degra
 
 const ANALYZE = 'http://127.0.0.1/harnessams/api/checks/analyze'
 
-// rw_machines text listing in the dsh-remote 0.8.54 shape (parseRwMachinesText contract).
-const MACHINES_TEXT = '- m1  "node1"  [native]  user@10.0.0.1:22\n    auth: key:xx + agent  workspace=/home/user/sim\nconnect with rw_connect(...)\n'
+// ssh_list structured host listing (dsh-ssh 0.4.18 src/tools.ts contract).
+const HOSTS_VALUE = { hosts: [
+  { alias: 'node1', host: '10.0.0.1', port: 22, user: 'user', auth: 'key', keyReady: true },
+] }
 
 test('diagnose route: 400 contract (bad JSON shape, unknown check, empty failed)', async () => {
   const handler = await registerRoutes({ workspaceRegistry: { list: () => [] }, get: () => null })
@@ -163,34 +164,31 @@ test('diagnose route: local check anchors the current project workspace and crea
   }
 })
 
-test('diagnose route: remote check anchors the machine remote-project workspace; 404/409/503 paths', async () => {
+test('diagnose route: remote check resolves the alias and anchors the current project; 404/503 paths', async () => {
   const tmp = await mkdtemp(path.join(tmpdir(), 'hams-diag-remote-'))
-  const { home, mirror } = makeMirrorHome({
-    host: '10.0.0.1', port: 22, user: 'user', remotePath: '/home/user/sim',
-    segments: ['n1', '2222', 'user', 'ws1'],
-  })
-  const restoreHome = setDSHHome(home) // remoteWorkspacesRoot() resolves mirrors under $DSH_HOME/remote-workspaces
   try {
     const calls = []
     const sc = {
       create: async (req) => { calls.push(['create', req]); return { sessionId: 'sess-r' } },
       prompt: async (req) => { calls.push(['prompt', req]) },
     }
-    // The checking session lives in a LOCAL project (checks run from a local
-    // project's Overview); the mirror workspace is registered separately and
-    // carries no session — findRemoteProjectForMachine matches it by machine.
+    // The checking session lives in a local project; a remote check resolves the
+    // machineId against the ssh_list registry and still anchors the diagnosis
+    // session to the CURRENT project (ssh_exec needs no workspace binding).
     const localWs = path.join(tmp, 'local-ws')
     await mkdir(localWs, { recursive: true })
-    const ws = mirror // the remote-project workspace IS the mirror ws1 dir
-    const makeCtx = (controller, registryList) => ({
-      workspaceRegistry: { list: () => registryList ?? [
+    const makeCtx = (controller) => ({
+      workspaceRegistry: { list: () => [
         { id: 'ws-local', path: localWs, title: 'harnessams-workspace', sessionIds: ['sess-local'] },
-        { id: 'ws-remote', path: ws, title: 'node1 (remote)' },
       ] },
       tools: {
         register: () => {},
-        get: (n) => (n === 'rw_machines' ? {} : undefined),
-        execute: async () => batchOf({ value: MACHINES_TEXT, content: [] }),
+        get: (n) => (n === 'ssh_list' ? {} : undefined),
+        execute: async (input) => {
+          const call = input.calls[0]
+          assert.equal(call.name, 'ssh_list')
+          return batchOf({ isError: false, value: HOSTS_VALUE })
+        },
       },
       get: (n) => (n === 'sessionController' ? controller : null),
     })
@@ -198,34 +196,36 @@ test('diagnose route: remote check anchors the machine remote-project workspace;
     const call = (body) => callPost(handler, ANALYZE, body)
 
     const ok = await call({
-      sessionId: 'sess-local', check: 'jobs', machineId: 'm1', lang: 'en', auto: true,
+      sessionId: 'sess-local', check: 'jobs', machineId: 'node1', lang: 'en', auto: true,
       failed: [{ item: 'LSF jobs', detail: 'bjobs: not found', ok: false, ms: 12 }],
     })
     assert.equal(ok.code, 200)
     assert.equal(ok.body.sessionId, 'sess-r')
-    assert.equal(calls[0][1].workspaceId, 'ws-remote')
+    assert.equal(calls[0][1].workspaceId, 'ws-local') // current project, not a mirror
     const prompt = calls[1][1].content[0].text
-    assert.ok(prompt.includes('node1 (user@10.0.0.1:22)'))
-    assert.ok(prompt.includes('Remote workspace path: /home/user/sim'))
+    assert.ok(prompt.includes('node1 (user@10.0.0.1:22, dsh-ssh alias "node1")'))
+    assert.ok(prompt.includes('ssh_exec (alias "node1")'))
     assert.ok(prompt.includes('automatic — the check run ended with failed entries'))
     assert.ok(prompt.endsWith('Answer in English.'))
 
     // unknown machine → 404
     assert.equal((await call({ sessionId: 'sess-local', check: 'load', machineId: 'ghost', failed: [{ item: 'x' }] })).code, 404)
-    // machine without a remote project (registry holds only the local workspace) → 409
-    handler = await registerRoutes(makeCtx(sc, [{ id: 'ws-local', path: localWs, title: 'harnessams-workspace', sessionIds: ['sess-local'] }]))
-    const noRp = await call({ sessionId: 'sess-local', check: 'load', machineId: 'm1', failed: [{ item: 'x' }] })
-    assert.equal(noRp.code, 409)
-    assert.match(noRp.body.error, /no remote project for machine/)
+    // registry channel down → 503
+    handler = await registerRoutes({
+      workspaceRegistry: { list: () => [{ id: 'ws-local', path: localWs, title: 'P', sessionIds: ['sess-local'] }] },
+      tools: { register: () => {}, get: () => undefined },
+      get: (n) => (n === 'sessionController' ? sc : null),
+    })
+    const down = await call({ sessionId: 'sess-local', check: 'jobs', machineId: 'node1', failed: [{ item: 'x' }] })
+    assert.equal(down.code, 503)
+    assert.match(down.body.error, /dsh-ssh hosts unavailable/)
     // controller missing → 503
     handler = await registerRoutes(makeCtx(null))
-    const noSc = await call({ sessionId: 'sess-local', check: 'jobs', machineId: 'm1', failed: [{ item: 'x' }] })
+    const noSc = await call({ sessionId: 'sess-local', check: 'jobs', machineId: 'node1', failed: [{ item: 'x' }] })
     assert.equal(noSc.code, 503)
     assert.match(noSc.body.error, /sessionController/)
   } finally {
-    restoreHome()
     await rm(tmp, { recursive: true, force: true })
-    await rm(home, { recursive: true, force: true })
   }
 })
 

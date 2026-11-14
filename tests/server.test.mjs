@@ -1,5 +1,5 @@
 // Unit tests for the host-half server modules (tier 2 mapping, task store, asset
-// status, dsh-remote machine channel, remote-project model, check buttons).
+// status, the dsh-ssh machine channel, remote.js funnel contracts, check buttons).
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -7,15 +7,18 @@ import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import crypto from 'node:crypto'
-import { assertValidShell, batchOf, firstCall } from './helpers.mjs'
+import { assertValidShell, batchOf, firstCall, setRemoteMachines } from './helpers.mjs'
 import { sessionProject, readTasks, writeTasks, tasksPath } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
-import { resultText, parseRwMachinesText, fetchMachines, findMirrorForMachine, sessionInMirror } from '../src/server/machines.js'
+import { fetchMachines, checkableMachines, remoteMachinesStatus } from '../src/server/machines.js'
 import {
-  parseRwExecText, runRemoteCheckButton, REMOTE_CHECK_BUTTONS,
+  callTool, execRemote, uploadFile, downloadFile, resolveMachine, listMachines,
+  resultText, resultValue, attributeSshError,
+} from '../src/remote.js'
+import {
+  runRemoteCheckButton, REMOTE_CHECK_BUTTONS,
   parseLoadRow, parseBjobsRows, parseBatchRows, rootize,
 } from '../src/server/checks.js'
-import { remoteProjectFor, machineForProject, checkMachinesForLocal, findRemoteProjectForMachine, projectSessions, createRemoteProject } from '../src/server/remote.js'
 
 test('project: sessionProject maps over the workspace registry', () => {
   const registry = {
@@ -79,21 +82,21 @@ test('assets: bounded workspace scan lists stray vendored copies', async () => {
     await mkdir(path.join(root, 'a', 'b', 'c', 'd', 'e', 'f', 'g'), { recursive: true })
     const body = 'x'.repeat(1000)
     await writeFile(path.join(root, 'assets', 'plotly.min.js'), body)
-    await writeFile(path.join(root, 'demo1', 'Analysis', 'xterm.js'), body)
-    await writeFile(path.join(root, '.trash', 'xterm.js'), body) // dot dir: skipped
+    await writeFile(path.join(root, 'demo1', 'Analysis', 'plotly.min.js'), body)
+    await writeFile(path.join(root, '.trash', 'plotly.min.js'), body) // dot dir: skipped
     await writeFile(path.join(root, 'node_modules', 'pkg', 'plotly.min.js'), body) // node_modules: skipped
     await writeFile(path.join(root, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'plotly.min.js'), body) // beyond maxDepth: skipped
     await writeFile(path.join(root, 'assets', 'not-an-asset.js'), body) // other names: ignored
 
     const st = assetsStatus(root)
-    assert.equal(st.packages.length, 4, 'exactly the vendored .js set is listed')
+    assert.equal(st.packages.length, 1, 'only plotly is vendored')
     const byFile = new Map(st.packages.map((p) => [p.file, p]))
-    assert.equal(byFile.get('plotly.min.js').copies.length, 1)
-    assert.ok(byFile.get('plotly.min.js').copies[0].path.endsWith(path.join('assets', 'plotly.min.js')))
-    assert.equal(byFile.get('plotly.min.js').copies[0].bytes, 1000)
-    assert.equal(byFile.get('xterm.js').copies.length, 1)
-    assert.ok(byFile.get('xterm.js').copies[0].path.includes(path.join('demo1', 'Analysis')))
-    assert.equal(byFile.get('xterm-addon-fit.js').copies.length, 0)
+    // both non-skipped copies surface (assets/ and demo1/Analysis/); the dot
+    // dir, node_modules and beyond-maxDepth copies stay hidden
+    assert.equal(byFile.get('plotly.min.js').copies.length, 2)
+    assert.ok(byFile.get('plotly.min.js').copies.some((c) => c.path.endsWith(path.join('assets', 'plotly.min.js'))))
+    assert.ok(byFile.get('plotly.min.js').copies.some((c) => c.path.endsWith(path.join('demo1', 'Analysis', 'plotly.min.js'))))
+    assert.ok(byFile.get('plotly.min.js').copies.every((c) => c.bytes === 1000))
     for (const p of st.packages) {
       assert.equal(p.license, 'MIT')
       assert.ok(p.pkg && p.pkg.bytes > 0, 'the package copy itself must be listed')
@@ -105,331 +108,329 @@ test('assets: bounded workspace scan lists stray vendored copies', async () => {
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-// ---- dsh-remote machine channel ----
+// ---- dsh-ssh machine channel ----
 
-const RW_MACHINES_TEXT = [
-  '- m-1  "node1"  [native]  op@192.0.2.11:22  [CURRENT]',
-  '    auth: key:C:\\Users\\x\\.ssh\\id_ed25519  workspace=/home/op/sim/AutoAnalog',
-  '- m-2  "build farm"  [openssh]  root@10.0.0.8:2222',
-  '    auth: agent',
-  '',
-  'connect with rw_connect(machineId=<id>) to reuse a machine\'s full stored settings.',
-].join('\n')
+const HOSTS = [
+  { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true },
+  { alias: 'farm', host: '10.0.0.8', port: 2222, user: 'root', auth: 'agent', keyReady: false },
+]
 
-test('machines: parseRwMachinesText reads the rw_machines text listing', () => {
-  const ms = parseRwMachinesText(RW_MACHINES_TEXT)
-  assert.equal(ms.length, 2)
-  assert.deepEqual(
-    { ...ms[0] },
-    { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', current: true, workspace: '/home/op/sim/AutoAnalog' })
-  assert.equal(ms[1].current, false)
-  assert.equal(ms[1].port, 2222)
-  assert.equal(ms[1].username, 'root')
-  assert.deepEqual(parseRwMachinesText('No saved machines yet — add one in Settings.'), [])
+const hostsValue = (hosts) => ({ isError: false, value: { hosts } })
+
+test('machines: ssh_list single channel carries the batch contract', async () => {
+  const restore = setRemoteMachines({ node1: '/home/op/sim/AutoAnalog' })
+  try {
+    const inputs = []
+    const tools = {
+      get: (name) => (name === 'ssh_list' ? { name } : undefined),
+      execute: async (input) => {
+        inputs.push(input)
+        // regression pin: dsh-tools 0.2.2-rc.x takes ToolBatchInput — the 0.2.1
+        // single-call shape {callId,name,arguments} crashes on calls.map wrapped
+        // as "Tool batch execution failed", and without a signal the pipeline
+        // crashes reading `signal.aborted`
+        assert.ok(Array.isArray(input.calls) && input.calls.length === 1, 'one-entry calls[] required')
+        const call = input.calls[0]
+        assert.equal(call.type, 'tool-call')
+        assert.equal(call.name, 'ssh_list')
+        assert.ok(call.id, 'call id required')
+        assert.deepEqual(JSON.parse(call.arguments || '{}'), {})
+        assert.ok(input.signal instanceof AbortSignal, 'AbortSignal required')
+        return batchOf(hostsValue(HOSTS))
+      },
+    }
+    const r = await fetchMachines(tools)
+    assert.ok(r.ok, r.reason)
+    assert.equal(r.source, 'tool shell (ssh_list)')
+    assert.equal(r.machines.length, 2)
+    const node1 = r.machines.find((m) => m.id === 'node1')
+    assert.equal(node1.alias, 'node1')
+    assert.equal(node1.host, '192.0.2.11')
+    assert.equal(node1.username, 'op')
+    assert.equal(node1.auth, 'key')
+    assert.equal(node1.keyReady, true)
+    assert.equal(node1.workspace, '/home/op/sim/AutoAnalog') // merged from remote_machines
+    assert.equal(node1.configured, true)
+    const farm = r.machines.find((m) => m.id === 'farm')
+    assert.equal(farm.configured, false)
+    assert.equal(farm.workspace, undefined)
+  } finally {
+    restore()
+  }
 })
 
-test('machines: resultText extracts the tool result payload', () => {
+test('machines: absent tool and empty registry report reasons, never throw', async () => {
+  const absent = await fetchMachines({ get: () => undefined })
+  assert.ok(!absent.ok)
+  assert.match(absent.reason, /ssh_list is not registered/)
+
+  const empty = await fetchMachines({ get: () => ({}), execute: async (input) => batchOf(hostsValue([])) })
+  assert.ok(!empty.ok)
+  assert.match(empty.reason, /no hosts configured in dsh-ssh/)
+
+  const thrown = await fetchMachines({ get: () => ({}), execute: async () => { throw new Error('boom') } })
+  assert.ok(!thrown.ok)
+  assert.match(thrown.reason, /boom/)
+})
+
+test('machines: checkableMachines filters to configured hosts; remoteMachinesStatus projects roots', async () => {
+  const machines = [
+    { id: 'node1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', auth: 'key', keyReady: true, workspace: '/home/op/sim', configured: true },
+    { id: 'farm', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root', auth: 'agent', keyReady: false, workspace: undefined, configured: false },
+  ]
+  const checkable = checkableMachines(machines)
+  assert.equal(checkable.length, 1)
+  assert.deepEqual({ ...checkable[0] }, {
+    id: 'node1', name: 'node1', host: '192.0.2.11', port: 22,
+    username: 'op', auth: 'key', keyReady: true, remotePath: '/home/op/sim',
+  })
+  assert.deepEqual(checkableMachines([]), [])
+  assert.deepEqual(checkableMachines(null), [])
+
+  const tools = { get: () => ({}), execute: async () => batchOf(hostsValue(machines.map((m) => ({
+    alias: m.id, host: m.host, port: m.port, user: m.username, auth: m.auth, keyReady: m.keyReady,
+  })))) }
+  const restore = setRemoteMachines({ node1: '/home/op/sim' })
+  try {
+    const status = await remoteMachinesStatus(tools)
+    assert.equal(status.installed, true)
+    assert.equal(status.machines.length, 2)
+    assert.deepEqual(status.machines[0], {
+      id: 'node1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op',
+      auth: 'key', keyReady: true, remoteRoot: '/home/op/sim', configured: true,
+    })
+    assert.equal(status.machines[1].remoteRoot, null)
+    assert.equal(status.machines[1].configured, false)
+  } finally {
+    restore()
+  }
+
+  const down = await remoteMachinesStatus({ get: () => undefined })
+  assert.equal(down.installed, false)
+  assert.match(down.reason, /ssh_list is not registered/)
+})
+
+// ---- remote.js funnel contracts ----
+
+test('remote: resultText/resultValue extract the tool result payloads', () => {
   assert.equal(resultText('plain'), 'plain')
   assert.equal(resultText({ isError: false, value: { text: 'in value' }, content: [] }), 'in value')
   assert.equal(resultText({ isError: false, value: 'str value', content: [] }), 'str value')
   assert.equal(resultText({ content: [{ type: 'text', text: 'a' }, { type: 'text', text: 'b' }] }), 'a\nb')
   assert.equal(resultText(null), '')
+
+  assert.deepEqual(resultValue({ isError: false, value: { ok: true } }), { ok: true })
+  assert.equal(resultValue({ isError: false, value: 's' }), 's')
+  assert.equal(resultValue({ isError: true, value: { ok: true } }), null) // failures never carry a value
+  assert.equal(resultValue(null), null)
 })
 
-test('machines: execute must carry the batch contract; text listing wins over HTTP', async () => {
-  const seen = []
-  const tools = {
-    get: (name) => (name === 'rw_machines' ? { name } : undefined),
-    execute: async (input) => {
-      seen.push(input)
-      // regression pin: dsh-tools 0.2.2-rc.1 takes ToolBatchInput — the 0.2.1-rc.2
-      // single-call shape {callId,name,arguments} crashes on calls.map wrapped as
-      // "Tool batch execution failed", and without a signal the pipeline crashes
-      // reading `signal.aborted`
-      assert.ok(Array.isArray(input.calls) && input.calls.length === 1, 'one-entry calls[] required')
-      const call = input.calls[0]
-      assert.equal(call.type, 'tool-call')
-      assert.equal(call.name, 'rw_machines')
-      assert.ok(call.id, 'call id required')
-      assert.deepEqual(JSON.parse(call.arguments || '{}'), {})
-      assert.ok(input.signal instanceof AbortSignal, 'AbortSignal required')
-      return batchOf({ isError: false, value: { text: RW_MACHINES_TEXT }, content: [] })
+test('remote: attributeSshError annotates the MaxSessions shape (live-sampled string)', () => {
+  // sampled on node1 with 14 concurrent execs (2026-11-14): channels 11+ throw
+  assert.match(
+    attributeSshError('(SSH) Channel open failure: open failed'),
+    /Channel open failure: open failed \[suspected MaxSessions/)
+  assert.equal(attributeSshError('connect ETIMEDOUT 192.0.2.11:22'), 'connect ETIMEDOUT 192.0.2.11:22')
+})
+
+test('remote: execRemote wraps in timeout KILL and normalizes the value shapes', async () => {
+  const calls = []
+  const ctx = {
+    tools: {
+      get: (n) => (n === 'ssh_exec' ? { n } : undefined),
+      execute: async (input) => {
+        const call = input.calls[0]
+        const args = JSON.parse(call.arguments)
+        calls.push(args)
+        if (args.command.includes('echo hi')) {
+          return batchOf({ isError: false, value: { success: true, exitCode: 0, timedOut: false, stdout: 'hi\n', stderr: '', durationMs: 4 } })
+        }
+        if (args.command.includes('exit 9')) {
+          return batchOf({ isError: false, value: { success: false, exitCode: 9, timedOut: false, stdout: 'out\n', stderr: 'err-9\n', durationMs: 4 } })
+        }
+        if (args.command.includes('sleep 5')) {
+          // exit 137 = the remote `timeout -s KILL` deadline firing (128+SIGKILL)
+          return batchOf({ isError: false, value: { success: false, exitCode: 137, timedOut: false, stdout: '', stderr: '', durationMs: 4 } })
+        }
+        if (args.command.includes('boom')) {
+          // connect/channel errors ride on value.error with success:false
+          return batchOf({ isError: false, value: { success: false, exitCode: null, timedOut: false, stdout: '', stderr: '', durationMs: 0, error: '(SSH) Channel open failure: open failed' } })
+        }
+        return batchOf({ isError: true, content: [{ type: 'text', text: 'pipeline blew up' }] })
+      },
     },
   }
-  const r = await fetchMachines(tools, { headers: { host: '127.0.0.1:3187' } }, async () => { throw new Error('HTTP must not be reached') })
-  assert.ok(r.ok, r.reason)
-  assert.equal(r.source, 'tool shell (rw_machines)')
-  assert.equal(r.machines[0].name, 'node1')
+
+  const good = await execRemote(ctx, 'node1', 'echo hi', { timeoutMs: 30_000 })
+  assert.equal(good.ok, true)
+  assert.equal(good.exitCode, 0)
+  assert.equal(good.stdout, 'hi\n')
+  // wrapper + tool budget + 3-attempt outer signal (replays reset the budget)
+  assert.match(calls[0].command, /^timeout -s KILL 30s sh -c "echo hi"$/)
+  assert.equal(calls[0].alias, 'node1')
+  assert.equal(calls[0].timeoutMs, 120_000) // deadline + 90s connect margin
+
+  const bad = await execRemote(ctx, 'node1', 'echo out; echo err-9 >&2; exit 9', { timeoutMs: 30_000 })
+  assert.equal(bad.ok, false)
+  assert.equal(bad.exitCode, 9)
+  assert.equal(bad.stderr, 'err-9\n')
+
+  const killed = await execRemote(ctx, 'node1', 'sleep 5', { timeoutMs: 30_000 })
+  assert.equal(killed.ok, false)
+  assert.equal(killed.timedOut, true, 'exit 137 is the remote deadline, not a command failure')
+
+  const openFail = await execRemote(ctx, 'node1', 'boom', { timeoutMs: 30_000 })
+  assert.equal(openFail.ok, false)
+  assert.match(openFail.stderr, /suspected MaxSessions/)
+
+  const piped = await execRemote(ctx, 'node1', 'pipeline', { timeoutMs: 30_000 })
+  assert.equal(piped.ok, false)
+  assert.equal(piped.isError, true)
+  assert.match(piped.text, /pipeline blew up/)
 })
 
-test('machines: a thrown tool shell falls through to HTTP with forwarded credentials', async () => {
-  const tools = { get: () => ({}), execute: async () => { throw new Error("Cannot read properties of undefined (reading 'aborted')") } }
-  const calls = []
-  const fetchImpl = async (url, opts) => {
-    calls.push({ url, headers: opts.headers })
-    return { ok: true, json: async () => ({ machines: [{ id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', workspace: '/w', lastConnectedAt: '2026-10-26T08:00:00Z', latencyMs: 41 }], currentId: 'm-1' }) }
-  }
-  const req = { headers: { host: '127.0.0.1:3187', cookie: 'session=abc', authorization: 'Bearer t' } }
-  const r = await fetchMachines(tools, req, fetchImpl)
-  assert.ok(r.ok, r.reason)
-  assert.equal(r.source, 'HTTP /dsh-remote/machines')
-  assert.equal(r.machines[0].current, true)
-  assert.equal(r.machines[0].lastConnectedAt, '2026-10-26T08:00:00Z') // registry extras pass through
-  assert.equal(r.machines[0].latencyMs, 41)
-  assert.equal(calls[0].headers.cookie, 'session=abc')
-  assert.equal(calls[0].headers.authorization, 'Bearer t')
-  assert.match(calls[0].url, /\/dsh-remote\/machines$/)
+test('remote: uploadFile/downloadFile read the structured ok flags', async () => {
+  const seen = []
+  const make = (uploadValue, downloadValue) => ({
+    tools: {
+      get: (n) => (['ssh_upload', 'ssh_download'].includes(n) ? { n } : undefined),
+      execute: async (input) => {
+        const call = input.calls[0]
+        const args = JSON.parse(call.arguments)
+        seen.push({ name: call.name, args })
+        return batchOf({ isError: false, value: call.name === 'ssh_upload' ? uploadValue : downloadValue })
+      },
+    },
+  })
+  const okCtx = make({ ok: true, transferredBytes: 128, files: 1 }, { ok: true, bytes: 512 })
+  const up = await uploadFile(okCtx, 'node1', 'C:/local/x', '/remote/x')
+  assert.equal(up.ok, true)
+  assert.match(up.text, /uploaded 1 file\(s\), 128 bytes/)
+  const down = await downloadFile(okCtx, 'node1', '/remote/x', 'C:/local/x')
+  assert.equal(down.ok, true)
+  assert.match(down.text, /downloaded 512 bytes/)
+  // tool argument shapes: alias + localPath/remotePath (no agent anywhere)
+  assert.deepEqual(seen[0].args, { alias: 'node1', localPath: 'C:/local/x', remotePath: '/remote/x' })
+  assert.deepEqual(seen[1].args, { alias: 'node1', remotePath: '/remote/x', localPath: 'C:/local/x' })
+
+  const failCtx = make({ ok: false, error: 'upload denied' }, { ok: false, error: '(SSH) Channel open failure: open failed' })
+  assert.equal((await uploadFile(failCtx, 'node1', 'a', 'b')).ok, false)
+  const dl = await downloadFile(failCtx, 'node1', 'b', 'a')
+  assert.equal(dl.ok, false)
+  assert.match(dl.text, /suspected MaxSessions/)
 })
 
-test('machines: both channels failing reports both reasons', async () => {
-  const tools = { get: () => undefined } // tool absent
-  const r = await fetchMachines(tools, null, async () => ({ ok: false, status: 401 }))
-  assert.ok(!r.ok)
-  assert.match(r.reason, /rw_machines tool not registered/)
-  assert.match(r.reason, /HTTP fallback/)
-})
-
-test('machines: findMirrorForMachine matches host+port+user from meta files', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'hams-mirrors-'))
+test('remote: resolveMachine pins the alias + remote-root contract', async () => {
+  const restore = setRemoteMachines({ node1: '/home/op/sim', lab9: '' })
   try {
-    const mk = async (dir, meta) => {
-      await mkdir(path.join(root, dir), { recursive: true })
-      await writeFile(path.join(root, dir, '.dsh-remote-meta.json'), JSON.stringify(meta), 'utf8')
-    }
-    await mk('192.0.2.11-op-22/AutoAnalog', { host: '192.0.2.11', port: 22, username: 'op', remotePath: '/home/op/sim/AutoAnalog' })
-    await mk('10.0.0.8-root-2222/farm', { host: '10.0.0.8', port: 2222, username: 'root', remotePath: '/farm' })
-
-    const hit = findMirrorForMachine({ host: '192.0.2.11', port: 22, username: 'op' }, root)
-    assert.ok(hit, 'mirror not found')
-    assert.equal(hit.remotePath, '/home/op/sim/AutoAnalog')
-    assert.match(hit.mirrorDir.replace(/\\/g, '/'), /192\.0\.2\.11-op-22\/AutoAnalog$/)
-
-    assert.equal(findMirrorForMachine({ host: '192.0.2.11', port: 2222, username: 'op' }, root), null) // wrong port
-    assert.equal(findMirrorForMachine({ host: '192.0.2.11', port: 22, username: 'other' }, root), null) // wrong user
-    assert.equal(findMirrorForMachine({ host: 'nope', port: 22 }, root), null)
-    assert.equal(findMirrorForMachine({ host: 'x' }, path.join(root, 'missing')), null) // missing root degrades
-    assert.equal(findMirrorForMachine(null, root), null)
-  } finally { await rm(root, { recursive: true, force: true }) }
-})
-
-test('machines: sessionInMirror borrows a live session rooted in the mirror', () => {
-  const svc = { list: () => [
-    { id: 's-local', header: { cwd: 'D:/proj/harnessams-workspace' } },
-    { id: 's-remote', header: { cwd: 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog/sub' } },
-  ] }
-  const hit = sessionInMirror(null, 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog', svc)
-  assert.ok(hit, 'no session borrowed')
-  assert.equal(hit.agent.id, 's-remote') // rw_exec's background-job owner
-  assert.equal(hit.agent.session.header.cwd, 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog/sub')
-  assert.equal(sessionInMirror(null, 'C:/other', svc), null)
-  assert.equal(sessionInMirror(null, 'C:/Users/x/.dsh/remote-workspaces/192.0.2.11-op-22/AutoAnalog', { list: () => [] }), null)
-  assert.equal(sessionInMirror(null, 'C:/x', null), null) // no sessions service -> null, not throw
-  assert.equal(sessionInMirror(null, null, svc), null)
-})
-
-// ---- remote-project model (remote.js) ----
-
-test('remote: remoteProjectFor walks up to the nearest mirror meta', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'hams-rp-'))
-  try {
-    const meta = { host: '192.0.2.11', port: 22, username: 'op', remotePath: '/home/op/sim/AutoAnalog' }
-    const mirror = path.join(root, '192.0.2.11-op-22', 'AutoAnalog')
-    await mkdir(path.join(mirror, 'sub', 'deep'), { recursive: true })
-    await writeFile(path.join(mirror, '.dsh-remote-meta.json'), JSON.stringify(meta), 'utf8')
-
-    const hit = remoteProjectFor(path.join(mirror, 'sub', 'deep'), root)
-    assert.ok(hit, 'remote project not detected')
-    assert.equal(hit.host, '192.0.2.11')
-    assert.equal(hit.port, 22)
-    assert.equal(hit.remotePath, '/home/op/sim/AutoAnalog')
-    assert.equal(path.resolve(hit.mirrorDir), path.resolve(mirror))
-
-    assert.equal(remoteProjectFor(path.join(root, 'plain-ws'), root), null) // no meta anywhere above
-    assert.equal(remoteProjectFor(root, root), null) // the root itself is not inside
-    assert.equal(remoteProjectFor('D:/proj/unrelated', root), null) // outside the mirror root
-    assert.equal(remoteProjectFor(null, root), null)
-  } finally { await rm(root, { recursive: true, force: true }) }
-})
-
-test('remote: machineForProject matches host+port+user', () => {
-  const list = [
-    { id: 'm-1', host: '192.0.2.11', port: 22, username: 'op' },
-    { id: 'm-2', host: '10.0.0.8', port: 2222, username: 'root' },
-  ]
-  const rp = { host: '192.0.2.11', port: 22, username: 'op' }
-  assert.equal(machineForProject(list, rp).id, 'm-1')
-  assert.equal(machineForProject(list, { ...rp, port: 2222 }), null)
-  assert.equal(machineForProject(list, { ...rp, username: 'root' }), null)
-  assert.equal(machineForProject([], rp), null)
-  assert.equal(machineForProject(list, null), null)
-})
-
-test('remote: checkMachinesForLocal joins machines with remote projects and live sessions', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'hams-cml-'))
-  try {
-    const meta = { host: '192.0.2.11', port: 22, username: 'op', remotePath: '/home/op/sim/AutoAnalog' }
-    const mirror = path.join(root, '192.0.2.11-op-22', 'AutoAnalog')
-    await mkdir(path.join(mirror, 'sub'), { recursive: true })
-    await writeFile(path.join(mirror, '.dsh-remote-meta.json'), JSON.stringify(meta), 'utf8')
     const ctx = {
-      workspaceRegistry: { list: () => [
-        { id: 'w1', path: 'D:/local-ws', title: 'Local' },
-        { id: 'w2', path: mirror, title: 'node1 (remote)' },
-      ] },
-      get: (n) => (n === 'sessions' ? { list: () => [{ id: 's-live-1', header: { cwd: path.join(mirror, 'sub') } }] } : null),
+      tools: {
+        get: (n) => (n === 'ssh_list' ? { n } : undefined),
+        execute: async () => batchOf(hostsValue([
+          { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true },
+          { alias: 'lab9', host: '192.0.2.99', port: 22, user: 'op', auth: 'key', keyReady: true },
+        ])),
+      },
     }
-    const machines = [
-      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', current: true,
-        workspace: '/home/op/sim/AutoAnalog', lastConnectedAt: '2026-10-27T08:00:00Z', latencyMs: 12 },
-      { id: 'm-2', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root' }, // no remote project -> not listed
-    ]
-    const out = checkMachinesForLocal(ctx, machines, root)
-    assert.equal(out.length, 1)
-    assert.equal(out[0].id, 'm-1')
-    assert.equal(out[0].name, 'node1')
-    assert.equal(out[0].remotePath, '/home/op/sim/AutoAnalog')
-    assert.match(out[0].mirrorDir.replace(/\\/g, '/'), /AutoAnalog$/)
-    assert.equal(out[0].projectTitle, 'node1 (remote)')
-    assert.equal(out[0].liveSessions, 1)
-    assert.equal(out[0].sessionId, 's-live-1') // remote-terminal binding hint
-    assert.equal(out[0].current, true)
-    assert.equal(out[0].latencyMs, 12)
-    assert.equal(out[0].lastConnectedAt, '2026-10-27T08:00:00Z')
+    const t = await resolveMachine(ctx, 'node1')
+    assert.equal(t.alias, 'node1')
+    assert.equal(t.remoteRoot, '/home/op/sim')
+    assert.equal(t.machine.id, 'node1')
 
-    assert.equal(findRemoteProjectForMachine(ctx, { host: '10.0.0.8', port: 2222, username: 'root' }, root), null)
-    assert.equal(findRemoteProjectForMachine({ workspaceRegistry: { list: () => { throw new Error('down') } } }, machines[0], root), null)
-    assert.deepEqual(checkMachinesForLocal(null, machines, root), [])
-    assert.deepEqual(checkMachinesForLocal(ctx, [], root), [])
-  } finally { await rm(root, { recursive: true, force: true }) }
+    await assert.rejects(() => resolveMachine(ctx, undefined), /machine_id .* required/)
+    await assert.rejects(() => resolveMachine(ctx, 'ghost'), /no such dsh-ssh host: ghost \(known: node1, lab9\)/)
+    await assert.rejects(() => resolveMachine(ctx, 'lab9'), /no remote root configured for host lab9/)
+  } finally {
+    restore()
+  }
+
+  const broken = {
+    tools: {
+      get: (n) => (n === 'ssh_list' ? { n } : undefined),
+      execute: async () => batchOf({ isError: true, content: [{ type: 'text', text: 'dsh-ssh down' }] }),
+    },
+  }
+  await assert.rejects(() => resolveMachine(broken, 'node1'), /dsh-ssh hosts unavailable: dsh-ssh down/)
 })
 
-test('remote: projectSessions counts live sessions rooted in the workspace', () => {
-  const svc = { list: () => [
-    { header: { cwd: 'D:/ws/sub' } },
-    { header: { cwd: 'D:/ws' } },
-    { header: { cwd: 'D:/other' } },
-  ] }
-  const ctx = { get: (n) => (n === 'sessions' ? svc : null) }
-  assert.equal(projectSessions(ctx, 'D:/ws').length, 2)
-  assert.equal(projectSessions(null, 'D:/ws').length, 0) // no service -> empty, not throw
-  assert.equal(projectSessions(ctx, '').length, 0)
-})
+test('remote: listMachines degrades when ssh_list is missing or empty', async () => {
+  const absent = await listMachines({ tools: { get: () => undefined } })
+  assert.equal(absent.ok, false)
+  assert.match(absent.reason, /ssh_list is not registered/)
 
-test('remote: createRemoteProject registers the mirror as a workspace', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'hams-crproj-'))
+  const restore = setRemoteMachines(undefined)
   try {
-    const meta = { host: '192.0.2.11', port: 22, username: 'op', remotePath: '/home/op/sim/AutoAnalog' }
-    const mirror = path.join(root, '192.0.2.11-op-22', 'AutoAnalog')
-    await mkdir(mirror, { recursive: true })
-    await writeFile(path.join(mirror, '.dsh-remote-meta.json'), JSON.stringify(meta), 'utf8')
-
-    const calls = []
-    const registry = {
-      list: () => [],
-      create: async (p, title) => { calls.push({ p, title }); return { id: 'w9', path: p, title } },
-    }
-    const r = await createRemoteProject({ workspaceRegistry: registry },
-      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op' }, root)
-    assert.ok(r.created, JSON.stringify(r))
-    assert.equal(r.workspace.id, 'w9')
-    assert.equal(calls[0].title, 'node1 (remote)')
-    assert.match(calls[0].p.replace(/\\/g, '/'), /AutoAnalog$/)
-
-    // an already-registered workspace (or one inside the mirror) is not recreated
-    const registry2 = {
-      list: () => [{ id: 'w1', path: path.join(mirror, 'sub'), title: 'existing' }],
-      create: async () => { throw new Error('must not be called') },
-    }
-    const r2 = await createRemoteProject({ workspaceRegistry: registry2 },
-      { id: 'm-1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op' }, root)
-    assert.equal(r2.created, false)
-    assert.equal(r2.workspace.id, 'w1')
-
-    // no mirror -> actionable error pointing at dsh-remote, no throw, no create
-    const r3 = await createRemoteProject({ workspaceRegistry: registry },
-      { id: 'm-2', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root' }, root)
-    assert.match(r3.error, /no local mirror/)
-    assert.match(r3.error, /rw_pick_workspace|dsh-remote/)
-    assert.equal(calls.length, 1) // no second create
-  } finally { await rm(root, { recursive: true, force: true }) }
+    const empty = await listMachines({ tools: { get: () => ({}), execute: async () => batchOf(hostsValue([])) } })
+    assert.equal(empty.ok, false)
+    assert.match(empty.reason, /no hosts configured/)
+  } finally {
+    restore()
+  }
 })
 
 // ---- check buttons (checks.js) ----
-
-test('checks: parseRwExecText splits stdout/stderr and reads exit markers', () => {
-  const clean = parseRwExecText('0.12 0.34 0.45 3/812 12345\n8\n')
-  assert.equal(clean.exitCode, 0)
-  assert.equal(clean.stderr, '')
-  assert.ok(clean.stdout.startsWith('0.12'))
-
-  const failed = parseRwExecText('boom\n-- stderr --\nbash: xyz: command not found\n[exit code: 127]')
-  assert.equal(failed.exitCode, 127)
-  assert.match(failed.stderr, /command not found/)
-  assert.equal(failed.stdout, 'boom')
-
-  const slow = parseRwExecText('partial\n[command timed out after 20000ms]')
-  assert.equal(slow.timedOut, true)
-  assert.equal(slow.exitCode, 0) // no exit marker — timedOut carries the failure
-  assert.equal(slow.stdout, 'partial')
-
-  // dsh-remote 0.8.53+ promotion (jobs service present): the whole result is the
-  // marker + guidance — the command is STILL RUNNING and must never read as ok.
-  const promoted = parseRwExecText('[still running after 20000ms; moved to background job job-ab12cd]\n'
-    + 'Read its output with job_output (job_id="job-ab12cd") and stop it with job_kill.')
-  assert.equal(promoted.promotedJob, 'job-ab12cd')
-  assert.equal(promoted.stdout, '')
-  assert.equal(promoted.stderr, '')
-  assert.equal(promoted.timedOut, false)
-  assert.equal(promoted.exitCode, 0)
-})
 
 test('checks: the button surface is the four Overview buttons', () => {
   assert.deepEqual(REMOTE_CHECK_BUTTONS.map((b) => b.id), ['load', 'jobs', 'batches', 'scripts'])
 })
 
-test('checks: runRemoteCheckButton load runs with the borrowed session agent', async () => {
-  const inputs = []
-  const tools = {
-    get: (name) => (name === 'rw_exec' ? { name } : undefined),
-    execute: async (input) => {
-      inputs.push(input)
-      return batchOf({ isError: false, value: { text: '0.42 0.51 0.55 3/900 12345\n48\n[exit code: 0]' }, content: [] })
+// ssh_exec mock: unwraps the timeout-KILL wrapper for behavior routing and
+// replies with structured ExecResult values.
+function makeCheckCtx(route) {
+  return {
+    tools: {
+      get: (name) => (name === 'ssh_exec' ? { name } : undefined),
+      execute: async (input) => {
+        const call = input.calls[0]
+        const args = JSON.parse(call.arguments)
+        const v = route(String(args.command).replace(/\\"/g, '"'), args)
+        return batchOf({ isError: false, value: v })
+      },
     },
   }
-  const agent = { session: { header: { cwd: 'MIRROR/DIR' } } }
-  const r = await runRemoteCheckButton(tools, 'load', { agent, remotePath: '/home/op/sim' })
-  assert.equal(r.channel, 'dsh-remote (remote project session)')
+}
+const execOk = (stdout) => ({ success: true, exitCode: 0, timedOut: false, stdout, stderr: '', durationMs: 2 })
+const MACHINE = { id: 'node1', name: 'node1', alias: 'node1', host: '192.0.2.11', port: 22, username: 'op', auth: 'key', keyReady: true, workspace: '/home/op/sim' }
+
+test('checks: runRemoteCheckButton load targets the alias through the wrapper', async () => {
+  const inputs = []
+  const ctx = makeCheckCtx((cmd) => {
+    assert.match(cmd, /cat \/proc\/loadavg && nproc/)
+    return execOk('0.42 0.51 0.55 3/900 12345\n48\n')
+  })
+  ctx.tools.execute = async (input) => {
+    inputs.push(input)
+    const call = input.calls[0]
+    const args = JSON.parse(call.arguments)
+    return batchOf({ isError: false, value: execOk('0.42 0.51 0.55 3/900 12345\n48\n') })
+  }
+  const r = await runRemoteCheckButton(ctx, 'load', { machine: MACHINE })
+  assert.equal(r.channel, 'dsh-ssh (node1)')
   assert.equal(r.results.length, 1)
   assert.ok(r.results[0].ok, r.results[0].detail)
   assert.match(r.results[0].cmd, /cat \/proc\/loadavg && nproc/)
   assert.deepEqual(r.results[0].rows, [['0.42', '0.51', '0.55', '3/900', '48']])
   assert.match(r.results[0].result, /load 0\.42 \/ 48 cpu/)
-  assert.equal(inputs[0].agent.session.header.cwd, 'MIRROR/DIR') // binding context
   const call = firstCall(inputs[0]) // batch contract: {name, arguments(object)}
-  assert.equal(call.name, 'rw_exec')
-  assert.equal(call.arguments.promoteOnTimeout, false) // no background-job owner needed
-  assert.equal(call.arguments.timeoutMs, 40000)
+  assert.equal(call.name, 'ssh_exec')
+  assert.equal(call.arguments.alias, 'node1') // zero gating: alias only, no agent
+  assert.match(call.arguments.command, /^timeout -s KILL 40s sh -c /)
+  assert.equal(call.arguments.timeoutMs, 130_000) // deadline + 90s margin
   assert.ok(inputs[0].signal instanceof AbortSignal && call.id !== undefined)
 })
 
 test('checks: runRemoteCheckButton jobs surfaces a missing bjobs and an empty queue', async () => {
-  const tools = {
-    get: () => ({}),
-    execute: async () => batchOf({ isError: false, value: { text: 'bash: bjobs: command not found\n[exit code: 127]' }, content: [] }),
-  }
-  const r = await runRemoteCheckButton(tools, 'jobs', {})
-  assert.equal(r.channel, 'dsh-remote (active machine)') // no agent -> active machine
+  const missing = makeCheckCtx(() => ({ success: false, exitCode: 127, timedOut: false, stdout: 'bash: bjobs: command not found\n', stderr: '', durationMs: 2 }))
+  const r = await runRemoteCheckButton(missing, 'jobs', { machine: MACHINE })
+  assert.equal(r.channel, 'dsh-ssh (node1)')
   assert.equal(r.results[0].ok, false)
   assert.match(r.results[0].result, /command not found/)
   assert.match(r.results[0].detail, /exit code 127/)
   assert.equal(r.results[0].rows, undefined) // no table for a failed run
 
   // LSF bjobs exits 255 with "No job found" on an empty queue — healthy, not a failure
-  const tools2 = {
-    get: () => ({}),
-    execute: async () => batchOf({ isError: false, value: { text: 'No job found\n[exit code: 255]' }, content: [] }),
-  }
-  const r2 = await runRemoteCheckButton(tools2, 'jobs', {})
+  const empty = makeCheckCtx(() => ({ success: false, exitCode: 255, timedOut: false, stdout: 'No job found\n', stderr: '', durationMs: 2 }))
+  const r2 = await runRemoteCheckButton(empty, 'jobs', { machine: MACHINE })
   assert.equal(r2.results[0].ok, true)
   assert.match(r2.results[0].result, /No job found/)
   assert.equal(r2.results[0].detail, undefined)
@@ -441,14 +442,11 @@ test('checks: runRemoteCheckButton jobs parses bjobs -a into columned rows', asy
     'JOBID   USER STAT  QUEUE    FROM_HOST  EXEC_HOST  JOB_NAME   SUBMIT_TIME',
     '15326201 op RUN   normal   login01    node3      sp_00001   Oct 26 21:04',
     '15325000 op DONE  normal   login01    node4      sweep_ctl  Sep 30 08:15',
-    '15324999 op PEND  normal   login01               wait_job   Feb 12  2025',
+    '15324999 op PEND  normal   login01               wait_job   Feb 12 2025',
     'garbage line without columns',
   ].join('\n')
-  const tools = {
-    get: () => ({}),
-    execute: async () => batchOf({ isError: false, value: { text: bjobsOut + '\n[exit code: 0]' }, content: [] }),
-  }
-  const r = await runRemoteCheckButton(tools, 'jobs', { remotePath: '/w' })
+  const ctx = makeCheckCtx(() => execOk(bjobsOut))
+  const r = await runRemoteCheckButton(ctx, 'jobs', { machine: MACHINE })
   const e = r.results[0]
   assert.ok(e.ok, e.detail)
   assert.equal(e.result, '3 job(s)')
@@ -464,17 +462,18 @@ test('checks: runRemoteCheckButton jobs parses bjobs -a into columned rows', asy
 
 test('checks: runRemoteCheckButton batches lists progress files with $ROOT paths', async () => {
   const inputs = []
-  const tools = {
-    get: () => ({}),
-    execute: async (input) => {
-      inputs.push(input)
-      return batchOf({ isError: false, value: { text:
-        '/home/op/sim/AutoAnalog/b1  [completed] 32/32\n'
-        + '/home/op/sim/AutoAnalog/b2  [running] 4/16\n'
-        + '/elsewhere/b3  [failed] 1/8\n[exit code: 0]' }, content: [] })
-    },
+  const ctx = makeCheckCtx(() => execOk(
+    '/home/op/sim/AutoAnalog/b1  [completed] 32/32\n'
+    + '/home/op/sim/AutoAnalog/b2  [running] 4/16\n'
+    + '/elsewhere/b3  [failed] 1/8\n'))
+  ctx.tools.execute = async (input) => {
+    inputs.push(input)
+    return batchOf({ isError: false, value: execOk(
+      '/home/op/sim/AutoAnalog/b1  [completed] 32/32\n'
+      + '/home/op/sim/AutoAnalog/b2  [running] 4/16\n'
+      + '/elsewhere/b3  [failed] 1/8\n') })
   }
-  const r = await runRemoteCheckButton(tools, 'batches', { remotePath: '/home/op/sim/AutoAnalog' })
+  const r = await runRemoteCheckButton(ctx, 'batches', { machine: { ...MACHINE, workspace: '/home/op/sim/AutoAnalog' } })
   const e = r.results[0]
   assert.ok(e.ok, e.detail)
   assert.equal(e.result, '3 batch dir(s)')
@@ -487,8 +486,8 @@ test('checks: runRemoteCheckButton batches lists progress files with $ROOT paths
   assertValidShell(firstCall(inputs[0]).arguments.command)
 
   // empty result is still a pass — it reports "none found", no table
-  const tools2 = { get: () => ({}), execute: async () => batchOf({ isError: false, value: { text: '[exit code: 0]' }, content: [] }) }
-  const r2 = await runRemoteCheckButton(tools2, 'batches', { remotePath: '/w' })
+  const empty = makeCheckCtx(() => execOk(''))
+  const r2 = await runRemoteCheckButton(empty, 'batches', { machine: MACHINE })
   assert.ok(r2.results[0].ok)
   assert.match(r2.results[0].result, /no sweep_progress\.json found/)
   assert.equal(r2.results[0].rows, undefined)
@@ -504,19 +503,19 @@ test('checks: runRemoteCheckButton scripts compares the nested local tree agains
     await writeFile(path.join(dir, '__pycache__'), '', 'utf8').catch(() => {})
     const md5 = (s) => crypto.createHash('md5').update(s).digest('hex')
     const inputs = []
-    const tools = {
-      get: () => ({}),
-      execute: async (input) => {
-        inputs.push(input)
-        return batchOf({ isError: false, value: { text:
-          md5('AAA') + '  spectre/a.py\n'
-          + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  snp/b.py\n'
-          + '__REMOTE_PY__\nspectre/a.py\nsnp/b.py\ncommon/c.py\n[exit code: 0]',
-        }, content: [] })
-      },
+    const ctx = makeCheckCtx(() => execOk(
+      md5('AAA') + '  spectre/a.py\n'
+      + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  snp/b.py\n'
+      + '__REMOTE_PY__\nspectre/a.py\nsnp/b.py\ncommon/c.py\n'))
+    ctx.tools.execute = async (input) => {
+      inputs.push(input)
+      return batchOf({ isError: false, value: execOk(
+        md5('AAA') + '  spectre/a.py\n'
+        + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  snp/b.py\n'
+        + '__REMOTE_PY__\nspectre/a.py\nsnp/b.py\ncommon/c.py\n') })
     }
-    const r = await runRemoteCheckButton(tools, 'scripts',
-      { remotePath: '/home/op/sim', ws: { config: { sim_scripts_dir: dir } } })
+    const r = await runRemoteCheckButton(ctx, 'scripts',
+      { machine: MACHINE, ws: { config: { sim_scripts_dir: dir } } })
     const e = r.results[0]
     assert.ok(e.ok, e.detail)
     assert.match(e.result, /1 in sync, 1 differ, 0 only local, 1 only remote/)
@@ -529,29 +528,31 @@ test('checks: runRemoteCheckButton scripts compares the nested local tree agains
     assert.match(e.warn, /drift/)
     assert.match(e.detail, /snp\/b\.py — differs/)
     assert.match(e.detail, /common\/c\.py — only-remote/)
-    // relative POSIX paths, recursive remote listing, default root = remote workspace
-    assert.match(firstCall(inputs[0]).arguments.command,
-      /cd "\/home\/op\/sim" && md5sum "snp\/b\.py" "spectre\/a\.py"/)
-    assert.match(firstCall(inputs[0]).arguments.command, /find \. -maxdepth 4 -name '\*\.py'/)
-    assertValidShell(firstCall(inputs[0]).arguments.command)
+    // relative POSIX paths, recursive remote listing, default root = the machine's
+    // remote root; the wrapper escapes inner quotes — flatten before matching
+    const scriptCmd = String(firstCall(inputs[0]).arguments.command).replace(/\\"/g, '"')
+    assert.match(scriptCmd, /cd "\/home\/op\/sim" && md5sum "snp\/b\.py" "spectre\/a\.py"/)
+    assert.match(scriptCmd, /find \. -maxdepth 4 -name '\*\.py'/)
+    assertValidShell(scriptCmd)
 
-    // an explicit remote_scripts_dir (a REMOTE absolute path) replaces the workspace root
-    const rRoot = await runRemoteCheckButton(tools, 'scripts',
-      { remotePath: '/home/op/sim', ws: { config: {
+    // an explicit remote_scripts_dir (a REMOTE absolute path) replaces the root
+    const rRoot = await runRemoteCheckButton(ctx, 'scripts',
+      { machine: MACHINE, ws: { config: {
         sim_scripts_dir: dir, remote_scripts_dir: '/home/op/sim/HarnessAMS/scripts' } } })
     assert.match(rRoot.results[0].cmd, /cd "\/home\/op\/sim\/HarnessAMS\/scripts"/)
 
     // an unconfigured scripts dir fails with guidance, not a crash
-    const r2 = await runRemoteCheckButton(tools, 'scripts', { remotePath: '/w', ws: {} })
+    const r2 = await runRemoteCheckButton(ctx, 'scripts', { machine: MACHINE, ws: {} })
     assert.equal(r2.results[0].ok, false)
     assert.match(r2.results[0].detail, /sim_scripts_dir/)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('checks: unknown button and missing rw_exec are hard errors', async () => {
-  const tools = { get: () => ({}), execute: async () => batchOf({ isError: false, value: { text: 'x' }, content: [] }) }
-  await assert.rejects(() => runRemoteCheckButton(tools, 'nope', {}), /unknown check button/)
-  await assert.rejects(() => runRemoteCheckButton({ get: () => undefined }, 'load', {}), /rw_exec tool not registered/)
+test('checks: unknown button, missing ssh_exec and a missing machine are hard errors', async () => {
+  const ctx = makeCheckCtx(() => execOk('x'))
+  await assert.rejects(() => runRemoteCheckButton(ctx, 'nope', { machine: MACHINE }), /unknown check button/)
+  await assert.rejects(() => runRemoteCheckButton({ tools: { get: () => undefined } }, 'load', { machine: MACHINE }), /ssh_exec tool not registered/)
+  await assert.rejects(() => runRemoteCheckButton(ctx, 'load', {}), /opts\.machine/)
 })
 
 // ---- result parsers (structured rows for the columned tables) ----
