@@ -24,7 +24,8 @@
 //     path), merged into the machine records by listMachines.
 //
 // Hardening owned by this funnel (selection-doc §6/§7 mitigations):
-//   - every exec is wrapped in `timeout -s KILL <N>s -- sh -c …` so the remote
+//   - every exec is wrapped in `timeout -s KILL <N>s sh -c …` (no `--`:
+//     busybox-flavored timeout treats it as the command) so the remote
 //     process is guaranteed to die at the deadline (dsh-ssh's own kill on
 //     timeout is best-effort: stream KILL + channel close, connection kept);
 //   - dsh-ssh replays a broken-connection exec up to 3 times and each replay
@@ -156,7 +157,8 @@ export async function listMachines(ctx, timeoutMs = 10_000) {
 
 // ssh_exec funnel: guaranteed-kill wrapper + structured result normalization.
 // `machine` is the alias string or a listMachines record. The command always
-// runs as `timeout -s KILL <N>s -- sh -c <command>` remotely, so exit 137
+// runs as `timeout -s KILL <N>s sh -c <command>` remotely (no `--`, see
+// header), so exit 137
 // (128+SIGKILL) is the remote deadline firing, not a command failure.
 export async function execRemote(ctx, machine, command, { timeoutMs = 40_000 } = {}) {
   const alias = typeof machine === 'string' ? machine : (machine?.alias ?? machine?.id)
