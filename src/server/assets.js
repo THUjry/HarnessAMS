@@ -1,8 +1,8 @@
-// Digital assets: the single shared plotly.min.js and the xterm.js terminal bundle,
-// served from the plugin package under /harnessams/assets/. Whitelist-by-lookup (no
-// path traversal), immutable caching with a size-based ETag — files never change in
-// place (they ship in the tarball), so content-addressed busting on upgrade happens
-// via the package version instead.
+// Digital assets: the single shared plotly.min.js, served from the plugin package
+// under /harnessams/assets/. Whitelist-by-lookup (no path traversal), immutable
+// caching with a size-based ETag — files never change in place (they ship in the
+// tarball), so content-addressed busting on upgrade happens via the package
+// version instead.
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -10,28 +10,19 @@ const ASSET_DIR = path.resolve(import.meta.dirname ?? '.', '../assets')
 const ALLOWED = new Map([
   ['plotly.min.js', path.join(ASSET_DIR, 'plotly.min.js')],
   ['THIRD_PARTY_NOTICES.md', path.join(ASSET_DIR, 'THIRD_PARTY_NOTICES.md')],
-  // task-sidebar remote terminal (vendored @xterm/xterm 5.5.0 + addons, see THIRD_PARTY_NOTICES.md)
-  ['xterm.js', path.join(ASSET_DIR, 'xterm.js')],
-  ['xterm.css', path.join(ASSET_DIR, 'xterm.css')],
-  ['xterm-addon-fit.js', path.join(ASSET_DIR, 'xterm-addon-fit.js')],
-  ['xterm-addon-search.js', path.join(ASSET_DIR, 'xterm-addon-search.js')],
 ])
 const TYPES = {
   '.js': 'text/javascript; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
   '.md': 'text/markdown; charset=utf-8',
 }
 const cache = new Map()
 
 // The vendored .js packages the plugin ships, with their licenses — the console's
 // asset area lists exactly these plus where each copy lives. Keep in sync with the
-// ALLOWED whitelist and THIRD_PARTY_NOTICES.md; the .css/.md companions are not
-// packages and stay unlisted.
+// ALLOWED whitelist and THIRD_PARTY_NOTICES.md. (The vendored xterm bundle was
+// removed with the dsh-remote terminal — see THIRD_PARTY_NOTICES.md.)
 const VENDORED = [
   { file: 'plotly.min.js', label: 'plotly.js', license: 'MIT' },
-  { file: 'xterm.js', label: '@xterm/xterm 5.5.0', license: 'MIT' },
-  { file: 'xterm-addon-fit.js', label: '@xterm/addon-fit 5.5.0', license: 'MIT' },
-  { file: 'xterm-addon-search.js', label: '@xterm/addon-search 5.5.0', license: 'MIT' },
 ]
 const COPY_NAMES = new Set(VENDORED.map((v) => v.file))
 const SCAN = { maxDepth: 6, maxDirs: 4000, maxCopies: 100 }
