@@ -1,13 +1,12 @@
 // Unit tests for the host-half server modules (tier 2 mapping, task store, asset
-// status, the dsh-ssh machine channel, remote.js funnel contracts, check buttons).
-// Run: bare `node --test` from the repo root.
+// status, the dsh-ssh machine channel, remote.js funnel contracts, local
+// environment checks). Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, writeFile, rm, mkdir } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import crypto from 'node:crypto'
-import { assertValidShell, batchOf, firstCall, setRemoteMachines } from './helpers.mjs'
+import { batchOf, firstCall, setRemoteMachines } from './helpers.mjs'
 import { sessionProject, readTasks, writeTasks, tasksPath } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { fetchMachines, checkableMachines, remoteMachinesStatus } from '../src/server/machines.js'
@@ -15,10 +14,7 @@ import {
   callTool, execRemote, uploadFile, downloadFile, resolveMachine, listMachines,
   resultText, resultValue, attributeSshError,
 } from '../src/remote.js'
-import {
-  runRemoteCheckButton, REMOTE_CHECK_BUTTONS,
-  parseLoadRow, parseBjobsRows, parseBatchRows, rootize,
-} from '../src/server/checks.js'
+import { runLocalChecks, localEnvFacts } from '../src/server/checks.js'
 
 test('project: sessionProject maps over the workspace registry', async () => {
   const registry = {
@@ -379,252 +375,41 @@ test('remote: listMachines degrades when ssh_list is missing or empty', async ()
   }
 })
 
-// ---- check buttons (checks.js) ----
+// ---- local environment checks (checks.js) ----
 
-test('checks: the button surface is the four Overview buttons', () => {
-  assert.deepEqual(REMOTE_CHECK_BUTTONS.map((b) => b.id), ['load', 'jobs', 'batches', 'scripts'])
-})
-
-// ssh_exec mock: unwraps the timeout-KILL wrapper for behavior routing and
-// replies with structured ExecResult values.
-function makeCheckCtx(route) {
-  return {
-    tools: {
-      get: (name) => (name === 'ssh_exec' ? { name } : undefined),
-      execute: async (input) => {
-        const call = input.calls[0]
-        const args = JSON.parse(call.arguments)
-        const v = route(String(args.command).replace(/\\"/g, '"'), args)
-        return batchOf({ isError: false, value: v })
-      },
-    },
+test('checks: localEnvFacts carries node version + absolute path, python degrades softly', async () => {
+  const env = await localEnvFacts()
+  assert.equal(env.node.version, process.version)
+  assert.equal(env.node.path, process.execPath)
+  assert.ok(path.isAbsolute(env.node.path))
+  if (env.python.version) {
+    assert.match(env.python.version, /^\d+\.\d+/)
+    assert.equal(env.python.error, '')
+  } else {
+    assert.ok(env.python.error, 'a missing python must surface .error, not a silent fake')
   }
-}
-const execOk = (stdout) => ({ success: true, exitCode: 0, timedOut: false, stdout, stderr: '', durationMs: 2 })
-const MACHINE = { id: 'node1', name: 'node1', alias: 'node1', host: '192.0.2.11', port: 22, username: 'op', auth: 'key', keyReady: true, workspace: '/home/op/sim' }
-
-test('checks: runRemoteCheckButton load targets the alias through the wrapper', async () => {
-  const inputs = []
-  const ctx = makeCheckCtx((cmd) => {
-    assert.match(cmd, /cat \/proc\/loadavg && nproc/)
-    return execOk('0.42 0.51 0.55 3/900 12345\n48\n')
-  })
-  ctx.tools.execute = async (input) => {
-    inputs.push(input)
-    const call = input.calls[0]
-    const args = JSON.parse(call.arguments)
-    return batchOf({ isError: false, value: execOk('0.42 0.51 0.55 3/900 12345\n48\n') })
-  }
-  const r = await runRemoteCheckButton(ctx, 'load', { machine: MACHINE })
-  assert.equal(r.channel, 'dsh-ssh (node1)')
-  assert.equal(r.results.length, 1)
-  assert.ok(r.results[0].ok, r.results[0].detail)
-  assert.match(r.results[0].cmd, /cat \/proc\/loadavg && nproc/)
-  assert.deepEqual(r.results[0].rows, [['0.42', '0.51', '0.55', '3/900', '48']])
-  assert.match(r.results[0].result, /load 0\.42 \/ 48 cpu/)
-  const call = firstCall(inputs[0]) // batch contract: {name, arguments(object)}
-  assert.equal(call.name, 'ssh_exec')
-  assert.equal(call.arguments.alias, 'node1') // zero gating: alias only, no agent
-  assert.match(call.arguments.command, /^timeout -s KILL 40s sh -c /)
-  assert.equal(call.arguments.timeoutMs, 130_000) // deadline + 90s margin
-  assert.ok(inputs[0].signal instanceof AbortSignal && call.id !== undefined)
 })
 
-test('checks: runRemoteCheckButton jobs surfaces a missing bjobs and an empty queue', async () => {
-  const missing = makeCheckCtx(() => ({ success: false, exitCode: 127, timedOut: false, stdout: 'bash: bjobs: command not found\n', stderr: '', durationMs: 2 }))
-  const r = await runRemoteCheckButton(missing, 'jobs', { machine: MACHINE })
-  assert.equal(r.channel, 'dsh-ssh (node1)')
-  assert.equal(r.results[0].ok, false)
-  assert.match(r.results[0].result, /command not found/)
-  assert.match(r.results[0].detail, /exit code 127/)
-  assert.equal(r.results[0].rows, undefined) // no table for a failed run
-
-  // LSF bjobs exits 255 with "No job found" on an empty queue — healthy, not a failure
-  const empty = makeCheckCtx(() => ({ success: false, exitCode: 255, timedOut: false, stdout: 'No job found\n', stderr: '', durationMs: 2 }))
-  const r2 = await runRemoteCheckButton(empty, 'jobs', { machine: MACHINE })
-  assert.equal(r2.results[0].ok, true)
-  assert.match(r2.results[0].result, /No job found/)
-  assert.equal(r2.results[0].detail, undefined)
-  assert.deepEqual(r2.results[0].rows, []) // empty table; the client falls back to the text
-})
-
-test('checks: runRemoteCheckButton jobs parses bjobs -a into columned rows', async () => {
-  const bjobsOut = [
-    'JOBID   USER STAT  QUEUE    FROM_HOST  EXEC_HOST  JOB_NAME   SUBMIT_TIME',
-    '15326201 op RUN   normal   login01    node3      sp_00001   Oct 26 21:04',
-    '15325000 op DONE  normal   login01    node4      sweep_ctl  Sep 30 08:15',
-    '15324999 op PEND  normal   login01               wait_job   Feb 12 2025',
-    'garbage line without columns',
-  ].join('\n')
-  const ctx = makeCheckCtx(() => execOk(bjobsOut))
-  const r = await runRemoteCheckButton(ctx, 'jobs', { machine: MACHINE })
-  const e = r.results[0]
-  assert.ok(e.ok, e.detail)
-  assert.equal(e.result, '3 job(s)')
-  // display columns [jobid, stat, exec host, name, submit time]; the PEND row's empty
-  // exec-host cell is recovered by the all-time-tail heuristic (exec host -> '')
-  assert.deepEqual(e.rows[0], ['15326201', 'RUN', 'node3', 'sp_00001', 'Oct 26 21:04'])
-  assert.deepEqual(e.rows[1], ['15325000', 'DONE', 'node4', 'sweep_ctl', 'Sep 30 08:15'])
-  assert.deepEqual(e.rows[2], ['15324999', 'PEND', '', 'wait_job', 'Feb 12 2025'])
-  assert.equal(e.rows.length, 3) // header + garbage skipped
-  assert.ok(e.rowsRaw[0].startsWith('15326201'))
-  assert.equal(e.truncated, false)
-})
-
-test('checks: runRemoteCheckButton batches lists progress files with $ROOT paths', async () => {
-  const inputs = []
-  const ctx = makeCheckCtx(() => execOk(
-    '/home/op/sim/AutoAnalog/b1  [completed] 32/32\n'
-    + '/home/op/sim/AutoAnalog/b2  [running] 4/16\n'
-    + '/elsewhere/b3  [failed] 1/8\n'))
-  ctx.tools.execute = async (input) => {
-    inputs.push(input)
-    return batchOf({ isError: false, value: execOk(
-      '/home/op/sim/AutoAnalog/b1  [completed] 32/32\n'
-      + '/home/op/sim/AutoAnalog/b2  [running] 4/16\n'
-      + '/elsewhere/b3  [failed] 1/8\n') })
-  }
-  const r = await runRemoteCheckButton(ctx, 'batches', { machine: { ...MACHINE, workspace: '/home/op/sim/AutoAnalog' } })
-  const e = r.results[0]
-  assert.ok(e.ok, e.detail)
-  assert.equal(e.result, '3 batch dir(s)')
-  assert.deepEqual(e.rows, [
-    ['$ROOT/b1', 'completed', '32/32'],
-    ['$ROOT/b2', 'running', '4/16'],
-    ['/elsewhere/b3', 'failed', '1/8'], // outside the scope — verbatim
-  ])
-  assert.match(e.cmd, /find "\/home\/op\/sim\/AutoAnalog" -maxdepth 4 -name sweep_progress\.json/)
-  assertValidShell(firstCall(inputs[0]).arguments.command)
-
-  // empty result is still a pass — it reports "none found", no table
-  const empty = makeCheckCtx(() => execOk(''))
-  const r2 = await runRemoteCheckButton(empty, 'batches', { machine: MACHINE })
-  assert.ok(r2.results[0].ok)
-  assert.match(r2.results[0].result, /no sweep_progress\.json found/)
-  assert.equal(r2.results[0].rows, undefined)
-})
-
-test('checks: runRemoteCheckButton scripts compares the nested local tree against the remote scripts root', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'hams-scripts-'))
+test('checks: runLocalChecks rows — no sky130, Node/Python carry absolute paths', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'hams-localchk-'))
   try {
-    await mkdir(path.join(dir, 'spectre'))
-    await mkdir(path.join(dir, 'snp'))
-    await writeFile(path.join(dir, 'spectre', 'a.py'), 'AAA', 'utf8')
-    await writeFile(path.join(dir, 'snp', 'b.py'), 'BBB', 'utf8')
-    await writeFile(path.join(dir, '__pycache__'), '', 'utf8').catch(() => {})
-    const md5 = (s) => crypto.createHash('md5').update(s).digest('hex')
-    const inputs = []
-    const ctx = makeCheckCtx(() => execOk(
-      md5('AAA') + '  spectre/a.py\n'
-      + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  snp/b.py\n'
-      + '__REMOTE_PY__\nspectre/a.py\nsnp/b.py\ncommon/c.py\n'))
-    ctx.tools.execute = async (input) => {
-      inputs.push(input)
-      return batchOf({ isError: false, value: execOk(
-        md5('AAA') + '  spectre/a.py\n'
-        + 'deadbeefdeadbeefdeadbeefdeadbeef' + '  snp/b.py\n'
-        + '__REMOTE_PY__\nspectre/a.py\nsnp/b.py\ncommon/c.py\n') })
+    const results = await runLocalChecks({ config: { workspace_root: dir } })
+    const items = results.map((r) => r.item)
+    assert.deepEqual(items, ['Connectivity (local)', 'Node', 'Python', 'Disk capacity (workspace)', 'Workspace writable'])
+    assert.ok(!items.some((n) => /sky130/i.test(n)), 'the sky130 row is retired (2026-11-18)')
+    const node = results.find((r) => r.item === 'Node')
+    assert.ok(node.ok, node.detail)
+    assert.equal(node.result, process.version)
+    assert.equal(node.detail, process.execPath) // version AND absolute path
+    const py = results.find((r) => r.item === 'Python')
+    if (py.ok) {
+      assert.match(py.result, /^Python \d+\.\d+/)
+      if (py.detail !== '(executable path not resolved)') assert.ok(path.isAbsolute(py.detail))
     }
-    const r = await runRemoteCheckButton(ctx, 'scripts',
-      { machine: MACHINE, ws: { config: { sim_scripts_dir: dir } } })
-    const e = r.results[0]
-    assert.ok(e.ok, e.detail)
-    assert.match(e.result, /1 in sync, 1 differ, 0 only local, 1 only remote/)
-    assert.deepEqual(e.rows, [
-      ['snp/b.py', 'differs'],
-      ['spectre/a.py', 'in-sync'],
-      ['common/c.py', 'only-remote'],
-    ])
-    assert.equal(e.truncated, false)
-    assert.match(e.warn, /drift/)
-    assert.match(e.detail, /snp\/b\.py — differs/)
-    assert.match(e.detail, /common\/c\.py — only-remote/)
-    // relative POSIX paths, recursive remote listing, default root = the machine's
-    // remote root; the wrapper escapes inner quotes — flatten before matching
-    const scriptCmd = String(firstCall(inputs[0]).arguments.command).replace(/\\"/g, '"')
-    assert.match(scriptCmd, /cd "\/home\/op\/sim" && md5sum "snp\/b\.py" "spectre\/a\.py"/)
-    assert.match(scriptCmd, /find \. -maxdepth 4 -name '\*\.py'/)
-    assertValidShell(scriptCmd)
-
-    // an explicit remote_scripts_dir (a REMOTE absolute path) replaces the root
-    const rRoot = await runRemoteCheckButton(ctx, 'scripts',
-      { machine: MACHINE, ws: { config: {
-        sim_scripts_dir: dir, remote_scripts_dir: '/home/op/sim/HarnessAMS/scripts' } } })
-    assert.match(rRoot.results[0].cmd, /cd "\/home\/op\/sim\/HarnessAMS\/scripts"/)
-
-    // an unconfigured scripts dir fails with guidance, not a crash
-    const r2 = await runRemoteCheckButton(ctx, 'scripts', { machine: MACHINE, ws: {} })
-    assert.equal(r2.results[0].ok, false)
-    assert.match(r2.results[0].detail, /sim_scripts_dir/)
+    const disk = results.find((r) => r.item === 'Disk capacity (workspace)')
+    assert.ok(disk.ok, disk.detail)
+    assert.match(disk.result, /GiB/)
+    const wr = results.find((r) => r.item === 'Workspace writable')
+    assert.ok(wr.ok, wr.detail)
   } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
-test('checks: unknown button, missing ssh_exec and a missing machine are hard errors', async () => {
-  const ctx = makeCheckCtx(() => execOk('x'))
-  await assert.rejects(() => runRemoteCheckButton(ctx, 'nope', { machine: MACHINE }), /unknown check button/)
-  await assert.rejects(() => runRemoteCheckButton({ tools: { get: () => undefined } }, 'load', { machine: MACHINE }), /ssh_exec tool not registered/)
-  await assert.rejects(() => runRemoteCheckButton(ctx, 'load', {}), /opts\.machine/)
-})
-
-// ---- result parsers (structured rows for the columned tables) ----
-
-test('checks: parseLoadRow takes loadavg + nproc and drops the last-pid field', () => {
-  assert.deepEqual(parseLoadRow('0.42 0.51 0.55 3/900 12345\n48\n'), ['0.42', '0.51', '0.55', '3/900', '48'])
-  assert.equal(parseLoadRow('0.42 0.51 0.55 3/900\n'), null) // no nproc line
-  assert.equal(parseLoadRow('not a loadavg line\n48\n'), null)
-  assert.equal(parseLoadRow(''), null)
-  assert.equal(parseLoadRow(null), null)
-})
-
-test('checks: parseBjobsRows handles header, formats, empty queue and garbage', () => {
-  const parsed = parseBjobsRows('JOBID USER STAT QUEUE FROM_HOST EXEC_HOST JOB_NAME SUBMIT_TIME\n'
-    + '1 op RUN normal login01 node3 job_a Oct 26 21:04\n')
-  assert.deepEqual(parsed.rows, [['1', 'RUN', 'node3', 'job_a', 'Oct 26 21:04']])
-  assert.equal(parsed.total, 1)
-  assert.equal(parsed.truncated, false)
-
-  // the target cluster's zscheduler bjobs adds FROM_CLUSTER/EXEC_CLUSTER columns —
-  // the layout is taken from the header line, not a fixed column count
-  const zsched = parseBjobsRows(
-    'JOBID USER STAT QUEUE FROM_CLUSTER FROM_HOST EXEC_CLUSTER EXEC_HOST JOB_NAME SUBMIT_TIME\n'
-    + '15350701 test_user RUN normal zscheduler node1 zscheduler node3 virtuoso Oct 26 16:43\n')
-  assert.deepEqual(zsched.rows, [['15350701', 'RUN', 'node3', 'virtuoso', 'Oct 26 16:43']])
-
-  const empty = parseBjobsRows('No job found')
-  assert.deepEqual(empty, { rows: [], raw: [], total: 0, truncated: false })
-
-  // numeric job names must not be peeled into the date tail
-  const numeric = parseBjobsRows('2 u RUN q h e 12345 Oct 26 21:04')
-  assert.deepEqual(numeric.rows, [['2', 'RUN', 'e', '12345', 'Oct 26 21:04']])
-
-  // a tail without any time shape stays part of the job name
-  const named = parseBjobsRows('3 u RUN q h e my job name')
-  assert.deepEqual(named.rows, [['3', 'RUN', 'e', 'my job name', '']])
-
-  // a tail without any time shape stays part of the job name; nothing parses -> null
-  assert.equal(parseBjobsRows('only garbage here'), null)
-  assert.equal(parseBjobsRows(''), null)
-
-  // >maxRows entries are capped and flagged
-  const many = Array.from({ length: 35 }, (_, i) => `${1000 + i} u RUN q h e job_${i} Oct 26 21:04`).join('\n')
-  const capped = parseBjobsRows(many)
-  assert.equal(capped.rows.length, 30)
-  assert.equal(capped.total, 35)
-  assert.equal(capped.truncated, true)
-})
-
-test('checks: rootize collapses the workspace-scope prefix only', () => {
-  assert.equal(rootize('/home/op/sim/AutoAnalog/b1', '/home/op/sim/AutoAnalog'), '$ROOT/b1')
-  assert.equal(rootize('/home/op/sim/AutoAnalog', '/home/op/sim/AutoAnalog'), '$ROOT')
-  assert.equal(rootize('/home/op/sim/AutoAnalogX/b1', '/home/op/sim/AutoAnalog'), '/home/op/sim/AutoAnalogX/b1') // prefix boundary
-  assert.equal(rootize('/elsewhere/b1', '/home/op/sim/AutoAnalog'), '/elsewhere/b1')
-  assert.equal(rootize('/b1', ''), '/b1') // no scope -> verbatim
-})
-
-test('checks: parseBatchRows turns one-liner lines into [dir, status, progress]', () => {
-  const rows = parseBatchRows(
-    '/w/b1  [completed] 18/18\n/w/b2  [?] ?/?\nnot a batch line\n',
-    '/w')
-  assert.deepEqual(rows, [['$ROOT/b1', 'completed', '18/18'], ['$ROOT/b2', '?', '?/?']])
-  assert.deepEqual(parseBatchRows('', '/w'), [])
 })

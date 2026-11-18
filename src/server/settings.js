@@ -6,6 +6,7 @@
 // toggling the mode back and forth never loses the binding.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { ensureAgentsMdTemplate } from './agentsmd.js'
 
 const SETTINGS_DIR = '.harnessams'
 const SETTINGS_FILE = 'project_settings.json'
@@ -97,6 +98,9 @@ export async function writeSettings(workspacePath, settings) {
   const dir = path.join(workspacePath, SETTINGS_DIR)
   const finalPath = settingsPath(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
+  // .harnessams creation moment: lay down the AGENTS.md config-table template
+  // (empty table + first-fill instruction; idempotent, never throws).
+  await ensureAgentsMdTemplate(workspacePath)
   // Atomic replace — same discipline as tasks.json.
   const tmp = finalPath + '.tmp'
   await fsp.writeFile(tmp, JSON.stringify({ version: 1, ...settings }, null, 2) + '\n', 'utf8')

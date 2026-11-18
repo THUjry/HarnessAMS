@@ -8,6 +8,7 @@
 // break an assembly run.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { ensureAgentsMdTemplate } from './agentsmd.js'
 
 const PARAMS_DIR = '.harnessams'
 const PARAMS_FILE = 'check_params.json'
@@ -82,6 +83,9 @@ export async function writeCheckParams(workspacePath, params) {
   const dir = path.join(workspacePath, PARAMS_DIR)
   const finalPath = checkParamsPath(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
+  // .harnessams creation moment: lay down the AGENTS.md config-table template
+  // (empty table + first-fill instruction; idempotent, never throws).
+  await ensureAgentsMdTemplate(workspacePath)
   // Atomic replace — same discipline as project_settings.json / tasks.json.
   const tmp = finalPath + '.tmp'
   await fsp.writeFile(tmp, JSON.stringify({ version: 1, ...params }, null, 2) + '\n', 'utf8')
