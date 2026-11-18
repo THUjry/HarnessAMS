@@ -5,8 +5,9 @@
 //           dsh-ssh host registry with each alias's configured remote root), digital
 //           assets (vendored .js packages with licenses + package/workspace copy
 //           locations), disk usage;
-//   tier 2: project = DSH workspace (a local folder) — no per-session data; every
-//           session of a workspace shares one task list;
+//   tier 2: project = DSH workspace (a local folder) — the task list is shared by
+//           every session of the workspace; the SELECTED task is per-session
+//           (localStorage v2 map, forked sessions inherit their parent's entry);
 //   tier 3: right-sidebar task tab — the first-level strip
 //           opens on the project overview (health-check buttons + settings +
 //           one-click self-check, project-scoped so same-project session switches
@@ -52,6 +53,8 @@ window.__ModuleLoader__.load({
         'common.cancel': '取消',
         'common.none': '（无）',
         'common.sectionFailed': '此区块加载失败：',
+        'common.expand': '展开',
+        'common.collapse': '收起',
         'console.title': 'HarnessAMS 控制台',
         'console.infoFailed': 'info 读取失败：{msg}',
         'console.workspace': '工作区：{path}',
@@ -293,6 +296,8 @@ window.__ModuleLoader__.load({
         'common.cancel': 'Cancel',
         'common.none': '(none)',
         'common.sectionFailed': 'This section failed: ',
+        'common.expand': 'Show more',
+        'common.collapse': 'Show less',
         'console.title': 'HarnessAMS Console',
         'console.infoFailed': 'info failed: {msg}',
         'console.workspace': 'Workspace: {path}',
@@ -624,13 +629,13 @@ window.__ModuleLoader__.load({
       const el = document.createElement('style')
       el.id = 'dsh-harnessams-css'
       el.textContent = `
-.hams-page { padding: 20px 28px 48px; max-width: 1000px; font-size: var(--dsh-content-font-size, 14px); }
+.hams-page { padding: 20px 28px 48px; max-width: 1000px; font-size: var(--dsh-content-font-size, 14px); overflow-wrap: anywhere; }
 .hams-h1 { font-size: calc(20px + var(--dsh-content-font-delta, 0px)); margin: 0 0 4px; font-weight: 600; }
 .hams-meta { opacity: .7; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); margin-bottom: 14px; }
 .hams-section { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 8px; padding: 12px 16px 14px; margin: 14px 0; }
 .hams-section > h2 { font-size: calc(15px + var(--dsh-content-font-delta, 0px)); margin: 0 0 8px; font-weight: 600; }
 .hams-table { border-collapse: collapse; width: 100%; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); margin: 8px 0; }
-.hams-table th, .hams-table td { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding: 3px 8px; text-align: left; vertical-align: top; }
+.hams-table th, .hams-table td { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding: 3px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .hams-table th { opacity: .7; font-weight: 500; }
 .hams-rowbad td { background: color-mix(in srgb, #e05252 12%, transparent); }
 .hams-good { color: #3fb950; } .hams-bad { color: #e05252; font-weight: 600; } .hams-warn { color: #d29922; } .hams-faint { opacity: .6; }
@@ -642,6 +647,12 @@ window.__ModuleLoader__.load({
 .hams-input, .hams-select, .hams-textarea { font-size: calc(13px + var(--dsh-content-font-delta, 0px)); border-radius: 5px; padding: 3px 7px; color: inherit;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   background: color-mix(in srgb, currentColor 4%, transparent); font-family: inherit; }
+/* color-scheme makes the native option popup follow the theme; without it the
+   popup renders light while the inherited select text stays light too — options
+   only became readable on hover (fixed 2026-11-18). System colors on <option>
+   keep the popup readable in both themes. */
+.hams-select { color-scheme: light dark; }
+.hams-select option { background: canvas; color: canvasText; }
 .hams-input, .hams-textarea { width: 100%; box-sizing: border-box; }
 .hams-textarea { min-height: 90px; resize: vertical; }
 .hams-badge { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: calc(12px + var(--dsh-content-font-delta, 0px));
@@ -650,7 +661,15 @@ window.__ModuleLoader__.load({
 .hams-badge-bad { color: #d29922; border-color: color-mix(in srgb, #d29922 45%, transparent); }
 .hams-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .hams-err { color: #e05252; padding: 8px; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); }
-.hams-pre { font-size: calc(11.5px + var(--dsh-content-font-delta, 0px)); white-space: pre-wrap; margin: 4px 0; opacity: .8; overflow: auto; }
+.hams-pre { font-size: calc(11.5px + var(--dsh-content-font-delta, 0px)); white-space: pre-wrap; margin: 4px 0; opacity: .8;
+  overflow-wrap: anywhere; word-break: break-all; line-height: 1.5; }
+/* ClampText: read-only text over 8 rendered lines collapses to 8 (max-height in
+   em of the pre's own font-size: 8 lines x 1.5 line-height) behind a toggle. */
+.hams-clamp { overflow: hidden; max-height: 12em; }
+.hams-clamp-open { max-height: none; }
+.hams-clamp-btn { background: none; border: none; padding: 0; cursor: pointer; color: inherit; opacity: .65;
+  font-size: calc(12px + var(--dsh-content-font-delta, 0px)); text-decoration: underline; }
+.hams-clamp-btn:hover { opacity: 1; }
 .hams-link { color: inherit; }
 .hams-dim { opacity: .65; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
 /* tier 1 first-run guide: centered entry state + the sectioned guide page */
@@ -670,13 +689,14 @@ window.__ModuleLoader__.load({
 .hams-tasktab .hams-x:hover { opacity: 1; color: #e05252; }
 .hams-addbtn { border: 1px dashed color-mix(in srgb, currentColor 35%, transparent); background: none;
   color: inherit; border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); }
-.hams-body { padding: 8px 10px; overflow: auto; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.hams-body { padding: 8px 10px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
 .hams-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.38); display: flex;
   align-items: center; justify-content: center; z-index: 90; }
 .hams-dialog { border: 1px solid color-mix(in srgb, currentColor 28%, transparent); border-radius: 9px;
-  padding: 16px 18px; min-width: 320px; max-width: 440px;
+  padding: 16px 18px; min-width: 320px; max-width: 440px; overflow-wrap: anywhere;
   background: color-mix(in srgb, black 20%, canvas); color: fieldtext;
   color: light-dark(canvasText, #e6e6e6); backdrop-filter: blur(3px); }
+.hams-browse-dialog { width: 400px; max-width: 92vw; }
 .hams-dialog h3 { margin: 0 0 10px; font-size: calc(14.5px + var(--dsh-content-font-delta, 0px)); font-weight: 600; }
 .hams-field { margin: 8px 0; }
 .hams-field label { display: block; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); opacity: .7; margin-bottom: 3px; }
@@ -690,8 +710,8 @@ window.__ModuleLoader__.load({
   border-radius: 8px; padding: 14px; opacity: .75; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
 /* tier 3 Dashboard: report viewer (toolbar + iframe) and the add-report browser */
 .hams-dashview { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; min-height: 0; flex: 1; }
-.hams-dashtoolbar { margin: 0; flex-wrap: nowrap; }
-.hams-dashtoolbar .hams-select { flex: 1 1 120px; min-width: 60px; max-width: 100%; }
+.hams-dashtoolbar { margin: 0; flex-wrap: wrap; }
+.hams-dashtoolbar .hams-select { flex: 1 1 120px; min-width: 0; max-width: 100%; }
 .hams-btn { text-decoration: none; }
 .hams-dashframe { width: 100%; flex: 1; min-height: 300px;
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 8px; }
@@ -706,7 +726,7 @@ window.__ModuleLoader__.load({
 .hams-headerbtn { display: inline-flex; align-items: center; gap: 4px; }
 /* session tool cards (tool.call.toolview): simulation progress renderers */
 .hams-tc { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 8px;
-  padding: 8px 12px; margin: 4px 0; font-size: var(--dsh-content-font-size, 14px); max-width: 680px; }
+  padding: 8px 12px; margin: 4px 0; font-size: var(--dsh-content-font-size, 14px); max-width: 680px; overflow-wrap: anywhere; }
 .hams-tc-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .hams-tc-title { font-weight: 600; }
 .hams-tc-badge { display: inline-block; padding: 0 8px; border-radius: 10px;
@@ -992,7 +1012,7 @@ window.__ModuleLoader__.load({
           { k: tr('card.label.remoteDir'), v: d.remote_dir },
           { k: tr('card.label.updated'), v: d.updated_at },
         ] }))
-        if (d.errlog_tail) els.push(h('div', { key: 'err', className: 'hams-pre hams-warn' }, esc(String(d.errlog_tail))))
+        if (d.errlog_tail) els.push(h(ClampText, { key: 'err', text: String(d.errlog_tail), className: 'hams-warn' }))
         return els
       }
       if (toolName === 'batch_submit') {
@@ -1069,6 +1089,30 @@ window.__ModuleLoader__.load({
       return parts.join('\n---\n')
     }
 
+    // Long read-only text (check details, raw JSON, log tails) collapses past 8
+    // rendered lines: a clamped <pre> plus a toggle that only renders when the
+    // content actually overflows — measured after mount, so WRAPPING (not the
+    // newline count) decides. Re-collapses whenever the text changes.
+    function ClampText({ text, className }) {
+      const [open, setOpen] = useState(false)
+      const [overflows, setOverflows] = useState(false)
+      const ref = useRef(null)
+      useEffect(() => { setOpen(false) }, [text])
+      useEffect(() => {
+        if (open) return
+        const el = ref.current
+        if (!el) return
+        setOverflows(el.scrollHeight > el.clientHeight + 1)
+      }, [open, text])
+      return h('div', null,
+        h('pre', {
+          ref,
+          className: 'hams-pre hams-clamp' + (open ? ' hams-clamp-open' : '') + (className ? ' ' + className : ''),
+        }, esc(text)),
+        overflows && h('button', { className: 'hams-clamp-btn', onClick: () => setOpen(!open) },
+          tr(open ? 'common.collapse' : 'common.expand')))
+    }
+
     // One simulation tool call card, all three phases. Occupying the key means an
     // off toggle cannot fall back to the DSH generic card — the off view renders
     // the raw shape itself instead of leaving an empty row.
@@ -1091,8 +1135,8 @@ window.__ModuleLoader__.load({
           h('div', { className: 'hams-tc-head' },
             h('span', { className: 'hams-tc-title' }, esc(toolName)),
             h('span', { className: 'hams-faint' }, esc(phase))),
-          phase === 'start' && args ? h('div', { className: 'hams-pre' }, esc(JSON.stringify(args, null, 2))) : null,
-          result ? h('div', { className: 'hams-pre' }, esc((result.text || '').slice(0, 4000))) : null)
+          phase === 'start' && args ? h(ClampText, { text: JSON.stringify(args, null, 2) }) : null,
+          result ? h(ClampText, { text: (result.text || '').slice(0, 4000) }) : null)
       }
       const agg = live.agg && live.agg.local ? live.agg : null
       let body
@@ -1120,7 +1164,7 @@ window.__ModuleLoader__.load({
         body,
         d.expanded ? h('div', { className: 'hams-tc-details' },
           agg && (agg.batches || []).length ? aggTable(agg) : null,
-          h('div', { className: 'hams-pre' }, esc(rawTextOf(props, result)))) : null)
+          h(ClampText, { text: rawTextOf(props, result) })) : null)
     }
 
     // Console-page display settings: the toggle backing the tool cards (guide s6
@@ -1262,23 +1306,93 @@ window.__ModuleLoader__.load({
     }
 
     // First-level strip selection inside the task tab: 'overview' (the project
-    // overview pseudo-capsule, the default display) or a task id. Same survive-a-
-    // remount treatment as the sub-view above; a stale task id falls back to
-    // 'overview' when the list arrives (TaskSidebarBody sanitizes after fetch).
-    const STRIP_SEL_KEY = 'hams-task-strip-sel'
-    let stripSelMemory = null
-    function readStripSel() {
-      if (stripSelMemory) return stripSelMemory
+    // overview pseudo-capsule, the default display) or a task id. PER SESSION
+    // since 2026-11-18 (user decision): v2 stores a {sessionId: selection} map
+    // so different sessions of one project keep their own task, and a forked
+    // session inherits its parent's entry on first sight (sessionParents mirror
+    // filled in apply()). Same survive-a-remount treatment as the sub-view
+    // above; a stale task id falls back to 'overview' when the list arrives
+    // (TaskSidebarBody sanitizes after fetch).
+    const STRIP_SEL_KEY = 'hams-task-strip-sel-v2'
+    const STRIP_SEL_LEGACY_KEY = 'hams-task-strip-sel' // pre-2026-11-18 browser-global single value
+    const STRIP_SEL_MAX_SESSIONS = 50
+    let stripSelMemory = null // Map<sessionId, selection>; insertion order doubles as recency for pruning
+    function stripSelMap() {
+      if (!stripSelMemory) {
+        stripSelMemory = new Map()
+        try {
+          const v = JSON.parse(localStorage.getItem(STRIP_SEL_KEY) || 'null')
+          if (v && typeof v === 'object' && !Array.isArray(v)) {
+            for (const [k, sel] of Object.entries(v)) {
+              if (k && typeof sel === 'string' && sel) stripSelMemory.set(k, sel)
+            }
+          }
+        } catch { /* private mode / corrupt payload */ }
+      }
+      return stripSelMemory
+    }
+    function hasStoredStripSel(sessionId) {
+      return !!sessionId && stripSelMap().has(sessionId)
+    }
+    function readStripSel(sessionId) {
+      if (!sessionId) return 'overview'
+      const m = stripSelMap()
+      if (m.has(sessionId)) return m.get(sessionId)
+      // one-time v1 migration: the old browser-global single value seeds the
+      // first unseen session, so an upgrade keeps the visible selection
       try {
-        const v = localStorage.getItem(STRIP_SEL_KEY)
-        if (v) { stripSelMemory = v; return v }
+        const legacy = localStorage.getItem(STRIP_SEL_LEGACY_KEY)
+        if (legacy) {
+          localStorage.removeItem(STRIP_SEL_LEGACY_KEY)
+          m.set(sessionId, legacy)
+          persistStripSel()
+          return legacy
+        }
       } catch { /* private mode */ }
       return 'overview'
     }
-    function rememberStripSel(v) {
-      stripSelMemory = v
-      try { localStorage.setItem(STRIP_SEL_KEY, v) } catch { /* private mode */ }
+    function rememberStripSel(sessionId, v) {
+      if (!sessionId) return
+      const m = stripSelMap()
+      m.delete(sessionId) // re-insert at the end so pruning drops the OLDEST entry
+      m.set(sessionId, v)
+      while (m.size > STRIP_SEL_MAX_SESSIONS) m.delete(m.keys().next().value)
+      persistStripSel()
     }
+    function persistStripSel() {
+      try { localStorage.setItem(STRIP_SEL_KEY, JSON.stringify(Object.fromEntries(stripSelMap()))) } catch { /* private mode */ }
+    }
+
+    // Last ACTIVE strip selection (module memory): a first-seen session with
+    // no stored entry inherits this — fork-then-switch and new-session
+    // continuation both land there (the host exposes no parent-session read
+    // face to plugins; see the note in apply()).
+    let lastActiveStripSel = null
+
+    // Host right-sidebar layout persistence is per session (localStorage
+    // dsh.sidebar-right.v1.<sessionId>): the value's layout.nodes.*.tabs arrays
+    // list the tabs that session's sidebar has EVER hosted — EMPTY tabs means
+    // the user never touched that session's sidebar (the host writes the key
+    // with an empty collapsed layout at session creation), which is exactly the
+    // window where the project's default-open policy may act. Unreadable or
+    // odd-shaped storage counts as "touched" so the default never forces itself.
+    function sessionSidebarUntouched(sessionId) {
+      let raw = null
+      try { raw = localStorage.getItem('dsh.sidebar-right.v1.' + sessionId) } catch { return false }
+      if (raw == null) {
+        try { raw = localStorage.getItem('dsh.sidebar-right.v1') } catch { return false }
+        if (raw == null) return true // no layout record at all
+      }
+      try {
+        const v = JSON.parse(raw)
+        const layout = v?.bySession?.[sessionId]?.layout ?? v?.layout ?? v
+        const nodes = Object.values(layout?.nodes ?? {})
+        const tabCount = nodes.reduce((n, node) => n + (Array.isArray(node?.tabs) ? node.tabs.length : 0), 0)
+        return tabCount === 0
+      } catch { return false }
+    }
+    // sessionIds this page lifetime already auto-opened for (bounds retries)
+    const autoOpenedFor = new Set()
 
     // Overview health-check panel (LOCAL projects): one local-environment button plus
     // one block per machine that has a remote project — its four check buttons run
@@ -1337,7 +1451,7 @@ window.__ModuleLoader__.load({
               h('td', null,
                 esc(x.result || x.detail || '-'),
                 x.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + esc(x.warn)) : null,
-                x.ok && x.detail ? h('div', { className: 'hams-pre' }, esc(x.detail)) : null),
+                x.ok && x.detail ? h(ClampText, { text: x.detail }) : null),
               h('td', null, x.ms + ' ms'),
               h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'))))),
           run.channel && h('div', { className: 'hams-dim' }, esc(run.channel)))
@@ -1350,7 +1464,7 @@ window.__ModuleLoader__.load({
             h('span', { className: 'hams-dim' }, x.ms + ' ms'),
             h('span', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'),
             x.warn ? h('span', { className: 'hams-warn' }, '⚠ ' + esc(x.warn)) : null),
-          !x.ok && x.detail ? h('div', { className: 'hams-pre' }, esc(x.detail)) : null,
+          !x.ok && x.detail ? h(ClampText, { text: x.detail }) : null,
           x.rows && x.rows.length ? h(CheckResultTable, { check: run.check, x })
             : h('div', { className: 'hams-dim' }, esc(x.result || x.detail || '-')),
           x.truncated ? h('div', { className: 'hams-dim' }, tr('chk.truncated')) : null,
@@ -1516,7 +1630,7 @@ window.__ModuleLoader__.load({
             s.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + esc(s.warn)) : null),
           h('td', { title: s.detail || '' },
             esc(s.result || (s.skipReason ? tr('selfchk.skipped') + ' — ' + s.skipReason : '-')),
-            s.ok !== false && s.detail ? h('div', { className: 'hams-pre' }, esc(s.detail)) : null),
+            s.ok !== false && s.detail ? h(ClampText, { text: s.detail }) : null),
           h('td', null, s.ms != null ? s.ms + ' ms' : ''),
           h('td', { className: cls }, icon)))
       }
@@ -1770,15 +1884,18 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return h('div', { style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
-        h('div', { className: 'hams-body' },
-          project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
-          project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
-          project && h('div', { className: 'hams-dim' },
-            tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
-          project && checksInfo && h(CheckPanel, { info: checksInfo, run: checkRun, onRun: runCheck, analyze, onAnalyze: analyzeRun }),
-          project && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath }),
-        ))
+      // Single scroll context: the parent TaskSidebarBody's .hams-body is the
+      // ONLY scroll container — this view is plain flowing content (flex:none
+      // so the column layout never squeezes it), which is what gives the
+      // overview its vertical scrollbar however tall the content grows.
+      return h('div', { style: { flex: 'none', fontSize: 'var(--dsh-content-font-size, 14px)' } },
+        project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
+        project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
+        project && h('div', { className: 'hams-dim' },
+          tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
+        project && checksInfo && h(CheckPanel, { info: checksInfo, run: checkRun, onRun: runCheck, analyze, onAnalyze: analyzeRun }),
+        project && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath }),
+      )
     }
 
     function TaskSidebarBody(props) {
@@ -1786,7 +1903,7 @@ window.__ModuleLoader__.load({
       const [project, setProject] = useState(undefined) // undefined=loading, null=none
       const [reason, setReason] = useState(null)
       const [tasks, setTasks] = useState([])
-      const [stripSel, setStripSel] = useState(readStripSel) // first-level strip: 'overview' | task id
+      const [stripSel, setStripSel] = useState(() => readStripSel(sessionId)) // first-level strip: 'overview' | task id
       const [view, setView] = useState(readTaskView)
       const [error, setError] = useState(null)
       const [dialogOpen, setDialogOpen] = useState(false)
@@ -1798,12 +1915,19 @@ window.__ModuleLoader__.load({
       // keeps this body mounted even while the sidebar is collapsed (hidden), so
       // visibility — not mount state — is what "the sidebar is open" means. Probe
       // the root element's box every 500 ms and stamp sidebarOpenState while it
-      // is actually on screen.
+      // is actually on screen. The collapsed pane is slid OFF-VIEWPORT with
+      // visibility:hidden (verified 2026-11-18 on 0.2.2-rc.3: rect.x=1921 while
+      // offsetWidth stays 863) — box offsets alone false-positive, so the probe
+      // requires a viewport intersection AND non-hidden visibility.
       const rootRef = useRef(null)
       useEffect(() => {
         const probe = () => {
           const el = rootRef.current
-          if (el && el.isConnected && (el.offsetWidth > 0 || el.offsetHeight > 0)) {
+          if (!el || !el.isConnected) return
+          const r = el.getBoundingClientRect()
+          const cs = getComputedStyle(el)
+          if (r.width > 0 && r.height > 0 && r.right > 0 && r.left < window.innerWidth
+            && cs.visibility !== 'hidden' && cs.display !== 'none') {
             sidebarOpenState.lastSeenVisibleAt = Date.now()
           }
         }
@@ -1812,19 +1936,49 @@ window.__ModuleLoader__.load({
         return () => clearInterval(timer)
       }, [])
 
+      // Reload the per-session strip selection when the session changes; a
+      // first-seen session with no stored entry continues the LAST ACTIVE
+      // selection (fork child / new session alike), persisted as its own entry.
+      useEffect(() => {
+        if (!sessionId) { setStripSel('overview'); return }
+        if (hasStoredStripSel(sessionId)) { setStripSel(readStripSel(sessionId)); return }
+        if (lastActiveStripSel != null) { rememberStripSel(sessionId, lastActiveStripSel); setStripSel(lastActiveStripSel); return }
+        setStripSel(readStripSel(sessionId)) // legacy seed / overview default
+      }, [sessionId])
+      // keep the module-level "last active" current for the NEXT first-seen
+      // session (this effect runs after the inherit effect above on a switch)
+      useEffect(() => { if (sessionId) lastActiveStripSel = stripSel }, [sessionId, stripSel])
+
       useEffect(() => {
         let alive = true
+        let timer = null
         setError(null)
         if (!sessionId) { setProject(null); setReason(tr('tasks.noSession')); return }
         setProject(undefined)
-        fetchJson(API + '/project?sessionId=' + encodeURIComponent(sessionId))
-          .then((r) => {
-            if (!alive) return
-            setProject(r.project ?? null)
-            setReason(r.project ? null : r.reason ?? null)
-          })
-          .catch((e) => { if (alive) { setProject(null); setReason(String(e.message ?? e)) } })
-        return () => { alive = false }
+        let attempts = 0
+        const load = () => {
+          fetchJson(API + '/project?sessionId=' + encodeURIComponent(sessionId))
+            .then((r) => {
+              if (!alive) return
+              // a brand-new session enters the workspace registry only after its
+              // first turn — retry briefly (bounded, silent) so "new session"
+              // still resolves once the mapping lands (reason string is ours:
+              // server/project.js sessionProject)
+              if (!r?.project && attempts++ < 6 && String(r?.reason ?? '').includes('not accounted')) {
+                timer = setTimeout(load, 5000)
+                return
+              }
+              setProject(r.project ?? null)
+              setReason(r.project ? null : r.reason ?? null)
+            })
+            .catch((e) => {
+              if (!alive) return
+              if (attempts++ < 6) { timer = setTimeout(load, 5000); return }
+              setProject(null); setReason(String(e.message ?? e))
+            })
+        }
+        load()
+        return () => { alive = false; if (timer) clearTimeout(timer) }
       }, [sessionId])
 
       // Remote projects are connection anchors — no task store, no check surface.
@@ -1838,7 +1992,10 @@ window.__ModuleLoader__.load({
             setTasks(fresh)
             // sanitize the strip selection: a stored task id that no longer
             // exists (deleted, or left over from another project) falls back to
-            // the project overview — the tab's default display
+            // the project overview — the tab's default display (storage and
+            // state both, so the per-session entry stays truthful)
+            const storedSel = readStripSel(sessionId)
+            if (storedSel !== 'overview' && !fresh.some((t) => t.id === storedSel)) rememberStripSel(sessionId, 'overview')
             setStripSel((prev) => prev !== 'overview' && !fresh.some((t) => t.id === prev) ? 'overview' : prev)
           })
           .catch((e) => { if (alive) setError(String(e.message ?? e)) })
@@ -1861,6 +2018,8 @@ window.__ModuleLoader__.load({
               if (!alive) return
               const fresh = d.tasks ?? []
               setTasks((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh))
+              const storedSel = readStripSel(sessionId)
+              if (storedSel !== 'overview' && !fresh.some((t) => t.id === storedSel)) rememberStripSel(sessionId, 'overview')
               setStripSel((prev) => prev !== 'overview' && !fresh.some((t) => t.id === prev) ? 'overview' : prev)
             })
             .catch(() => { /* keep the current list */ })
@@ -1909,7 +2068,7 @@ window.__ModuleLoader__.load({
 
       const createTask = async (name, description) => {
         const saved = await persist((latest) => [...latest, { name, description: description || '' }])
-        if (saved && saved.length) { const id = saved[saved.length - 1].id; rememberStripSel(id); setStripSel(id) }
+        if (saved && saved.length) { const id = saved[saved.length - 1].id; rememberStripSel(sessionId, id); setStripSel(id) }
       }
       const removeTask = (id) => {
         const t = tasks.find((x) => x.id === id)
@@ -1917,7 +2076,7 @@ window.__ModuleLoader__.load({
         if (!window.confirm(tr('tasks.deleteConfirm', { name: t.name }))) return
         if (stripSel === id) {
           const next = tasks.filter((x) => x.id !== id)[0]?.id ?? 'overview'
-          rememberStripSel(next); setStripSel(next)
+          rememberStripSel(sessionId, next); setStripSel(next)
         }
         persist((latest) => latest.filter((x) => x.id !== id))
       }
@@ -1939,13 +2098,13 @@ window.__ModuleLoader__.load({
           h('div', {
             className: 'hams-tasktab' + (stripSel === 'overview' ? ' active' : ''),
             title: tr('tasks.projectOverview'),
-            onClick: () => { rememberStripSel('overview'); setStripSel('overview') },
+            onClick: () => { rememberStripSel(sessionId, 'overview'); setStripSel('overview') },
           }, h('span', { className: 'hams-tabname' }, tr('tasks.projectOverview'))),
           tasks.map((t) => h('div', {
               key: t.id,
               className: 'hams-tasktab' + (t.id === stripSel ? ' active' : ''),
               title: t.name,
-              onClick: () => { rememberStripSel(t.id); setStripSel(t.id); setDescDraft(null) },
+              onClick: () => { rememberStripSel(sessionId, t.id); setStripSel(t.id); setDescDraft(null) },
             },
             h('span', { className: 'hams-tabname' }, t.name),
             h('span', { className: 'hams-x', role: 'button', 'aria-label': tr('tasks.deleteAria', { name: t.name }),
@@ -1958,7 +2117,10 @@ window.__ModuleLoader__.load({
           project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
           project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
           project && stripSel === 'overview' && h(ProjectOverviewView, { sessionId }),
-          selected && h('div', { style: { marginTop: '8px', flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' } },
+          // the task branch GROWS instead of clipping (flex 1 0 auto): short
+          // content still fills the pane (dashboard iframe), long content
+          // lengthens the single .hams-body scroll region below
+          selected && h('div', { style: { marginTop: '8px', flex: '1 0 auto', display: 'flex', flexDirection: 'column' } },
             // task-level info: name+date row and the description editor stay
             // always visible above the sub tabs (project-level info lives in the
             // project overview view)
@@ -2327,7 +2489,8 @@ window.__ModuleLoader__.load({
     // task body probes its own visibility and stamps the last time it was
     // actually seen; the header button below re-opens the tab on a sessionId
     // change iff the sidebar was visible recently (within the probe cadence
-    // plus the switch teardown, 1.5 s).
+    // plus the switch teardown, 1.5 s) — or applies the project's default-open
+    // policy when the session's sidebar was never touched (2026-11-18).
     let openSidebarTab = null
     const sidebarOpenState = { lastSeenVisibleAt: 0 }
 
@@ -2336,14 +2499,52 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         if (!sessionId || !openSidebarTab) return
         let cancelled = false
-        // the host tears the right pane down and up around a switch; a short delay
-        // keeps the reopen from landing on the intermediate state
+        let retryTimer = null
+        // Default-open lives HERE, not in the tab body: a session whose sidebar
+        // was never opened does not mount tab bodies at all (verified 2026-11-18:
+        // .hams-tabstrip absent from the DOM for a fresh blank session), so the
+        // always-mounted conversation-header button is the only reliable trigger.
+        // The host tears the right pane down and up around a switch; a short
+        // delay keeps the reopen from landing on the intermediate state.
         const t = setTimeout(() => {
           if (cancelled || !openSidebarTab) return
-          if (Date.now() - sidebarOpenState.lastSeenVisibleAt > 1500) return // was closed — leave it
-          if (openSidebarTab) openSidebarTab()
+          if (Date.now() - sidebarOpenState.lastSeenVisibleAt <= 1500) { // was open — keep following
+            openSidebarTab()
+            return
+          }
+          // Default-open (user decision 2026-11-18): a session whose project
+          // already has a .harnessams store gets the sidebar opened on first
+          // sight — new sessions, cross-project switches, and returning to the
+          // start window all land here. Gated on the user never having touched
+          // that session's sidebar (empty layout tabs) and once per page
+          // lifetime: an explicit close always wins over the default. A blank
+          // session enters the workspace registry only after its first turn, so
+          // the mapping gets a bounded silent retry window.
+          if (autoOpenedFor.has(sessionId) || !sessionSidebarUntouched(sessionId)) return
+          let attempts = 0
+          const check = () => {
+            if (cancelled || !openSidebarTab) return
+            fetchJson(API + '/project?sessionId=' + encodeURIComponent(sessionId))
+              .then((r) => {
+                if (cancelled) return
+                if (!r?.project && attempts++ < 24 && String(r?.reason ?? '').includes('not accounted')) {
+                  retryTimer = setTimeout(check, 5000)
+                  return
+                }
+                // re-gate right before opening: the user may have touched the
+                // sidebar while the retries were pending
+                if (r.project?.initialized && !autoOpenedFor.has(sessionId) && sessionSidebarUntouched(sessionId)) {
+                  autoOpenedFor.add(sessionId)
+                  openSidebarTab()
+                }
+              })
+              .catch(() => {
+                if (!cancelled && attempts++ < 24) retryTimer = setTimeout(check, 5000)
+              })
+          }
+          check()
         }, 350)
-        return () => { cancelled = true; clearTimeout(t) }
+        return () => { cancelled = true; clearTimeout(t); if (retryTimer) clearTimeout(retryTimer) }
       }, [sessionId])
       return h('button', {
         className: 'hams-btn hams-btn-sm hams-headerbtn',
@@ -2393,6 +2594,14 @@ window.__ModuleLoader__.load({
         slots.inject('conversation.session.header.actions', () =>
           slots.register({ name: 'conversation.session.header.actions', id: 'dsh-harnessams-open', order: 20 }, SessionHeaderButton))
       })
+      // NOTE (2026-11-18): fork-parent lookup was attempted through the client
+      // 'sessions' service (catalog snapshot byId[].parentId) — the instance a
+      // plugin ctx sees is an UNCONNECTED one whose list snapshot stays empty
+      // (verified live: ids=0 forever), and the server-side sessionController
+      // facade exposes no list face either. Inheritance therefore follows the
+      // last ACTIVE selection instead (see TaskSidebarBody): a first-seen
+      // session continues whatever the previously active session had selected,
+      // which covers fork-then-switch and new-session continuation alike.
       // Session tool cards: keyed by wire tool name, exact match (a typo never
       // renders), so all eight names must be listed verbatim — guarded by the
       // entry test against the registered tool-name set.

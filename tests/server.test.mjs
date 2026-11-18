@@ -20,18 +20,29 @@ import {
   parseLoadRow, parseBjobsRows, parseBatchRows, rootize,
 } from '../src/server/checks.js'
 
-test('project: sessionProject maps over the workspace registry', () => {
+test('project: sessionProject maps over the workspace registry', async () => {
   const registry = {
     list: () => [
       { id: 'w1', path: 'D:/p1', title: 'P1', sessionIds: ['s1', 's2'] },
       { id: 'w2', path: 'D:/p2', title: 'P2', sessionIds: ['s3'] },
     ],
   }
-  assert.deepEqual(sessionProject(registry, 's2').project, { id: 'w1', path: 'D:/p1', title: 'P1' })
+  assert.deepEqual(sessionProject(registry, 's2').project, { id: 'w1', path: 'D:/p1', title: 'P1', initialized: false })
   assert.equal(sessionProject(registry, 's404').project, null)
   assert.ok(sessionProject(registry, 's404').reason)
   assert.ok(sessionProject(null, 's1').reason) // service missing -> degrade, not throw
   assert.ok(sessionProject(registry, null).reason) // missing sessionId
+  // initialized keys the sidebar default-open policy: true only once the
+  // workspace already has its .harnessams store (2026-11-18)
+  const tmp = await mkdtemp(path.join(tmpdir(), 'hams-ws-'))
+  const ws = { id: 'w3', path: tmp, title: 'W3', sessionIds: ['s9'] }
+  try {
+    assert.equal(sessionProject({ list: () => [ws] }, 's9').project.initialized, false)
+    await mkdir(path.join(tmp, '.harnessams'))
+    assert.equal(sessionProject({ list: () => [ws] }, 's9').project.initialized, true)
+  } finally {
+    await rm(tmp, { recursive: true, force: true })
+  }
 })
 
 test('tasks: read-missing is empty, write->read roundtrip, validation', async () => {
