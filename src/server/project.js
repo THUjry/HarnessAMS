@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
+import { ensureAgentsMdTemplate } from './agentsmd.js'
 
 // Resolve the workspace (project) a session belongs to. The registry's sessionIds
 // projection is canonical-cwd based; the return value mirrors the DSH workspace record,
@@ -126,6 +127,9 @@ export async function writeTasks(workspacePath, input) {
   const dir = path.join(workspacePath, TASKS_DIR)
   const finalPath = tasksPath(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
+  // .harnessams creation moment: lay down the AGENTS.md config-table template
+  // (empty table + first-fill instruction; idempotent, never throws).
+  await ensureAgentsMdTemplate(workspacePath)
   // Atomic replace: the store now has two writers (this sidebar PUT channel and
   // sim_report's report injection) — a torn read must never be observable.
   const tmp = finalPath + '.tmp'

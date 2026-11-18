@@ -74,7 +74,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': 'SmartAnaSim 单包安装即注册全部 11 个工具：spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、batch（通用 LSF 提交 / 轮询 / 取回）、共享（分析 / 进度 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 任务侧栏「项目总览」— 本机环境检查 + 各机器四项检查（按 dsh-ssh 别名直发）+ 项目设置表与一键项目自检；「new task」建新任务，任务内「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）、「参数检查」— 项目级检查参数编辑；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 任务侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「new task」建新任务，任务内「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）、「参数检查」— 项目级检查参数编辑；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
         'hosts.ok': 'dsh-ssh：{n} 台主机',
         'hosts.missing': 'dsh-ssh 不可用',
@@ -86,47 +86,21 @@ window.__ModuleLoader__.load({
         'hosts.rootHint': '在 harnessams.json 的 remote_machines 段为该别名配置远端根路径',
         'hosts.empty': 'dsh-ssh 中还没有主机 — 请先在 dsh-ssh 面板里添加。',
         'hosts.hint': '主机与凭据在 dsh-ssh 插件里管理；此处只读展示别名与远端根路径（remote_machines）。',
-        'chk.title': '健康检查',
-        'chk.remoteArea': '远端根路径：{path}',
-        'chk.needRemoteRoot': '主机都未配置远端根路径——在 harnessams.json 的 remote_machines 段配置后即可在此检查。',
-        'chk.unconfiguredList': '未配置：{list}',
         'chk.running': '检查中…',
         'chk.colItem': '检查项',
         'chk.colResult': '结果',
         'chk.colElapsed': '耗时',
         'chk.colStatus': '状态',
-        'chk.analyze': '起会话分析',
-        'chk.analyzing': '正在创建分析会话…',
-        'chk.analyzeDone': '已创建分析会话，请到左侧会话树查看。',
-        'chk.analyzeAuto': '检查发现问题，已自动创建分析会话，请到左侧会话树查看。',
-        'chk.analyzeFail': '创建分析会话失败：',
-        'chk.noneYet': '点击按钮运行一项检查。',
         'chk.truncated': '（列表已截断）',
-        'chk.rootLegend': '$ROOT = {path}',
-        'chk.btn.load': '负载',
-        'chk.btn.jobs': 'LSF 作业',
-        'chk.btn.batches': '批次目录',
-        'chk.btn.scripts': '脚本同步',
-        'chk.btn.local': '本机环境',
-        'chk.lc.load1': '1 分钟',
-        'chk.lc.load5': '5 分钟',
-        'chk.lc.load15': '15 分钟',
-        'chk.lc.procs': '进程 (可运行/总数)',
-        'chk.lc.cpus': 'CPU 核数',
-        'chk.jc.jobid': '作业号',
-        'chk.jc.stat': '状态',
-        'chk.jc.exec': '执行节点',
-        'chk.jc.name': '作业名',
-        'chk.jc.submit': '提交时间',
-        'chk.bc.dir': '目录',
+        'chk.btn.local': '列出本机环境',
         'chk.bc.status': '状态',
         'chk.bc.progress': '进度',
-        'chk.sc.file': '文件',
-        'chk.sc.state': '同步状态',
-        'chk.sync.in-sync': '一致',
-        'chk.sync.differs': '不一致',
-        'chk.sync.only-local': '仅本地',
-        'chk.sync.only-remote': '仅远程',
+        'agents.saveBtn': '保存到AGENTS.md',
+        'agents.saving': '保存中…',
+        'agents.saved': '已保存：{path}',
+        'agents.saveFailed': '保存失败：{msg}',
+        'agents.checkAll': '全部检查并保存',
+        'agents.checkAllRunning': '检查并保存中…',
         'assets.title': '数字资产',
         'assets.plotlyOk': 'plotly.min.js 已就绪 — {size}',
         'assets.plotlyMissing': '缺少 plotly 资产',
@@ -205,6 +179,12 @@ window.__ModuleLoader__.load({
         'pset.dirLabel': '工作目录',
         'pset.dirLocalHint': '本地模式：自检产物写入本地工作区 selfcheck/ 目录',
         'pset.dirRemoteRel': '相对路径按 $ROOT/ 解析',
+        'pset.browse': '浏览',
+        'pset.browseTitle': '浏览远程工作目录',
+        'pset.browsePickDir': '目录（点名称进入，或点「选择」使用该目录）',
+        'pset.pickDir': '选择',
+        'pset.pickThisDir': '使用该目录',
+        'pset.pickCurrentDir': '用当前目录',
         'pset.colMode': '工作模式',
         'pset.colMachine': '远程机器',
         'pset.colSched': '调度器',
@@ -317,7 +297,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'SmartAnaSim registers all 11 tools on install: spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), batch (generic LSF submit / poll / fetch), shared (analysis / progress / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS task sidebar “Project overview” — local environment checks plus four checks per machine (sent straight to the dsh-ssh alias), plus the project-settings table and the one-click project self-check; “new task” creates a task, and inside a task “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in) and “Checks” — project-level check-parameter editing; for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS task sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “new task” creates a task, and inside a task “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in) and “Checks” — project-level check-parameter editing; for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
         'hosts.ok': 'dsh-ssh: {n} host(s)',
         'hosts.missing': 'dsh-ssh not available',
@@ -329,47 +309,21 @@ window.__ModuleLoader__.load({
         'hosts.rootHint': 'set this alias\'s remote root in harnessams.json\'s remote_machines section',
         'hosts.empty': 'no hosts configured in dsh-ssh yet — add one in its panel.',
         'hosts.hint': 'Hosts and credentials are managed by the dsh-ssh plugin; this card is a read-only view of aliases and remote roots (remote_machines).',
-        'chk.title': 'Health check',
-        'chk.remoteArea': 'Remote root: {path}',
-        'chk.needRemoteRoot': 'no host has a remote root configured — set remote_machines in harnessams.json to check them here.',
-        'chk.unconfiguredList': 'unconfigured: {list}',
         'chk.running': 'Running…',
         'chk.colItem': 'Item',
         'chk.colResult': 'Result',
         'chk.colElapsed': 'Elapsed',
         'chk.colStatus': 'Status',
-        'chk.analyze': 'Analyze in new session',
-        'chk.analyzing': 'Creating the analysis session…',
-        'chk.analyzeDone': 'Analysis session created — see it in the session tree.',
-        'chk.analyzeAuto': 'Problems found — an analysis session was created automatically (see the session tree).',
-        'chk.analyzeFail': 'Failed to create the analysis session: ',
-        'chk.noneYet': 'Click a button to run a check.',
         'chk.truncated': '(list truncated)',
-        'chk.rootLegend': '$ROOT = {path}',
-        'chk.btn.load': 'Load',
-        'chk.btn.jobs': 'LSF jobs',
-        'chk.btn.batches': 'Batch dirs',
-        'chk.btn.scripts': 'Script sync',
-        'chk.btn.local': 'Local environment',
-        'chk.lc.load1': '1 min',
-        'chk.lc.load5': '5 min',
-        'chk.lc.load15': '15 min',
-        'chk.lc.procs': 'procs (run/total)',
-        'chk.lc.cpus': 'CPUs',
-        'chk.jc.jobid': 'job',
-        'chk.jc.stat': 'stat',
-        'chk.jc.exec': 'exec host',
-        'chk.jc.name': 'name',
-        'chk.jc.submit': 'submitted',
-        'chk.bc.dir': 'directory',
+        'chk.btn.local': 'List local environment',
         'chk.bc.status': 'status',
         'chk.bc.progress': 'progress',
-        'chk.sc.file': 'file',
-        'chk.sc.state': 'sync state',
-        'chk.sync.in-sync': 'in sync',
-        'chk.sync.differs': 'differs',
-        'chk.sync.only-local': 'local only',
-        'chk.sync.only-remote': 'remote only',
+        'agents.saveBtn': 'Save to AGENTS.md',
+        'agents.saving': 'Saving…',
+        'agents.saved': 'Saved: {path}',
+        'agents.saveFailed': 'Save failed: {msg}',
+        'agents.checkAll': 'Check all & save',
+        'agents.checkAllRunning': 'Checking & saving…',
         'assets.title': 'Digital assets',
         'assets.plotlyOk': 'plotly.min.js served — {size}',
         'assets.plotlyMissing': 'plotly asset missing',
@@ -448,6 +402,12 @@ window.__ModuleLoader__.load({
         'pset.dirLabel': 'Working directory',
         'pset.dirLocalHint': 'local mode: self-check artifacts go under the local workspace\'s selfcheck/ directory',
         'pset.dirRemoteRel': 'relative paths resolve under $ROOT/',
+        'pset.browse': 'Browse',
+        'pset.browseTitle': 'Browse remote working directory',
+        'pset.browsePickDir': 'Directories (click a name to enter, or "Select" to use it)',
+        'pset.pickDir': 'Select',
+        'pset.pickThisDir': 'Use this directory',
+        'pset.pickCurrentDir': 'Use current directory',
         'pset.colMode': 'Mode',
         'pset.colMachine': 'Machine',
         'pset.colSched': 'Scheduler',
@@ -1394,144 +1354,72 @@ window.__ModuleLoader__.load({
     // sessionIds this page lifetime already auto-opened for (bounds retries)
     const autoOpenedFor = new Set()
 
-    // Overview health-check panel (LOCAL projects): one local-environment button plus
-    // one block per machine that has a remote project — its four check buttons run
-    // through that remote project's live session (borrowed server-side). Every button
-    // runs independently; results replace whatever showed below.
-    const REMOTE_CHECK_IDS = ['load', 'jobs', 'batches', 'scripts']
-    // Auto handoff policy: remote check failures start a
-    // diagnosis session without a click; local failures only offer the button. A
-    // constant until the behavior gets its settings card — flip to false for
-    // button-only behavior.
-    const AUTO_ANALYZE_REMOTE = true
-    const CHECK_TABLES = {
-      load: { cols: ['chk.lc.load1', 'chk.lc.load5', 'chk.lc.load15', 'chk.lc.procs', 'chk.lc.cpus'] },
-      jobs: { cols: ['chk.jc.jobid', 'chk.jc.stat', 'chk.jc.exec', 'chk.jc.name', 'chk.jc.submit'] },
-      batches: { cols: ['chk.bc.dir', 'chk.bc.status', 'chk.bc.progress'] },
-      scripts: { cols: ['chk.sc.file', 'chk.sc.state'] },
-    }
-    const JOB_STAT_COLOR = {
-      RUN: 'hams-good', DONE: 'hams-good', EXIT: 'hams-bad', ERROR: 'hams-bad', ZOMBI: 'hams-bad', UDONE: 'hams-good',
-      PEND: 'hams-warn', PSUSP: 'hams-warn', USUSP: 'hams-warn', SSUSP: 'hams-warn',
-    }
-    const SYNC_COLOR = { 'in-sync': 'hams-good', 'differs': 'hams-bad', 'only-local': 'hams-warn', 'only-remote': 'hams-faint' }
-    const batchStatusColor = (s) => (s === 'completed' ? 'hams-good' : s === 'running' ? 'hams-warn'
-      : s === 'failed' || s === 'error' ? 'hams-bad' : 'hams-faint')
-    // Semantic class for one cell of a check table (column index + raw server value).
-    function checkCellClass(check, col, value) {
-      const v = String(value ?? '')
-      if (check === 'jobs' && col === 1) return JOB_STAT_COLOR[v] ?? 'hams-faint'
-      if (check === 'batches' && col === 1) return batchStatusColor(v)
-      if (check === 'scripts' && col === 1) return SYNC_COLOR[v] ?? ''
-      return ''
-    }
-
-    // One columned result table; the server sends rows as string[][]. scripts state
-    // cells are translated here (server keeps protocol values untranslated).
-    function CheckResultTable({ check, x }) {
-      const spec = CHECK_TABLES[check]
-      if (!spec) return null
-      return h('table', { className: 'hams-table' },
-        h('thead', null, h('tr', null, spec.cols.map((k) => h('th', { key: k }, tr(k))))),
-        h('tbody', null, x.rows.map((r, i) => h('tr', { key: i, title: x.rowsRaw?.[i] ?? '' },
-          r.map((cell, j) => h('td', { key: j, className: checkCellClass(check, j, cell) },
-            check === 'scripts' && j === 1 ? tr('chk.sync.' + cell) : esc(cell)))))))
-    }
-
-    // Results of one run: a local run keeps the classic Item/Result table; a remote
-    // run renders one block per entry — head line + columned table (or plain text
-    // fallback when the server could not parse rows) + warn/truncation notes.
-    function CheckResults({ run, machines }) {
-      if (!run.machineId) {
-        return h('div', null,
-          h('table', { className: 'hams-table' },
-            h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus')].map((c) => h('th', { key: c }, c)))),
-            h('tbody', null, (run.results ?? []).map((x, i) => h('tr', { key: i, className: x.ok ? '' : 'hams-rowbad' },
-              h('td', { title: x.cmd ?? '' }, esc(x.item)),
-              h('td', null,
-                esc(x.result || x.detail || '-'),
-                x.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + esc(x.warn)) : null,
-                x.ok && x.detail ? h(ClampText, { text: x.detail }) : null),
-              h('td', null, x.ms + ' ms'),
-              h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'))))),
-          run.channel && h('div', { className: 'hams-dim' }, esc(run.channel)))
-      }
-      const m = machines.find((x) => x.id === run.machineId)
+    // Local-environment results table (the "list local environment" button in the
+    // project-settings block): the classic Item/Result/Elapsed/Status rows; the
+    // Node/Python rows carry their absolute executable paths in the detail clamp.
+    function LocalEnvResults({ run }) {
       return h('div', null,
-        (run.results ?? []).map((x, i) => h('div', { key: i, style: { margin: '6px 0' } },
-          h('div', { className: 'hams-row' },
-            h('b', null, esc(x.item)),
-            h('span', { className: 'hams-dim' }, x.ms + ' ms'),
-            h('span', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'),
-            x.warn ? h('span', { className: 'hams-warn' }, '⚠ ' + esc(x.warn)) : null),
-          !x.ok && x.detail ? h(ClampText, { text: x.detail }) : null,
-          x.rows && x.rows.length ? h(CheckResultTable, { check: run.check, x })
-            : h('div', { className: 'hams-dim' }, esc(x.result || x.detail || '-')),
-          x.truncated ? h('div', { className: 'hams-dim' }, tr('chk.truncated')) : null,
-          run.check === 'batches' && x.rows && x.rows.length && m
-            ? h('div', { className: 'hams-dim' }, tr('chk.rootLegend', { path: m.remotePath })) : null)),
-        run.channel && h('div', { className: 'hams-dim' }, esc(run.channel)))
+        h('table', { className: 'hams-table' },
+          h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus')].map((c) => h('th', { key: c }, c)))),
+          h('tbody', null, (run.results ?? []).map((x, i) => h('tr', { key: i, className: x.ok ? '' : 'hams-rowbad' },
+            h('td', null, esc(x.item)),
+            h('td', null,
+              esc(x.result || x.detail || '-'),
+              x.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + esc(x.warn)) : null,
+              x.ok && x.detail ? h(ClampText, { text: x.detail }) : null),
+            h('td', null, x.ms + ' ms'),
+            h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'))))))
     }
 
-    // One machine block: identity line + remote root + the four remote check
-    // buttons (ssh_exec by alias — no live-session requirement anymore).
-    function MachineCheckBlock({ m, run, running, onRun }) {
-      const machineRun = run && run.machineId === m.id ? run : null
-      const hostLine = (m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22)
-      return h('div', { style: { margin: '10px 0 2px' } },
-        h('div', { style: { fontSize: 'calc(12.5px + var(--dsh-content-font-delta, 0px))', lineHeight: 1.6 } },
-          h('div', null,
-            h('b', null, esc(m.name || m.host)), ' ', esc(hostLine),
-            m.auth ? ' · ' + esc(m.auth) + (m.auth === 'key' && !m.keyReady ? ' ⚠' : '') : ''),
-          h('div', null, tr('chk.remoteArea', { path: m.remotePath || '—' }))),
-        h('div', { className: 'hams-row' },
-          REMOTE_CHECK_IDS.map((id) => h('button', {
-            key: id,
-            className: 'hams-btn hams-btn-sm',
-            disabled: running,
-            title: tr('chk.btn.' + id),
-            onClick: () => onRun(m.id, id),
-          }, running && machineRun && machineRun.id === m.id + ':' + id ? tr('chk.running') : tr('chk.btn.' + id)))))
-    }
-
-    function CheckPanel({ info, run, onRun, analyze, onAnalyze }) {
-      const running = run?.status === 'running'
-      const machines = info?.machines ?? []
-      // The failed-entries handoff replaced the old copy-to-clipboard diagnose
-      // button: one run-level button bundles every failed entry of the current
-      // run into a newly created DSH session (analyzeRun in TaskSidebarBody).
-      const hasFailed = run?.status === 'done' && (run.results ?? []).some((x) => x && x.ok === false)
-      const analyzing = analyze?.status === 'running'
-      return h('div', { style: { marginTop: '10px' } },
-        h('div', { className: 'hams-dim' }, h('b', null, tr('chk.title'))),
-        h('div', { className: 'hams-row' },
-          (info?.buttons ?? []).map((b) => h('button', {
-            key: b.id,
-            className: 'hams-btn hams-btn-sm',
-            disabled: running,
-            title: b.item,
-            onClick: () => onRun(null, b.id),
-          }, running && run?.id === b.id ? tr('chk.running') : tr('chk.btn.' + b.id)))),
-        info?.machinesReason && h('div', { className: 'hams-dim' }, esc(info.machinesReason)),
-        !info?.machinesReason && machines.length === 0 && info
-          && h('div', { className: 'hams-dim' },
-            tr(info.machinesTotal ? 'chk.needRemoteRoot' : 'hosts.empty'),
-            info.machinesTotal && (info.machinesUnconfigured ?? []).length
-              ? ' (' + tr('chk.unconfiguredList', { list: info.machinesUnconfigured.join(', ') }) + ')' : ''),
-        machines.map((m) => h(MachineCheckBlock, { key: m.id, m, run, running, onRun })),
-        run?.status === 'failed' && h('div', { className: 'hams-err' }, run.error),
-        run?.status === 'done' && h(CheckResults, { run, machines }),
-        hasFailed && h('div', { className: 'hams-row' },
-          h('button', {
-            className: 'hams-btn hams-btn-sm',
-            disabled: analyzing,
-            title: tr('chk.analyze'),
-            onClick: () => onAnalyze(run, false),
-          }, analyzing ? tr('chk.analyzing') : tr('chk.analyze')),
-          analyze?.status === 'done' && h('span', { className: 'hams-dim' }, analyze.auto ? tr('chk.analyzeAuto') : tr('chk.analyzeDone')),
-          analyze?.status === 'failed' && h('span', { className: 'hams-err' }, tr('chk.analyzeFail') + esc(analyze.error ?? ''))),
-        !run && h('div', { className: 'hams-dim' }, tr('chk.noneYet')),
-      )
+    // Remote working-directory picker (settings table, remote mode): one
+    // directory level per fetch (GET /api/remote-browse — ssh_exec by alias
+    // through the execRemote funnel), starting at the machine's remote root.
+    // Clicking a name enters the directory; the per-row "select" button (or the
+    // footer's "use current") writes the ABSOLUTE path into remote_dir — the old
+    // free-typed text input is retired. Mirrors the add-report dialog's shape.
+    function RemoteDirBrowse({ sessionId, machineId, rootDir, onCancel, onPick }) {
+      const [cwd, setCwd] = useState(null) // null = server default (the machine's remote root)
+      const [listing, setListing] = useState(null)
+      const [error, setError] = useState(null)
+      useEffect(() => {
+        let alive = true
+        setError(null); setListing(null)
+        const q = 'sessionId=' + encodeURIComponent(sessionId)
+          + '&machineId=' + encodeURIComponent(machineId)
+          + (cwd ? '&dir=' + encodeURIComponent(cwd) : '')
+        fetchJson(API + '/remote-browse?' + q)
+          .then((r) => { if (alive) setListing(r) })
+          .catch((e) => { if (alive) setError(String(e.message ?? e)) })
+        return () => { alive = false }
+      }, [sessionId, machineId, cwd])
+      return h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) onCancel() } },
+        h('div', { className: 'hams-dialog hams-browse-dialog' },
+          h('h3', null, tr('pset.browseTitle')),
+          h('div', { className: 'hams-field' },
+            h('label', null, tr('dash.currentDir')),
+            h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+              h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.parentDir'),
+                disabled: !listing?.parent, onClick: () => setCwd(listing.parent) }, '↑'),
+              h('span', { className: 'hams-dim',
+                style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                esc(listing ? listing.dir : (cwd ?? rootDir ?? '…'))))),
+          h('div', { className: 'hams-field' },
+            h('label', null, tr('pset.browsePickDir')),
+            h('div', { className: 'hams-list' },
+              error && h('div', { className: 'hams-err' }, error),
+              listing && !error && h('div', null,
+                (listing.dirs ?? []).map((d) => h('div', { key: 'd:' + d, className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+                  h('button', { className: 'hams-listitem', style: { flex: 1, textAlign: 'left', minWidth: 0 },
+                    onClick: () => setCwd(listing.dir + '/' + d) },
+                    h('span', { className: 'hams-name' }, '📁 ' + esc(d))),
+                  h('button', { className: 'hams-btn hams-btn-sm', title: tr('pset.pickThisDir'),
+                    onClick: () => onPick(listing.dir + '/' + d) }, tr('pset.pickDir')))),
+                listing.truncated && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('chk.truncated')),
+                !(listing.dirs ?? []).length && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('dash.emptyDir'))))),
+          h('div', { className: 'hams-row', style: { justifyContent: 'space-between' } },
+            h('button', { className: 'hams-btn hams-btn-sm', disabled: !listing, onClick: () => onPick(listing.dir) },
+              tr('pset.pickCurrentDir')),
+            h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')))))
     }
 
     // ---------- tier 3 Overview: project settings + one-click project self-check ----------
@@ -1645,15 +1533,18 @@ window.__ModuleLoader__.load({
     // project's data lives here and a remount for the SAME project renders
     // straight from the snapshot (silent revalidate, no blank flash) while a
     // different project simply misses and refetches clean.
-    const overviewMemory = { path: null, project: null, checksInfo: null, checkRun: null }
-    const selfcheckMemory = { path: null, settings: null, run: null }
+    const overviewMemory = { path: null, project: null, checksInfo: null }
+    const selfcheckMemory = { path: null, settings: null, run: null, envRun: null }
 
     function ProjectSelfcheck({ sessionId, info, projectPath }) {
       const [settings, setSettings] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.settings : null))
       const [settingsError, setSettingsError] = useState(null)
-      const [dirDraft, setDirDraft] = useState(null)
       const [run, setRun] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.run : null))
       const [startError, setStartError] = useState(null)
+      const [envRun, setEnvRun] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.envRun : null))
+      const [saveState, setSaveState] = useState(null) // {status:'running'|'done'|'failed', path?, error?}
+      const [browseOpen, setBrowseOpen] = useState(false)
+      const [checkAllPending, setCheckAllPending] = useState(false) // auto-save once the check-all run lands
       const machines = info?.machines ?? []
 
       // Same-project remount (session switch inside one workspace): adopt the
@@ -1663,7 +1554,7 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         let alive = true
         const adopt = !!projectPath && selfcheckMemory.path === projectPath
-        if (!adopt) { setSettings(null); setSettingsError(null); setRun(null); setStartError(null) }
+        if (!adopt) { setSettings(null); setSettingsError(null); setRun(null); setStartError(null); setEnvRun(null) }
         if (!sessionId) return
         fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId))
           .then((r) => { if (alive) setSettings((prev) => (JSON.stringify(prev) === JSON.stringify(r.settings) ? prev : r.settings)) })
@@ -1680,7 +1571,8 @@ window.__ModuleLoader__.load({
         selfcheckMemory.path = projectPath
         selfcheckMemory.settings = settings
         selfcheckMemory.run = run
-      }, [projectPath, settings, run])
+        selfcheckMemory.envRun = envRun
+      }, [projectPath, settings, run, envRun])
 
       const runId = run?.id ?? null
       const runStatus = run?.status ?? null
@@ -1733,16 +1625,56 @@ window.__ModuleLoader__.load({
           setRun({ id: r.runId, status: 'running', steps: [], diagnoses: [], scope: null })
         } catch (e) {
           setStartError(tr('selfchk.startFailed', { msg: String(e.message ?? e) }))
+          setCheckAllPending(false)
         }
       }
 
+      // "list local environment" — display only (Node/Python rows carry their
+      // absolute executable paths); the values enter AGENTS.md via the save
+      // buttons, not via this listing.
+      const runLocalEnv = async () => {
+        setEnvRun({ status: 'running', results: null })
+        try {
+          const r = await fetchJson(API + '/checks/run?sessionId=' + encodeURIComponent(sessionId) + '&check=local')
+          setEnvRun({ status: 'done', results: r.results })
+        } catch (e) {
+          setEnvRun({ status: 'failed', error: String(e.message ?? e) })
+        }
+      }
+
+      // Measured-values sync into the workspace AGENTS.md config table (POST
+      // /api/agents-md rewrites the marked block; a first-fill prompt from the
+      // .harnessams-creation template is removed with the rewrite).
+      const saveAgents = async () => {
+        setSaveState({ status: 'running' })
+        try {
+          const r = await fetchJson(API + '/agents-md', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+          })
+          setSaveState({ status: 'done', path: r.path })
+        } catch (e) {
+          setSaveState({ status: 'failed', error: String(e.message ?? e) })
+        }
+      }
+
+      // "check all & save": once THIS button's self-check run lands, write the
+      // measured values once (the flag keeps ordinary one-click runs save-free).
+      useEffect(() => {
+        if (!checkAllPending || run?.status !== 'done') return
+        setCheckAllPending(false)
+        void saveAgents()
+      }, [checkAllPending, run?.status])
+
       const remote = settings?.run_mode === 'remote'
       const machine = machines.find((m) => m.id === settings?.machine_id) ?? null
-      const dirValue = dirDraft ?? settings?.remote_dir ?? ''
       const dirPreview = String(settings?.remote_dir ?? '').startsWith('/')
         ? settings.remote_dir
         : (machine?.remotePath ? String(machine.remotePath).replace(/\/+$/, '') + '/' + settings?.remote_dir : '$ROOT/' + (settings?.remote_dir ?? ''))
       const running = run?.status === 'running'
+      const envRunning = envRun?.status === 'running'
+      const saving = saveState?.status === 'running'
 
       return h('div', { style: { marginTop: '10px' } },
         h('div', { className: 'hams-dim' }, h('b', null, tr('pset.title')), ' · ', tr('selfchk.title')),
@@ -1750,24 +1682,44 @@ window.__ModuleLoader__.load({
         !settings && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
         settings && h('div', null,
           // working directory: always visible — "local" read-only, or the bound
-          // remote directory (full-path preview + manual input; the mirror browse
-          // button is gone with the dsh-remote mirrors — type the path instead)
+          // remote directory picked through the dsh-ssh directory browser (the
+          // free-typed text input is retired; the full-path preview stays)
           h('div', { className: 'hams-row', style: { flexWrap: 'nowrap' } },
             h('b', { style: { flexShrink: 0 } }, tr('pset.dirLabel')),
             remote
-              ? h('input', { className: 'hams-input', value: dirValue, title: dirPreview,
-                  onChange: (e) => setDirDraft(e.target.value),
-                  onBlur: () => { const v = (dirDraft ?? '').trim(); setDirDraft(null); if (v && v !== settings.remote_dir) void updateSetting('remote_dir', v) },
-                  onKeyDown: (e) => { if (e.key === 'Enter') e.target.blur() } })
-              : h('span', { className: 'hams-dim' }, 'local · ' + tr('pset.dirLocalHint'))),
+              ? h('span', { className: 'hams-dim', title: dirPreview,
+                  style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                esc(settings.remote_dir || '—'))
+              : h('span', { className: 'hams-dim' }, 'local · ' + tr('pset.dirLocalHint')),
+            remote && h('button', { className: 'hams-btn hams-btn-sm', style: { flexShrink: 0 },
+              disabled: !machine, title: tr('pset.browseTitle'), onClick: () => setBrowseOpen(true) }, tr('pset.browse'))),
           remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
             '→ ', esc(dirPreview), ' · ', tr('pset.dirRemoteRel')),
           h(SettingsTable, { settings, machines, run, onChange: updateSetting }),
+          // the button row: [save to AGENTS.md] [one-click self-check] [list
+          // local environment] [check all & save] — the project-settings block
+          // is the Overview's single entry since the health-check panel retired
           h('div', { className: 'hams-row' },
-            h('button', { className: 'hams-btn hams-btn-sm', disabled: running || !sessionId, onClick: startRun },
-              running ? tr('selfchk.running') : tr('selfchk.run')),
+            h('button', { className: 'hams-btn hams-btn-sm', disabled: running || saving || !sessionId, onClick: () => void saveAgents() },
+              saving ? tr('agents.saving') : tr('agents.saveBtn')),
+            h('button', { className: 'hams-btn hams-btn-sm', disabled: running || saving || !sessionId, onClick: startRun },
+              running && !checkAllPending ? tr('selfchk.running') : tr('selfchk.run')),
+            h('button', { className: 'hams-btn hams-btn-sm', disabled: envRunning || !sessionId, onClick: () => void runLocalEnv() },
+              envRunning ? tr('chk.running') : tr('chk.btn.local')),
+            h('button', { className: 'hams-btn hams-btn-sm', disabled: running || saving || !sessionId,
+              onClick: () => { setCheckAllPending(true); void startRun() } },
+              running && checkAllPending ? tr('agents.checkAllRunning') : tr('agents.checkAll')),
             h('span', { className: 'hams-dim' }, tr('selfchk.desc'))),
           startError && h('div', { className: 'hams-err' }, esc(startError)),
+          saveState?.status === 'done' && h('div', { className: 'hams-dim' }, tr('agents.saved', { path: saveState.path ?? '' })),
+          saveState?.status === 'failed' && h('div', { className: 'hams-err' }, esc(tr('agents.saveFailed', { msg: saveState.error ?? '' }))),
+          envRun?.status === 'failed' && h('div', { className: 'hams-err' }, esc(envRun.error)),
+          envRun?.status === 'done' && h(LocalEnvResults, { run: envRun }),
+          browseOpen && remote && machine && h(RemoteDirBrowse, {
+            sessionId, machineId: machine.id, rootDir: machine.remotePath,
+            onCancel: () => setBrowseOpen(false),
+            onPick: (dir) => { setBrowseOpen(false); if (dir && dir !== settings.remote_dir) void updateSetting('remote_dir', dir) },
+          }),
           h(SelfcheckSteps, { run }),
           run?.summary && h('div', { className: 'hams-row' },
             h('span', { className: run.summary.ok ? 'hams-good' : 'hams-bad', style: { fontWeight: 600 } },
@@ -1777,18 +1729,17 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- tier 3: project overview (first-level view inside the task tab) ----------
-    // Project-level surfaces only (health checks + settings/self-check): nothing
-    // here depends on a task, so switching sessions or strip entries INSIDE one
-    // project must not refresh the view — the body initializes from overviewMemory
-    // and only a real project change clears and refetches. Rendered by
-    // TaskSidebarBody as the strip's default 'overview' entry.
+    // Project-level surfaces only (the settings/self-check block is the single
+    // entry since the health-check panel retired): nothing here depends on a
+    // task, so switching sessions or strip entries INSIDE one project must not
+    // refresh the view — the body initializes from overviewMemory and only a
+    // real project change clears and refetches. Rendered by TaskSidebarBody as
+    // the strip's default 'overview' entry.
     function ProjectOverviewView(props) {
       const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
       const [project, setProject] = useState(() => overviewMemory.project ?? undefined)
       const [reason, setReason] = useState(null)
       const [checksInfo, setChecksInfo] = useState(() => (overviewMemory.path ? overviewMemory.checksInfo : null))
-      const [checkRun, setCheckRun] = useState(() => (overviewMemory.path ? overviewMemory.checkRun : null))
-      const [analyze, setAnalyze] = useState(null)
       const projectPath = project?.path ?? null
 
       useEffect(() => {
@@ -1803,8 +1754,7 @@ window.__ModuleLoader__.load({
               overviewMemory.path = r?.project?.path ?? null
               overviewMemory.project = null
               overviewMemory.checksInfo = null
-              overviewMemory.checkRun = null
-              setChecksInfo(null); setCheckRun(null)
+              setChecksInfo(null)
             }
             setProject(r.project ?? null)
             setReason(r.project ? null : r.reason ?? null)
@@ -1813,7 +1763,8 @@ window.__ModuleLoader__.load({
         return () => { alive = false }
       }, [sessionId])
 
-      // Overview check surface (local environment + per-machine remote checks).
+      // Machine list for the settings table's dropdown (GET /api/checks — the
+      // local-env rows run through /api/checks/run inside ProjectSelfcheck).
       // No upfront clear: a same-project remount keeps showing the cached copy
       // while the silent revalidate lands (JSON-compare swap).
       useEffect(() => {
@@ -1831,58 +1782,7 @@ window.__ModuleLoader__.load({
         overviewMemory.path = projectPath
         overviewMemory.project = project
         overviewMemory.checksInfo = checksInfo
-        overviewMemory.checkRun = checkRun
-      }, [projectPath, project, checksInfo, checkRun])
-
-      // mid=null runs the local-environment check; otherwise mid is the machineId
-      // of the machine block the button sits in (remote checks borrow that
-      // machine's remote-project session server-side).
-      const runCheck = async (mid, id) => {
-        const key = mid ? mid + ':' + id : id
-        setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'running', results: null })
-        try {
-          const q = 'sessionId=' + encodeURIComponent(sessionId) + '&check=' + encodeURIComponent(id)
-            + (mid ? '&machineId=' + encodeURIComponent(mid) : '')
-          const r = await fetchJson(API + '/checks/run?' + q)
-          setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'done', results: r.results, channel: r.channel })
-          // Auto handoff (path 2, user decision 2026-11-01): a REMOTE check that
-          // ends with failed entries immediately starts a diagnosis session, so
-          // cluster problems never need a manual copy-paste. Local check failures
-          // stay button-only (auto sessions for trivial failures would just burn
-          // tokens). Behavior switch is a constant for now — future: user setting.
-          if (AUTO_ANALYZE_REMOTE && mid && (r.results ?? []).some((x) => x && x.ok === false)) {
-            void analyzeRun({ machineId: mid, check: id, results: r.results }, true)
-          }
-        } catch (e) {
-          setCheckRun({ id: key, machineId: mid ?? null, check: id, status: 'failed', error: String(e.message ?? e), results: null })
-        }
-      }
-
-      // analyzeRun: hand a run's failed entries to a newly created diagnosis
-      // session (POST /api/checks/analyze); auto=true marks the automatic
-      // trigger for the result message.
-      const analyzeRun = async (run, auto) => {
-        const failed = (run.results ?? []).filter((x) => x && x.ok === false)
-        if (!failed.length || !sessionId) return
-        setAnalyze({ status: 'running', auto })
-        try {
-          const r = await fetchJson(API + '/checks/analyze', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sessionId,
-              check: run.check,
-              machineId: run.machineId ?? null,
-              lang: effectiveLang(),
-              auto: !!auto,
-              failed,
-            }),
-          })
-          setAnalyze({ status: 'done', auto, sessionId: r.sessionId, title: r.title })
-        } catch (e) {
-          setAnalyze({ status: 'failed', auto, error: String(e.message ?? e) })
-        }
-      }
+      }, [projectPath, project, checksInfo])
 
       // Single scroll context: the parent TaskSidebarBody's .hams-body is the
       // ONLY scroll container — this view is plain flowing content (flex:none
@@ -1893,7 +1793,6 @@ window.__ModuleLoader__.load({
         project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
         project && h('div', { className: 'hams-dim' },
           tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
-        project && checksInfo && h(CheckPanel, { info: checksInfo, run: checkRun, onRun: runCheck, analyze, onAnalyze: analyzeRun }),
         project && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath }),
       )
     }

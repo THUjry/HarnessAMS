@@ -4,18 +4,19 @@
 //            alias's configured remote root), digital assets, disk usage;
 //   tier 2 (project = DSH workspace) — session-to-workspace mapping + per-project task
 //            store at <workspace>/.harnessams/tasks.json;
-//   tier 3 (task sidebar) — the task store API plus the Overview health-check
-//            buttons, consumed per active session; failed checks can be handed to a
-//            newly created diagnosis session (POST /api/checks/analyze, diagnose.js
-//            — private surface over the DSH session controller).
+//   tier 3 (task sidebar) — the task store API plus the Overview project
+//            settings / self-check surface, consumed per active session: the local
+//            environment rows, the AGENTS.md project-config sync (POST
+//            /api/agents-md, server/agentsmd.js) and the remote working-directory
+//            browser (GET /api/remote-browse, server/remotebrowse.js).
 // Routes are not token-gated by the DSH web server (verified): only local
 // management reads/writes live here — no credentials, no remote-execution passthrough.
 // The Dashboard viewer is display-only: it serves task-registered local HTML reports
 // read-only (/dash/<taskId>/<reportId>/…, bounded by each report's own directory) and
 // a one-level listing for the add-report picker (/api/browse) — no file writes.
 // Remote connectivity is delegated entirely to @linxin666/dsh-ssh (ssh_* tools by
-// alias, zero gating): remote checks run ssh_exec directly from a LOCAL project's
-// Overview, the user's interactive shell is dsh-ssh's own terminal panel, and each
+// alias, zero gating): the remote dir picker runs ssh_exec from the Overview,
+// the user's interactive shell is dsh-ssh's own terminal panel, and each
 // alias's remote root comes from the workspace harnessams.json `remote_machines`
 // map (merged into the machine records by listMachines in remote.js).
 // Model tools: the generic remote batch channel (batch_submit/batch_poll/batch_fetch;
@@ -29,13 +30,14 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import { findWorkspaceConfig } from './server/workspace.js'
-import { runLocalChecks, runRemoteCheckButton, REMOTE_CHECK_BUTTONS } from './server/checks.js'
+import { runLocalChecks } from './server/checks.js'
 import { localDiskUsage, workspaceDirs } from './server/disk.js'
 import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty } from './server/project.js'
 import { remoteMachinesStatus, fetchMachines, checkableMachines } from './server/machines.js'
-import { buildDiagnosisPrompt, createDiagnosisSession } from './server/diagnose.js'
 import { readSettings, validateSettings, writeSettings } from './server/settings.js'
 import { readCheckParams, validateCheckParams, writeCheckParams } from './server/checkparams.js'
+import { syncAgentsMd } from './server/agentsmd.js'
+import { remoteBrowse } from './server/remotebrowse.js'
 import { startSelfcheck, getSelfcheck } from './server/selfcheck.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
@@ -100,8 +102,8 @@ async function handle(req, res, ctx) {
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     // Write surface is narrow by design: tasks, project settings, check params,
-    // self-check runs and diagnosis handoffs (all project-local file writes or
-    // DSH session-controller calls; no remote execution surface lives here).
+    // self-check runs and the AGENTS.md config block (all project-local file
+    // writes; no remote execution surface lives here).
     if (req.method === 'PUT' && route === '/api/tasks') {
       const sessionId = url.searchParams.get('sessionId')
       const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
@@ -159,46 +161,26 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, runId: r.runId })
       return
     }
-    if (req.method === 'POST' && route === '/api/checks/analyze') {
-      // Hand failed check entries to a newly created DSH session (the private
-      // replacement of the old copy-to-clipboard diagnose button). The client
-      // sends what it already rendered; nothing is re-run here. The session is
-      // always anchored to the current project's workspace; a remote check's
-      // machine alias rides in the prompt so the diagnosis agent can use
-      // ssh_exec (zero gating — no workspace anchoring is needed for it).
+    if (req.method === 'POST' && route === '/api/agents-md') {
+      // Values sync behind the Overview "save to AGENTS.md" / "check all & save"
+      // buttons: one POST gathers settings + machines + local env + the latest
+      // self-check run and rewrites the marked block in <workspace>/AGENTS.md
+      // (server/agentsmd.js). The rewrite carries no first-fill instruction, so
+      // a stale one from the .harnessams-creation template is removed with it.
       let body
       try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
       const sessionId = body?.sessionId
-      const check = body?.check
-      const machineId = body?.machineId ?? null
-      const lang = body?.lang === 'zh' ? 'zh' : 'en'
       if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
-      if (check !== 'local' && !REMOTE_CHECK_BUTTONS.some((b) => b.id === check)) {
-        json(400, { error: `unknown check: ${check} (buttons: ${REMOTE_CHECK_BUTTONS.map((b) => b.id).join(', ')}, local)` })
-        return
-      }
-      if (!Array.isArray(body?.failed) || !body.failed.length) { json(400, { error: 'missing or empty failed entries' }); return }
       const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
       if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-      let machine = null
-      if (machineId) {
-        const list = await fetchMachines(ctx.tools)
-        if (!list.ok) { json(503, { error: `dsh-ssh hosts unavailable: ${list.reason}` }); return }
-        machine = list.machines.find((m) => m.id === machineId || m.name === machineId)
-        if (!machine) { json(404, { error: `no such dsh-ssh host: ${machineId}` }); return }
-      }
-      const w = (typeof ctx.workspaceRegistry?.list === 'function' ? ctx.workspaceRegistry.list() : [])
-        .find((x) => x?.path === project.path)
-      if (!w?.id) { json(409, { error: 'the current project workspace is not registered in workspaceRegistry' }); return }
-      const workspaceId = w.id
-      const prompt = buildDiagnosisPrompt({ check, machine, remotePath: machine?.workspace ?? null, projectTitle: project.title, failed: body.failed, lang, auto: body?.auto === true })
-      const title = 'HarnessAMS diagnosis: ' + check + ' @ ' + (machine ? (machine.name || machine.host) : 'local')
-      const r = await createDiagnosisSession(ctx, { workspaceId, title, prompt })
-      if (r.error) { json(r.sessionId ? 502 : 503, { error: r.error, ...(r.sessionId ? { sessionId: r.sessionId } : {}) }); return }
-      json(200, { ok: true, sessionId: r.sessionId, title })
+      let settings
+      try { ({ settings } = await readSettings(project.path)) } catch (e) { json(500, { error: `project_settings.json unreadable: ${e.message}` }); return }
+      const r = await syncAgentsMd(ctx, { project, settings })
+      if (r.error) { json(500, { error: r.error }); return }
+      json(200, { ok: true, path: r.path, created: r.created })
       return
     }
-    json(405, { error: 'GET only (PUT /api/tasks, PUT /api/project-settings, PUT /api/check-params, POST /api/selfcheck, POST /api/checks/analyze)' })
+    json(405, { error: 'GET only (PUT /api/tasks, PUT /api/project-settings, PUT /api/check-params, POST /api/selfcheck, POST /api/agents-md)' })
     return
   }
 
@@ -214,7 +196,8 @@ async function handle(req, res, ctx) {
     return
   }
 
-  // ---- tier 3 Overview: health-check surface ----
+  // ---- tier 3 Overview: local-env check rows + the machine list (the settings
+  // table's machine dropdown consumes the same projection) ----
   if (route === '/api/checks') {
     const sessionId = url.searchParams.get('sessionId')
     const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
@@ -233,32 +216,12 @@ async function handle(req, res, ctx) {
   if (route === '/api/checks/run') {
     const sessionId = url.searchParams.get('sessionId')
     const check = url.searchParams.get('check')
-    const machineId = url.searchParams.get('machineId')
     if (!sessionId || !check) { json(400, { error: 'missing sessionId or check parameter' }); return }
     const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
     if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-    if (check === 'local') {
-      if (!ws) { json(503, { error: 'harnessams-workspace/harnessams.json not found' }); return }
-      json(200, { ok: true, type: 'local', results: await runLocalChecks(ws) })
-      return
-    }
-    if (!REMOTE_CHECK_BUTTONS.some((b) => b.id === check)) {
-      json(400, { error: `unknown check: ${check} (buttons: ${REMOTE_CHECK_BUTTONS.map((b) => b.id).join(', ')}, local)` })
-      return
-    }
-    if (!machineId) { json(400, { error: 'missing machineId — remote checks target a configured dsh-ssh host' }); return }
-    const list = await fetchMachines(ctx.tools)
-    if (!list.ok) { json(503, { error: `dsh-ssh hosts unavailable: ${list.reason}` }); return }
-    const machine = list.machines.find((m) => m.id === machineId || m.name === machineId)
-    if (!machine) { json(404, { error: `no such dsh-ssh host: ${machineId}` }); return }
-    if (!machine.configured) {
-      json(409, { error: `no remote root configured for ${machine.id} — set remote_machines["${machine.id}"] in the workspace harnessams.json` })
-      return
-    }
-    try {
-      const r = await runRemoteCheckButton(ctx, check, { machine, ws })
-      json(200, { ok: true, type: 'remote', channel: r.channel, results: r.results })
-    } catch (e) { json(502, { error: String(e?.message ?? e) }) }
+    if (check !== 'local') { json(400, { error: `unknown check: ${check} (the only check is local)` }); return }
+    if (!ws) { json(503, { error: 'harnessams-workspace/harnessams.json not found' }); return }
+    json(200, { ok: true, type: 'local', results: await runLocalChecks(ws) })
     return
   }
 
@@ -320,6 +283,29 @@ async function handle(req, res, ctx) {
     const r = await browseDir(url.searchParams.get('path'), ws ? ws.config.workspace_root : os.homedir())
     if (r.error) { json(400, { error: r.error }); return }
     json(200, { ok: true, ...r })
+    return
+  }
+  if (route === '/api/remote-browse') {
+    // One remote directory level for the working-directory picker (settings
+    // table, remote mode): directories only, through the dsh-ssh exec funnel.
+    const sessionId = url.searchParams.get('sessionId')
+    const machineId = url.searchParams.get('machineId')
+    const dir = url.searchParams.get('dir')
+    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+    if (!machineId) { json(400, { error: 'missing machineId (a configured dsh-ssh host alias)' }); return }
+    try {
+      const r = await remoteBrowse(ctx, machineId, dir)
+      json(200, { ok: true, ...r })
+    } catch (e) {
+      const msg = String(e?.message ?? e)
+      const code = /dsh-ssh hosts unavailable/.test(msg) ? 503
+        : /no such dsh-ssh host/.test(msg) ? 404
+        : /no remote root configured/.test(msg) ? 409
+        : /^dir /.test(msg) ? 400
+        : 502
+      json(code, { error: msg })
+    }
     return
   }
   // ---- tier 2: project mapping + task store ----

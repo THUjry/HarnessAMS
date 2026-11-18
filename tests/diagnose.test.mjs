@@ -1,16 +1,12 @@
-// Diagnosis-session surface: prompt assembly and
-// size caps (server/diagnose.js), the session-controller handoff, and the
-// POST /api/checks/analyze route (route-level, through the apply()-registered
-// handler, same discipline as dashboard.test.mjs). The client half is a
-// combo-loaded classic script, so its contract is pinned against the source text.
-// Run: bare `node --test` from the repo root.
+// Diagnosis-session surface (server/diagnose.js): entry sanitization and the
+// session-controller handoff consumed by the self-check orchestrator. The
+// Overview health-check handoff (buildDiagnosisPrompt + POST /api/checks/analyze)
+// was retired with that panel on 2026-11-18 — the client half is pinned against
+// the source text as GONE. Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import path from 'node:path'
-import { sanitizeFailed, buildDiagnosisPrompt, createDiagnosisSession } from '../src/server/diagnose.js'
-import { registerRoutes, callRoute, callPost, clientSrc, assertDictKeys, batchOf } from './helpers.mjs'
+import { sanitizeFailed, createDiagnosisSession } from '../src/server/diagnose.js'
+import { clientSrc } from './helpers.mjs'
 
 test('diagnose: sanitizeFailed caps entries and text, drops unknown fields', () => {
   const big = 'x'.repeat(5000)
@@ -27,38 +23,6 @@ test('diagnose: sanitizeFailed caps entries and text, drops unknown fields', () 
   assert.equal(out[1].item, 'e0')
   assert.ok(out.every((x) => x.ok === false))
   assert.equal(sanitizeFailed(null).length, 0)
-})
-
-test('diagnose: prompt body is English, context is complete, language line follows lang', () => {
-  const base = {
-    check: 'jobs',
-    machine: { id: 'node1', name: 'node1', host: '10.0.0.1', port: 22, username: 'user' },
-    remotePath: '/home/user/sim',
-    projectTitle: 'broadband3 repro',
-    failed: [{ item: 'LSF jobs', detail: 'bjobs: command not found' }],
-  }
-  const zh = buildDiagnosisPrompt({ ...base, lang: 'zh', auto: true })
-  const en = buildDiagnosisPrompt({ ...base, lang: 'en', auto: false })
-  for (const p of [zh, en]) {
-    assert.ok(p.includes('Check: LSF jobs (id: jobs)'))
-    assert.ok(p.includes('node1 (user@10.0.0.1:22, dsh-ssh alias "node1")'))
-    assert.ok(p.includes('Remote root: /home/user/sim'))
-    assert.ok(p.includes('Project: broadband3 repro'))
-    assert.ok(p.includes('bjobs: command not found'))
-    assert.ok(p.includes('READ-ONLY'))
-    assert.ok(p.includes('ssh_exec (alias "node1")'))
-    assert.ok(p.endsWith('Answer in Chinese.') || p.endsWith('Answer in English.'))
-  }
-  assert.ok(zh.endsWith('Answer in Chinese.'))
-  assert.ok(en.endsWith('Answer in English.'))
-  assert.ok(zh.includes('automatic — the check run ended with failed entries'))
-  assert.ok(en.includes('user button on the check results'))
-
-  const local = buildDiagnosisPrompt({ check: 'local', failed: [{ item: 'Node', detail: 'boom' }], lang: 'zh' })
-  assert.ok(local.includes('Machine: local (this host)'))
-  assert.ok(!local.includes('ssh_exec'))
-  const unknown = buildDiagnosisPrompt({ check: 'mystery', failed: [], lang: 'zh' })
-  assert.ok(unknown.includes('Check: mystery (id: mystery)'))
 })
 
 test('diagnose: createDiagnosisSession drives create→prompt→rename and degrades soft', async () => {
@@ -102,151 +66,15 @@ test('diagnose: createDiagnosisSession drives create→prompt→rename and degra
   assert.match(miss.error, /sessionController service unavailable/)
 })
 
-// ---- route level: POST /api/checks/analyze through the apply()-registered handler ----
-
-const ANALYZE = 'http://127.0.0.1/harnessams/api/checks/analyze'
-
-// ssh_list structured host listing (dsh-ssh 0.4.18 src/tools.ts contract).
-const HOSTS_VALUE = { hosts: [
-  { alias: 'node1', host: '10.0.0.1', port: 22, user: 'user', auth: 'key', keyReady: true },
-] }
-
-test('diagnose route: 400 contract (bad JSON shape, unknown check, empty failed)', async () => {
-  const handler = await registerRoutes({ workspaceRegistry: { list: () => [] }, get: () => null })
-  const bad = await callPost(handler, ANALYZE, '{oops')
-  assert.equal(bad.code, 400)
-  assert.match(bad.body.error, /bad JSON body/)
-
-  assert.equal((await callPost(handler, ANALYZE, { check: 'jobs', failed: [{ item: 'x' }] })).code, 400) // missing sessionId
-  assert.equal((await callPost(handler, ANALYZE, { sessionId: 's1', check: 'nope', failed: [{ item: 'x' }] })).code, 400)
-  assert.equal((await callPost(handler, ANALYZE, { sessionId: 's1', check: 'jobs' })).code, 400) // missing failed
-  assert.equal((await callPost(handler, ANALYZE, { sessionId: 's1', check: 'jobs', failed: [] })).code, 400)
-  assert.equal((await callPost(handler, ANALYZE, { sessionId: 's1', check: 'jobs', failed: [{ item: 'x' }] })).code, 404) // session in no workspace
-  // GET still rejected; the 405 hint names the new route
-  const res = await callRoute(handler, { method: 'POST', url: 'http://127.0.0.1/harnessams/api/other', headers: {} })
-  assert.equal(res.code, 405)
-  assert.ok(String(res.body && res.body.error).includes('/api/checks/analyze'))
-})
-
-test('diagnose route: local check anchors the current project workspace and creates the session', async () => {
-  const ws = await mkdtemp(path.join(tmpdir(), 'hams-diag-local-'))
-  try {
-    const calls = []
-    const sc = {
-      create: async (req) => { calls.push(['create', req]); return { sessionId: 'sess-diag' } },
-      prompt: async (req) => { calls.push(['prompt', req]) },
-      rename: async (req) => { calls.push(['rename', req]) },
-    }
-    const handler = await registerRoutes({
-      workspaceRegistry: { list: () => [{ id: 'ws-local', path: ws, title: 'harnessams-workspace', sessionIds: ['sess-local'] }] },
-      get: (n) => (n === 'sessionController' ? sc : null),
-    })
-    const call = (body) => callPost(handler, ANALYZE, body)
-    const r = await call({
-      sessionId: 'sess-local', check: 'local', machineId: null, lang: 'zh', auto: false,
-      failed: [{ item: 'Node', detail: 'node missing', ok: false, ms: 3 }],
-    })
-    assert.equal(r.code, 200)
-    assert.equal(r.body.ok, true)
-    assert.equal(r.body.sessionId, 'sess-diag')
-    assert.equal(calls[0][1].workspaceId, 'ws-local')
-    const prompt = calls[1][1].content[0].text
-    assert.ok(prompt.includes('Machine: local (this host)'))
-    assert.ok(prompt.includes('node missing'))
-    assert.ok(prompt.endsWith('Answer in Chinese.'))
-    assert.equal(calls[2][0], 'rename')
-
-    // a session outside every workspace keeps the 404 contract
-    const miss = await call({ sessionId: 'sess-stranger', check: 'local', failed: [{ item: 'x' }] })
-    assert.equal(miss.code, 404)
-  } finally {
-    await rm(ws, { recursive: true, force: true })
-  }
-})
-
-test('diagnose route: remote check resolves the alias and anchors the current project; 404/503 paths', async () => {
-  const tmp = await mkdtemp(path.join(tmpdir(), 'hams-diag-remote-'))
-  try {
-    const calls = []
-    const sc = {
-      create: async (req) => { calls.push(['create', req]); return { sessionId: 'sess-r' } },
-      prompt: async (req) => { calls.push(['prompt', req]) },
-    }
-    // The checking session lives in a local project; a remote check resolves the
-    // machineId against the ssh_list registry and still anchors the diagnosis
-    // session to the CURRENT project (ssh_exec needs no workspace binding).
-    const localWs = path.join(tmp, 'local-ws')
-    await mkdir(localWs, { recursive: true })
-    const makeCtx = (controller) => ({
-      workspaceRegistry: { list: () => [
-        { id: 'ws-local', path: localWs, title: 'harnessams-workspace', sessionIds: ['sess-local'] },
-      ] },
-      tools: {
-        register: () => {},
-        get: (n) => (n === 'ssh_list' ? {} : undefined),
-        execute: async (input) => {
-          const call = input.calls[0]
-          assert.equal(call.name, 'ssh_list')
-          return batchOf({ isError: false, value: HOSTS_VALUE })
-        },
-      },
-      get: (n) => (n === 'sessionController' ? controller : null),
-    })
-    let handler = await registerRoutes(makeCtx(sc))
-    const call = (body) => callPost(handler, ANALYZE, body)
-
-    const ok = await call({
-      sessionId: 'sess-local', check: 'jobs', machineId: 'node1', lang: 'en', auto: true,
-      failed: [{ item: 'LSF jobs', detail: 'bjobs: not found', ok: false, ms: 12 }],
-    })
-    assert.equal(ok.code, 200)
-    assert.equal(ok.body.sessionId, 'sess-r')
-    assert.equal(calls[0][1].workspaceId, 'ws-local') // current project, not a mirror
-    const prompt = calls[1][1].content[0].text
-    assert.ok(prompt.includes('node1 (user@10.0.0.1:22, dsh-ssh alias "node1")'))
-    assert.ok(prompt.includes('ssh_exec (alias "node1")'))
-    assert.ok(prompt.includes('automatic — the check run ended with failed entries'))
-    assert.ok(prompt.endsWith('Answer in English.'))
-
-    // unknown machine → 404
-    assert.equal((await call({ sessionId: 'sess-local', check: 'load', machineId: 'ghost', failed: [{ item: 'x' }] })).code, 404)
-    // registry channel down → 503
-    handler = await registerRoutes({
-      workspaceRegistry: { list: () => [{ id: 'ws-local', path: localWs, title: 'P', sessionIds: ['sess-local'] }] },
-      tools: { register: () => {}, get: () => undefined },
-      get: (n) => (n === 'sessionController' ? sc : null),
-    })
-    const down = await call({ sessionId: 'sess-local', check: 'jobs', machineId: 'node1', failed: [{ item: 'x' }] })
-    assert.equal(down.code, 503)
-    assert.match(down.body.error, /dsh-ssh hosts unavailable/)
-    // controller missing → 503
-    handler = await registerRoutes(makeCtx(null))
-    const noSc = await call({ sessionId: 'sess-local', check: 'jobs', machineId: 'node1', failed: [{ item: 'x' }] })
-    assert.equal(noSc.code, 503)
-    assert.match(noSc.body.error, /sessionController/)
-  } finally {
-    await rm(tmp, { recursive: true, force: true })
-  }
-})
-
 // ---- client static contract (classic script: asserted against the source text) ----
 
 const src = await clientSrc()
 
-test('diagnose client: analyze keys exist in both languages, clipboard keys are gone', () => {
-  assertDictKeys(src, ['chk.analyze', 'chk.analyzing', 'chk.analyzeDone', 'chk.analyzeAuto', 'chk.analyzeFail'])
-  assert.ok(!src.includes('chk.diagnose'), 'the clipboard diagnose flow must be fully removed')
-  assert.ok(!src.includes('chk.promptCopied') && !src.includes('chk.copyPrompt'), 'clipboard prompt keys must be gone')
-})
-
-test('diagnose client: handoff wiring — run-level button, auto path, language probe', () => {
-  assert.ok(src.includes("API + '/checks/analyze'"), 'client must post to the analyze route')
-  assert.ok(/const AUTO_ANALYZE_REMOTE = true/.test(src), 'auto-handoff policy constant present (button-only when false)')
-  assert.ok(/void analyzeRun\(\{ machineId: mid, check: id, results: r\.results \}, true\)/.test(src),
-    'a failed REMOTE run must auto-fire the handoff')
-  assert.ok(src.includes('lang: effectiveLang()'), 'the answer-language must follow the effective UI language')
-  assert.ok(/function effectiveLang\(\)/.test(src) && src.includes("boundLocaleTr('common.sectionFailed')"),
-    'effectiveLang probes the DSH-bound translator')
-  assert.ok(/onAnalyze\(run, false\)/.test(src), 'the run-level button is the manual path (auto=false)')
-  assert.ok(!/diagnose\(x\.item\)/.test(src), 'no per-entry clipboard buttons remain')
+test('diagnose client: the health-check handoff surface is fully retired', () => {
+  assert.ok(!src.includes('/checks/analyze'), 'the analyze route call must be gone from the client')
+  assert.ok(!src.includes('AUTO_ANALYZE_REMOTE') && !src.includes('analyzeRun'), 'the auto-handoff machinery must be gone')
+  assert.ok(!src.includes('buildDiagnosisPrompt'), 'no stale references to the removed prompt builder')
+  for (const k of ['chk.analyze', 'chk.analyzing', 'chk.analyzeDone', 'chk.analyzeAuto', 'chk.analyzeFail']) {
+    assert.ok(!src.includes(`'${k}':`), `dictionary key ${k} must be gone (both languages)`)
+  }
 })
