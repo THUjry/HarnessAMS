@@ -119,7 +119,7 @@ test('client half: single tab with the project overview on the first-level strip
   assert.ok(src.includes('function ProjectOverviewView'), 'project overview view component')
   assert.ok(src.includes("stripSel === 'overview' && h(ProjectOverviewView"), 'overview renders as the strip selection')
   assert.ok(src.includes("'tasks.projectOverview'"), 'project overview strip capsule copy key')
-  assert.ok(src.includes("const STRIP_SEL_KEY = 'hams-task-strip-sel-v2'"), 'strip selection must survive remounts')
+  assert.ok(src.includes("'/session-tasks?sessionId='") && src.includes('putSessionTaskState'), 'per-session task state persists via sessions.json')
   assert.ok(src.includes("tr('tasks.newTask')),"),
     'the create button must read "new task" (not a bare +)')
   // The sidebar follows session switches by tracking open state, not a pin
@@ -153,11 +153,14 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   // dropdown options follow the theme (hover-only-readable bug)
   assert.ok(src.includes('.hams-select { color-scheme: light dark; }'), 'select color-scheme')
   assert.ok(src.includes('.hams-select option { background: canvas; color: canvasText; }'), 'option colors')
-  // per-session strip selection with last-active inheritance (the host exposes
-  // no parent-session read face to plugins — see the note in apply())
-  assert.ok(src.includes('function readStripSel(sessionId)'), 'selection read is per-session')
-  assert.ok(src.includes('function rememberStripSel(sessionId, v)'), 'selection write is per-session')
-  assert.ok(src.includes('let lastActiveStripSel = null'), 'last-active inheritance memory')
+  // per-session ACTIVE task list with last-active inheritance (the host exposes
+  // no parent-session read face to plugins — see the note in apply()) and
+  // sessions.json persistence (round 3, 2026-11-18)
+  assert.ok(src.includes('const sessionTaskState = new Map()'), 'per-session active-task map')
+  assert.ok(src.includes('function taskStateOf(sessionId)'), 'first-sight inherit via taskStateOf')
+  assert.ok(src.includes('const lastActiveSessionId = { id: null }'), 'last-active session memory')
+  assert.ok(src.includes('function putSessionTaskState(sessionId)'), 'merge-PUT persistence')
+  assert.ok(src.includes("API + '/session-tasks?sessionId='"), 'session-tasks API wired')
   // default-open: initialized project + untouched host layout tabs
   assert.ok(src.includes('sessionSidebarUntouched(sessionId)'), 'untouched-layout gate')
   assert.ok(src.includes('r.project?.initialized'), 'default-open keys off initialized')

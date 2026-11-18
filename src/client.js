@@ -653,6 +653,7 @@ window.__ModuleLoader__.load({
   border: 1px solid transparent; border-bottom: none; }
 .hams-tasktab.active { border-color: color-mix(in srgb, currentColor 25%, transparent);
   background: color-mix(in srgb, currentColor 7%, transparent); }
+.hams-tasktab.cur { font-weight: 600; box-shadow: inset 0 -2px 0 currentColor; }
 .hams-tasktab .hams-tabname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hams-tasktab .hams-x { opacity: .55; cursor: pointer; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); line-height: 1; }
 .hams-tasktab .hams-x:hover { opacity: 1; color: #e05252; }
@@ -1274,79 +1275,42 @@ window.__ModuleLoader__.load({
       try { localStorage.setItem(TASK_VIEW_KEY, v) } catch { /* private mode */ }
     }
 
-    // First-level strip selection inside the task tab: 'overview' (the project
-    // overview pseudo-capsule, the default display) or a task id. PER SESSION
-    // since 2026-11-18 (user decision): v2 stores a {sessionId: selection} map
-    // so different sessions of one project keep their own task, and a forked
-    // session inherits its parent's entry on first sight (sessionParents mirror
-    // filled in apply()). Same survive-a-remount treatment as the sub-view
-    // above; a stale task id falls back to 'overview' when the list arrives
-    // (TaskSidebarBody sanitizes after fetch).
-    const STRIP_SEL_KEY = 'hams-task-strip-sel-v2'
-    const STRIP_SEL_LEGACY_KEY = 'hams-task-strip-sel' // pre-2026-11-18 browser-global single value
-    const STRIP_SEL_MAX_SESSIONS = 50
-    let stripSelMemory = null // Map<sessionId, selection>; insertion order doubles as recency for pruning
-    function stripSelMap() {
-      if (!stripSelMemory) {
-        stripSelMemory = new Map()
-        try {
-          const v = JSON.parse(localStorage.getItem(STRIP_SEL_KEY) || 'null')
-          if (v && typeof v === 'object' && !Array.isArray(v)) {
-            for (const [k, sel] of Object.entries(v)) {
-              if (k && typeof sel === 'string' && sel) stripSelMemory.set(k, sel)
-            }
-          }
-        } catch { /* private mode / corrupt payload */ }
+    // First-level strip state inside the task tab, PER SESSION (user decision
+    // 2026-11-18, round 3): each session keeps its own ACTIVE TASK LIST (a set
+    // of task ids shown as highlighted capsules) plus the one currently
+    // displayed ('overview' or a task id). A first-seen session inherits the
+    // previously active session's list (fork and new-session continuation both
+    // land there — the host exposes no parent-session read face to plugins).
+    // PERSISTED to <workspace>/.harnessams/sessions.json (user ruling: a reload
+    // must NOT lose it) — module memory is the runtime truth, every change
+    // merge-PUTs the session's entry; blank sessions keep theirs in memory
+    // until the workspace mapping lands.
+    const sessionTaskState = new Map() // sessionId -> { active: Set<taskId>, display: 'overview' | taskId }
+    const lastActiveSessionId = { id: null }
+    const hydratedProjects = new Set() // projectPath values whose sessions.json is already in the map
+    function taskStateOf(sessionId) {
+      const empty = { active: new Set(), display: 'overview' }
+      if (!sessionId) return empty
+      if (!sessionTaskState.has(sessionId)) {
+        // first sight: inherit the previously ACTIVE session's list — for a
+        // fork the previous active session is the fork source in the normal
+        // flow (fork does not switch sessions; the user clicks the child next)
+        const prev = lastActiveSessionId.id ? sessionTaskState.get(lastActiveSessionId.id) : null
+        sessionTaskState.set(sessionId, prev
+          ? { active: new Set(prev.active), display: prev.display }
+          : empty)
       }
-      return stripSelMemory
+      return sessionTaskState.get(sessionId)
     }
-    function hasStoredStripSel(sessionId) {
-      return !!sessionId && stripSelMap().has(sessionId)
-    }
-    function readStripSel(sessionId) {
-      if (!sessionId) return 'overview'
-      const m = stripSelMap()
-      if (m.has(sessionId)) return m.get(sessionId)
-      // one-time v1 migration: the old browser-global single value seeds the
-      // first unseen session, so an upgrade keeps the visible selection
-      try {
-        const legacy = localStorage.getItem(STRIP_SEL_LEGACY_KEY)
-        if (legacy) {
-          localStorage.removeItem(STRIP_SEL_LEGACY_KEY)
-          m.set(sessionId, legacy)
-          persistStripSel()
-          return legacy
-        }
-      } catch { /* private mode */ }
-      return 'overview'
-    }
-    function rememberStripSel(sessionId, v) {
+    function putSessionTaskState(sessionId) {
       if (!sessionId) return
-      const m = stripSelMap()
-      if (v !== 'overview') {
-        // one task belongs to ONE session at a time (user decision 2026-11-18,
-        // round 2): taking a task here releases it from every other session.
-        // The released sessions are pinned back to 'overview' (not deleted) so
-        // switching to one later reads its own entry instead of re-inheriting
-        // (and re-stealing) the task via the last-active fallback.
-        for (const [sid, sel] of [...m]) {
-          if (sid !== sessionId && sel === v) m.set(sid, 'overview')
-        }
-      }
-      m.delete(sessionId) // re-insert at the end so pruning drops the OLDEST entry
-      m.set(sessionId, v)
-      while (m.size > STRIP_SEL_MAX_SESSIONS) m.delete(m.keys().next().value)
-      persistStripSel()
+      const st = sessionTaskState.get(sessionId) ?? null
+      fetchJson(API + '/session-tasks?sessionId=' + encodeURIComponent(sessionId), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, state: st ? { active: [...st.active], display: st.display } : null }),
+      }).catch(() => { /* offline: the in-memory map keeps working */ })
     }
-    function persistStripSel() {
-      try { localStorage.setItem(STRIP_SEL_KEY, JSON.stringify(Object.fromEntries(stripSelMap()))) } catch { /* private mode */ }
-    }
-
-    // Last ACTIVE strip selection (module memory): a first-seen session with
-    // no stored entry inherits this — fork-then-switch and new-session
-    // continuation both land there (the host exposes no parent-session read
-    // face to plugins; see the note in apply()).
-    let lastActiveStripSel = null
 
     // Host right-sidebar layout persistence is per session (localStorage
     // dsh.sidebar-right.v1.<sessionId>): the value's layout.nodes.*.tabs arrays
@@ -1830,7 +1794,6 @@ window.__ModuleLoader__.load({
       const [project, setProject] = useState(undefined) // undefined=loading, null=none
       const [reason, setReason] = useState(null)
       const [tasks, setTasks] = useState([])
-      const [stripSel, setStripSel] = useState(() => readStripSel(sessionId)) // first-level strip: 'overview' | task id
       const [view, setView] = useState(readTaskView)
       const [error, setError] = useState(null)
       const [dialogOpen, setDialogOpen] = useState(false)
@@ -1863,18 +1826,63 @@ window.__ModuleLoader__.load({
         return () => clearInterval(timer)
       }, [])
 
-      // Reload the per-session strip selection when the session changes; a
-      // first-seen session with no stored entry continues the LAST ACTIVE
-      // selection (fork child / new session alike), persisted as its own entry.
+      // Per-session active-task state: reload on session switch (hydrating
+      // the project's sessions.json once per project), a FIRST-SEEN session
+      // inherits the previously active session's list (fork child /
+      // new-session continuation — see taskStateOf) and the inherited entry is
+      // persisted right away. After the adopt, this session becomes the
+      // "previously active" for the next first-seen one.
+      const [stripState, setStripState] = useState(() => taskStateOf(sessionId))
+      const stripSel = stripState.display // what the body shows: 'overview' | task id
       useEffect(() => {
-        if (!sessionId) { setStripSel('overview'); return }
-        if (hasStoredStripSel(sessionId)) { setStripSel(readStripSel(sessionId)); return }
-        if (lastActiveStripSel != null) { rememberStripSel(sessionId, lastActiveStripSel); setStripSel(lastActiveStripSel); return }
-        setStripSel(readStripSel(sessionId)) // legacy seed / overview default
-      }, [sessionId])
-      // keep the module-level "last active" current for the NEXT first-seen
-      // session (this effect runs after the inherit effect above on a switch)
-      useEffect(() => { if (sessionId) lastActiveStripSel = stripSel }, [sessionId, stripSel])
+        let alive = true
+        if (!sessionId) { setStripState(taskStateOf(null)); return }
+        const adopt = () => {
+          const first = !sessionTaskState.has(sessionId)
+          setStripState(taskStateOf(sessionId))
+          if (first) putSessionTaskState(sessionId)
+          lastActiveSessionId.id = sessionId
+        }
+        if (hydratedProjects.has(projectPath)) { adopt(); return () => { alive = false } }
+        fetchJson(API + '/session-tasks?sessionId=' + encodeURIComponent(sessionId))
+          .then((d) => {
+            if (!alive) return
+            hydratedProjects.add(projectPath)
+            const sessions = d?.sessions ?? {}
+            for (const [sid, st] of Object.entries(sessions)) {
+              if (st && typeof st === 'object') {
+                sessionTaskState.set(sid, { active: new Set(Array.isArray(st.active) ? st.active : []), display: st.display ?? 'overview' })
+              }
+            }
+            adopt()
+          })
+          .catch(() => { if (alive) adopt() }) // offline: run on the in-memory map
+        return () => { alive = false }
+      }, [sessionId, projectPath])
+      // event-handler mutator: apply fn to a copy, keep the module map truthful
+      // and merge-PUT the session's entry to sessions.json
+      const mutateStrip = (fn) => {
+        const next = { active: new Set(stripState.active), display: stripState.display }
+        fn(next)
+        if (sessionId) sessionTaskState.set(sessionId, next)
+        setStripState(next)
+        putSessionTaskState(sessionId)
+      }
+      // sanitize after the task list (re)loads: drop deleted ids from the
+      // active set and fall the display back to the overview when its task is
+      // gone (module map stays truthful — Map.set is idempotent, so a React
+      // double-invoke of the updater is harmless)
+      const sanitizeAgainst = (fresh) => setStripState((prev) => {
+        const alive = new Set(fresh.map((t) => t.id))
+        const active = new Set([...prev.active].filter((id) => alive.has(id)))
+        const display = prev.display !== 'overview' && !alive.has(prev.display) ? 'overview' : prev.display
+        const next = { active, display }
+        if (sessionId && (next.display !== prev.display || next.active.size !== prev.active.size)) {
+          sessionTaskState.set(sessionId, next)
+          putSessionTaskState(sessionId)
+        }
+        return next
+      })
 
       useEffect(() => {
         let alive = true
@@ -1918,13 +1926,10 @@ window.__ModuleLoader__.load({
             if (!alive) return
             const fresh = d.tasks ?? []
             setTasks(fresh)
-            // sanitize the strip selection: a stored task id that no longer
-            // exists (deleted, or left over from another project) falls back to
-            // the project overview — the tab's default display (storage and
-            // state both, so the per-session entry stays truthful)
-            const storedSel = readStripSel(sessionId)
-            if (storedSel !== 'overview' && !fresh.some((t) => t.id === storedSel)) rememberStripSel(sessionId, 'overview')
-            setStripSel((prev) => prev !== 'overview' && !fresh.some((t) => t.id === prev) ? 'overview' : prev)
+            // sanitize: active ids that no longer exist (deleted, or inherited
+            // from another project's session) drop out; a gone display falls
+            // back to the project overview — the tab's default display
+            sanitizeAgainst(fresh)
           })
           .catch((e) => { if (alive) setError(String(e.message ?? e)) })
         return () => { alive = false }
@@ -1946,9 +1951,7 @@ window.__ModuleLoader__.load({
               if (!alive) return
               const fresh = d.tasks ?? []
               setTasks((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh))
-              const storedSel = readStripSel(sessionId)
-              if (storedSel !== 'overview' && !fresh.some((t) => t.id === storedSel)) rememberStripSel(sessionId, 'overview')
-              setStripSel((prev) => prev !== 'overview' && !fresh.some((t) => t.id === prev) ? 'overview' : prev)
+              sanitizeAgainst(fresh)
             })
             .catch(() => { /* keep the current list */ })
         }
@@ -1996,16 +1999,22 @@ window.__ModuleLoader__.load({
 
       const createTask = async (name, description) => {
         const saved = await persist((latest) => [...latest, { name, description: description || '' }])
-        if (saved && saved.length) { const id = saved[saved.length - 1].id; rememberStripSel(sessionId, id); setStripSel(id) }
+        if (saved && saved.length) {
+          const id = saved[saved.length - 1].id
+          mutateStrip((s) => { s.active.add(id); s.display = id })
+        }
       }
       const removeTask = (id) => {
         const t = tasks.find((x) => x.id === id)
         if (!t) return
         if (!window.confirm(tr('tasks.deleteConfirm', { name: t.name }))) return
-        if (stripSel === id) {
-          const next = tasks.filter((x) => x.id !== id)[0]?.id ?? 'overview'
-          rememberStripSel(sessionId, next); setStripSel(next)
-        }
+        mutateStrip((s) => {
+          s.active.delete(id)
+          if (s.display === id) {
+            const rest = [...s.active]
+            s.display = rest.length ? rest[rest.length - 1] : 'overview'
+          }
+        })
         persist((latest) => latest.filter((x) => x.id !== id))
       }
       const saveDescription = () => {
@@ -2026,13 +2035,22 @@ window.__ModuleLoader__.load({
           h('div', {
             className: 'hams-tasktab' + (stripSel === 'overview' ? ' active' : ''),
             title: tr('tasks.projectOverview'),
-            onClick: () => { rememberStripSel(sessionId, 'overview'); setStripSel('overview') },
+            onClick: () => mutateStrip((s) => { s.display = 'overview' }),
           }, h('span', { className: 'hams-tabname' }, tr('tasks.projectOverview'))),
           tasks.map((t) => h('div', {
               key: t.id,
-              className: 'hams-tasktab' + (t.id === stripSel ? ' active' : ''),
+              // active = in this session's ACTIVE task set; cur = the one the
+              // body currently shows. Click: activate+show, or toggle OUT when
+              // it is already the shown one (drops it from the active set).
+              className: 'hams-tasktab' + (stripState.active.has(t.id) ? ' active' : '') + (t.id === stripSel ? ' cur' : ''),
               title: t.name,
-              onClick: () => { rememberStripSel(sessionId, t.id); setStripSel(t.id); setDescDraft(null) },
+              onClick: () => {
+                setDescDraft(null)
+                mutateStrip((s) => {
+                  if (s.display === t.id && s.active.has(t.id)) { s.active.delete(t.id); s.display = 'overview' }
+                  else { s.active.add(t.id); s.display = t.id }
+                })
+              },
             },
             h('span', { className: 'hams-tabname' }, t.name),
             h('span', { className: 'hams-x', role: 'button', 'aria-label': tr('tasks.deleteAria', { name: t.name }),

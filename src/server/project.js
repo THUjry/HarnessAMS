@@ -146,3 +146,60 @@ export async function clearTasksIfEmpty(workspacePath) {
     if (tasks.length === 0 && fs.existsSync(p)) await fsp.rm(p)
   } catch { /* best effort */ }
 }
+
+// ---------- per-session active-task state (2026-11-18 round 3) ----------
+// <workspace>/.harnessams/sessions.json: which tasks each DSH session keeps
+// ACTIVE (highlighted capsules) plus the one currently displayed. Disk-
+// persisted by user ruling (a reload must NOT lose it); entries are keyed by
+// the raw DSH session id and reference this project's task ids.
+const SESSIONS_FILE = 'sessions.json'
+const MAX_SESSION_ENTRIES = 200
+const MAX_ACTIVE_PER_SESSION = 50
+export function sessionTasksPath(workspacePath) {
+  return path.join(workspacePath, TASKS_DIR, SESSIONS_FILE)
+}
+export async function readSessionTasks(workspacePath) {
+  try {
+    const raw = await fsp.readFile(sessionTasksPath(workspacePath), 'utf8')
+    const v = JSON.parse(raw)
+    const sessions = v && typeof v === 'object' && !Array.isArray(v) ? v.sessions : null
+    if (!sessions || typeof sessions !== 'object' || Array.isArray(sessions)) return { sessions: {} }
+    const out = {}
+    for (const [sid, st] of Object.entries(sessions)) {
+      if (typeof sid !== 'string' || !sid || sid.length > 128 || !st || typeof st !== 'object') continue
+      const active = Array.isArray(st.active)
+        ? [...new Set(st.active)].filter((x) => typeof x === 'string' && ID_RE.test(x)).slice(0, MAX_ACTIVE_PER_SESSION)
+        : []
+      const display = st.display === 'overview' || (typeof st.display === 'string' && active.includes(st.display)) ? st.display : 'overview'
+      out[sid] = { active, display }
+    }
+    return { sessions: out }
+  } catch { return { sessions: {} } } // missing / corrupt -> empty, never throw
+}
+// Read-modify-write of ONE session's entry (single UI writer, but a stale
+// full-file PUT from an old tab would clobber sibling sessions — merge instead).
+export async function writeSessionTaskState(workspacePath, sessionId, state) {
+  if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 128) return { error: 'bad sessionId' }
+  const cur = await readSessionTasks(workspacePath)
+  const sessions = { ...cur.sessions }
+  delete sessions[sessionId] // re-insert at the end: insertion order doubles as recency for pruning
+  if (state != null) {
+    const active = Array.isArray(state?.active)
+      ? [...new Set(state.active)].filter((x) => typeof x === 'string' && ID_RE.test(x)).slice(0, MAX_ACTIVE_PER_SESSION)
+      : []
+    const display = state?.display === 'overview' || (typeof state?.display === 'string' && active.includes(state.display)) ? state.display : 'overview'
+    sessions[sessionId] = { active, display }
+  }
+  let entries = Object.entries(sessions)
+  while (entries.length > MAX_SESSION_ENTRIES) entries = entries.slice(1)
+  const dir = path.join(workspacePath, TASKS_DIR)
+  try {
+    await fsp.mkdir(dir, { recursive: true })
+    const tmp = sessionTasksPath(workspacePath) + '.tmp'
+    await fsp.writeFile(tmp, JSON.stringify({ version: 1, sessions: Object.fromEntries(entries) }, null, 2) + '\n', 'utf8')
+    await fsp.rename(tmp, sessionTasksPath(workspacePath))
+  } catch (e) {
+    return { error: 'sessions.json write failed: ' + String(e?.message ?? e) }
+  }
+  return { sessions: Object.fromEntries(entries) }
+}
