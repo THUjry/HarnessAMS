@@ -593,12 +593,17 @@ window.__ModuleLoader__.load({
       const el = document.createElement('style')
       el.id = 'dsh-harnessams-css'
       el.textContent = `
-.hams-page { padding: 20px 28px 48px; max-width: 1000px; font-size: var(--dsh-content-font-size, 14px); overflow-wrap: anywhere; }
+.hams-page { padding: 20px 28px 48px; max-width: 1000px; font-size: var(--dsh-content-font-size, 14px); overflow-wrap: anywhere;
+  height: 100%; box-sizing: border-box; overflow-y: auto; }
 .hams-h1 { font-size: calc(20px + var(--dsh-content-font-delta, 0px)); margin: 0 0 4px; font-weight: 600; }
 .hams-meta { opacity: .7; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); margin-bottom: 14px; }
 .hams-section { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 8px; padding: 12px 16px 14px; margin: 14px 0; }
 .hams-section > h2 { font-size: calc(15px + var(--dsh-content-font-delta, 0px)); margin: 0 0 8px; font-weight: 600; }
-.hams-table { border-collapse: collapse; width: 100%; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); margin: 8px 0; }
+/* table-layout:fixed — auto layout lets a <select>'s intrinsic width (immune to
+   overflow-wrap) and nowrap cells push the table past the pane; fixed keeps
+   columns inside the container and cells wrap via overflow-wrap */
+.hams-table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); margin: 8px 0; }
+.hams-table .hams-select { max-width: 100%; }
 .hams-table th, .hams-table td { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding: 3px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .hams-table th { opacity: .7; font-weight: 500; }
 .hams-rowbad td { background: color-mix(in srgb, #e05252 12%, transparent); }
@@ -1318,6 +1323,16 @@ window.__ModuleLoader__.load({
     function rememberStripSel(sessionId, v) {
       if (!sessionId) return
       const m = stripSelMap()
+      if (v !== 'overview') {
+        // one task belongs to ONE session at a time (user decision 2026-11-18,
+        // round 2): taking a task here releases it from every other session.
+        // The released sessions are pinned back to 'overview' (not deleted) so
+        // switching to one later reads its own entry instead of re-inheriting
+        // (and re-stealing) the task via the last-active fallback.
+        for (const [sid, sel] of [...m]) {
+          if (sid !== sessionId && sel === v) m.set(sid, 'overview')
+        }
+      }
       m.delete(sessionId) // re-insert at the end so pruning drops the OLDEST entry
       m.set(sessionId, v)
       while (m.size > STRIP_SEL_MAX_SESSIONS) m.delete(m.keys().next().value)
@@ -1357,6 +1372,12 @@ window.__ModuleLoader__.load({
     }
     // sessionIds this page lifetime already auto-opened for (bounds retries)
     const autoOpenedFor = new Set()
+
+    // Last workspace state seen by any mounted surface: a brand-new session is
+    // created under the CURRENT workspace, so this answers the default-open
+    // question while the new session is still unaccounted in the workspace
+    // registry (blank sessions enter it only after their first turn).
+    const lastProjectInfo = { initialized: null }
 
     // Local-environment results table (the "list local environment" button in the
     // project-settings block): the classic Item/Result/Elapsed/Status rows; the
@@ -1495,7 +1516,7 @@ window.__ModuleLoader__.load({
         h('thead', null, h('tr', null, [tr('pset.colName'), tr('pset.colValue'), tr('chk.colStatus')]
           .map((c) => h('th', { key: c }, c)))),
         h('tbody', null, cols.map((c) => h('tr', { key: c.id },
-          h('td', { key: 'name', style: { whiteSpace: 'nowrap' } }, tr(c.labelKey)),
+          h('td', { key: 'name' }, tr(c.labelKey)),
           h('td', { key: 'value' }, settingCell(c)),
           resultCell(c)))))
     }
@@ -1876,6 +1897,7 @@ window.__ModuleLoader__.load({
               }
               setProject(r.project ?? null)
               setReason(r.project ? null : r.reason ?? null)
+              if (r?.project) lastProjectInfo.initialized = !!r.project.initialized
             })
             .catch((e) => {
               if (!alive) return
@@ -2508,6 +2530,43 @@ window.__ModuleLoader__.load({
       // last ACTIVE selection instead (see TaskSidebarBody): a first-seen
       // session continues whatever the previously active session had selected,
       // which covers fork-then-switch and new-session continuation alike.
+      // Blank-session default-open (round 2): neither the tab body nor the
+      // conversation-header actions mount for a blank session, so the header
+      // button above cannot fire there. But the host MINTS the per-session
+      // layout key the moment a session is created/first activated — a NEW key
+      // in localStorage IS the "a never-seen session just went active" signal
+      // (switches to already-keyed sessions never mint). Poll for new keys
+      // (the storage event does not fire on the same page) and run the same
+      // default-open policy; while the new session is still unaccounted in the
+      // registry, the last known project's initialized flag answers for it (a
+      // new session is created under the CURRENT workspace).
+      const knownLayoutKeys = new Set()
+      try { for (const k of Object.keys(localStorage)) if (k.startsWith('dsh.sidebar-right.v1.')) knownLayoutKeys.add(k) } catch { /* private mode */ }
+      setInterval(() => {
+        let keys
+        try { keys = Object.keys(localStorage).filter((k) => k.startsWith('dsh.sidebar-right.v1.')) } catch { return }
+        for (const k of keys) {
+          if (knownLayoutKeys.has(k)) continue
+          knownLayoutKeys.add(k)
+          const sid = k.slice('dsh.sidebar-right.v1.'.length)
+          if (!sid || autoOpenedFor.has(sid)) continue
+          autoOpenedFor.add(sid)
+          let attempts = 0
+          const check = () => {
+            if (!openSidebarTab) return
+            fetchJson(API + '/project?sessionId=' + encodeURIComponent(sid))
+              .then((r) => {
+                if (r?.project?.initialized) { openSidebarTab(); return }
+                if (!r?.project && attempts++ < 24 && String(r?.reason ?? '').includes('not accounted')) {
+                  if (lastProjectInfo.initialized) { openSidebarTab(); return }
+                  setTimeout(check, 5000)
+                }
+              })
+              .catch(() => { if (attempts++ < 24) setTimeout(check, 5000) })
+          }
+          check()
+        }
+      }, 1000)
       // Session tool cards: keyed by wire tool name, exact match (a typo never
       // renders), so all eight names must be listed verbatim — guarded by the
       // entry test against the registered tool-name set.
