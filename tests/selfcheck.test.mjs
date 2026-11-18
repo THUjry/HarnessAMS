@@ -931,7 +931,7 @@ test('client static contract: keys bilingual, endpoints wired, two-row table, po
   assert.ok(src.includes('function ProjectSelfcheck('))
   assert.ok(src.includes('function SettingsTable('))
   assert.ok(src.includes('function SelfcheckSteps('))
-  assert.ok(src.includes('SETTING_COLS'), 'column config drives the two-row table')
+  assert.ok(src.includes('SETTING_COLS'), 'row config drives the transposed three-column table (name / value / verdict)')
   assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath })'), 'mounted in the Overview tab')
   assert.match(src, /,\s*3_000\s*\)/, '3s poll while running')
   assert.ok(src.includes("'local'"), 'local dir display branch')

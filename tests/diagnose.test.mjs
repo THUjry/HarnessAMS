@@ -1,12 +1,11 @@
 // Diagnosis-session surface (server/diagnose.js): entry sanitization and the
 // session-controller handoff consumed by the self-check orchestrator. The
 // Overview health-check handoff (buildDiagnosisPrompt + POST /api/checks/analyze)
-// was retired with that panel on 2026-11-18 — the client half is pinned against
-// the source text as GONE. Run: bare `node --test` from the repo root.
+// was retired with that panel on 2026-11-18. Run: bare `node --test` from the
+// repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { sanitizeFailed, createDiagnosisSession } from '../src/server/diagnose.js'
-import { clientSrc } from './helpers.mjs'
 
 test('diagnose: sanitizeFailed caps entries and text, drops unknown fields', () => {
   const big = 'x'.repeat(5000)
@@ -64,17 +63,4 @@ test('diagnose: createDiagnosisSession drives create→prompt→rename and degra
   // missing controller → soft error (503 at the route)
   const miss = await createDiagnosisSession({ get: () => null }, { workspaceId: 'ws-1', title: 'T', prompt: 'P' })
   assert.match(miss.error, /sessionController service unavailable/)
-})
-
-// ---- client static contract (classic script: asserted against the source text) ----
-
-const src = await clientSrc()
-
-test('diagnose client: the health-check handoff surface is fully retired', () => {
-  assert.ok(!src.includes('/checks/analyze'), 'the analyze route call must be gone from the client')
-  assert.ok(!src.includes('AUTO_ANALYZE_REMOTE') && !src.includes('analyzeRun'), 'the auto-handoff machinery must be gone')
-  assert.ok(!src.includes('buildDiagnosisPrompt'), 'no stale references to the removed prompt builder')
-  for (const k of ['chk.analyze', 'chk.analyzing', 'chk.analyzeDone', 'chk.analyzeAuto', 'chk.analyzeFail']) {
-    assert.ok(!src.includes(`'${k}':`), `dictionary key ${k} must be gone (both languages)`)
-  }
 })

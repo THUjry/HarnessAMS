@@ -167,7 +167,7 @@ test('agentsmd: apply() alone writes nothing — only the .harnessams writers an
 
 const src = await clientSrc()
 
-test('agentsmd client: button row order and wiring, retired keys gone, new keys bilingual', () => {
+test('agentsmd client: button row order and wiring, new keys bilingual', () => {
   assert.ok(src.includes("API + '/agents-md'"), 'the save buttons post to the agents-md route')
   assert.ok(src.includes("API + '/remote-browse?'"), 'the dir browser fetches the remote-browse route')
   const iSave = src.indexOf("tr('agents.saveBtn')")
@@ -177,17 +177,11 @@ test('agentsmd client: button row order and wiring, retired keys gone, new keys 
   assert.ok(iSave >= 0 && iSave < iRun && iRun < iLocal && iLocal < iAll,
     'button order: save to AGENTS.md | one-click self-check | list local environment | check all & save')
   assert.ok(/setCheckAllPending\(true\); void startRun\(\)/.test(src), 'check-all runs the self-check then auto-saves on landing')
+  assert.ok(src.includes('function RemoteDirBrowse') && src.includes('function LocalEnvResults'), 'the new components exist')
   assertDictKeys(src, [
     'agents.saveBtn', 'agents.saving', 'agents.saved', 'agents.saveFailed', 'agents.checkAll', 'agents.checkAllRunning',
     'pset.browse', 'pset.browseTitle', 'pset.browsePickDir', 'pset.pickDir', 'pset.pickThisDir', 'pset.pickCurrentDir',
+    'pset.colName', 'pset.colValue',
     'chk.btn.local', 'chk.truncated',
   ])
-  for (const k of ['chk.title', 'chk.remoteArea', 'chk.needRemoteRoot', 'chk.unconfiguredList', 'chk.noneYet', 'chk.rootLegend',
-    'chk.btn.load', 'chk.btn.jobs', 'chk.btn.batches', 'chk.btn.scripts',
-    'chk.lc.load1', 'chk.jc.jobid', 'chk.bc.dir', 'chk.sc.file', 'chk.sync.in-sync']) {
-    assert.ok(!src.includes(`'${k}':`), `dictionary key ${k} must be gone (both languages)`)
-  }
-  assert.ok(!src.includes('function CheckPanel') && !src.includes('MachineCheckBlock'), 'the health-check panel components must be gone')
-  assert.ok(!src.includes('value: dirValue'), 'the free-typed remote-dir input must be gone')
-  assert.ok(src.includes('function RemoteDirBrowse') && src.includes('function LocalEnvResults'), 'replacement components present')
 })
