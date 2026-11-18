@@ -1,16 +1,19 @@
 // Tier 2 — project = DSH workspace: the session-to-workspace mapping over
 // ctx.workspaceRegistry (a project is nothing more than a DSH workspace, i.e. a local
 // folder; HarnessAMS keeps no workspace concept of its own), and the per-project task
-// store at <workspace>/.harnessams/tasks.json. Sessions are deliberately NOT modeled:
-// every session of the same workspace sees the same task list.
+// store at <workspace>/.harnessams/tasks.json. Sessions are deliberately NOT modeled
+// server-side: every session of the same workspace sees the same task list (the
+// per-session SELECTED task is a client-side localStorage concern since 2026-11-18).
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 
 // Resolve the workspace (project) a session belongs to. The registry's sessionIds
-// projection is canonical-cwd based; the return value mirrors the DSH workspace record.
-// Returns { project: { id, path, title } } or { project: null, reason }.
+// projection is canonical-cwd based; the return value mirrors the DSH workspace record,
+// plus `initialized` = the workspace already has a .harnessams store (tasks/settings/
+// check params) — the client's sidebar default-open policy keys off it.
+// Returns { project: { id, path, title, initialized } } or { project: null, reason }.
 export function sessionProject(registry, sessionId) {
   if (!registry || typeof registry.list !== 'function') {
     return { project: null, reason: 'workspaceRegistry service unavailable' }
@@ -21,7 +24,9 @@ export function sessionProject(registry, sessionId) {
   for (const ws of registry.list()) {
     const ids = ws.sessionIds ?? []
     if (ids.includes(sessionId)) {
-      return { project: { id: ws.id, path: ws.path, title: ws.title } }
+      let initialized = false
+      try { initialized = !!ws.path && fs.existsSync(path.join(ws.path, TASKS_DIR)) } catch { initialized = false }
+      return { project: { id: ws.id, path: ws.path, title: ws.title, initialized } }
     }
   }
   return { project: null, reason: 'session is not accounted in any workspace (new session?)' }

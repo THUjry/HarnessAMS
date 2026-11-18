@@ -119,7 +119,7 @@ test('client half: single tab with the project overview on the first-level strip
   assert.ok(src.includes('function ProjectOverviewView'), 'project overview view component')
   assert.ok(src.includes("stripSel === 'overview' && h(ProjectOverviewView"), 'overview renders as the strip selection')
   assert.ok(src.includes("'tasks.projectOverview'"), 'project overview strip capsule copy key')
-  assert.ok(src.includes("const STRIP_SEL_KEY = 'hams-task-strip-sel'"), 'strip selection must survive remounts')
+  assert.ok(src.includes("const STRIP_SEL_KEY = 'hams-task-strip-sel-v2'"), 'strip selection must survive remounts')
   assert.ok(src.includes("tr('tasks.newTask')),"),
     'the create button must read "new task" (not a bare +)')
   // The sidebar follows session switches by tracking open state, not a pin
@@ -132,6 +132,36 @@ test('client half: single tab with the project overview on the first-level strip
   assert.ok(/id: 'check', labelKey: 'tasks\.viewCheck'/.test(src), 'TASK_VIEWS must carry the check view')
   assert.ok(src.includes("API + '/check-params"), 'check sub-view must call the check-params API')
   assert.ok(src.includes('check.oldValue'), 'unconfirmed edits must show the old value')
+})
+
+test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow, 8-line clamp, per-session selection', async () => {
+  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  // ONE scroll container: the task tab's outer .hams-body; the overview is
+  // plain flowing content (the old nested .hams-body + height:100% chain is
+  // what starved the overview of its vertical scrollbar)
+  assert.equal((src.match(/className: 'hams-body'/g) ?? []).length, 1, 'exactly one scroll container element')
+  assert.ok(src.includes('.hams-body { padding: 8px 10px; overflow-y: auto; overflow-x: hidden;'), 'scroll container bans horizontal scroll')
+  assert.ok(src.includes("flex: 'none', fontSize: 'var(--dsh-content-font-size, 14px)'"), 'overview flows, no height chain')
+  assert.ok(src.includes("flex: '1 0 auto'"), 'task branch grows instead of clipping')
+  // no horizontal overflow anywhere: wrap-anywhere at the roots + table cells + pre
+  assert.ok((src.match(/overflow-wrap: anywhere/g) ?? []).length >= 6, 'overflow-wrap: anywhere across roots/tables/pre')
+  assert.ok(src.includes('word-break: break-all'), 'pre blocks break long tokens')
+  // 8-line clamp with a measured toggle
+  assert.ok(src.includes('function ClampText'), 'clamp component exists')
+  assert.ok(src.includes('.hams-clamp { overflow: hidden; max-height: 12em; }'), '8 lines x 1.5 line-height clamp')
+  assert.ok(src.includes("tr(open ? 'common.collapse' : 'common.expand')"), 'clamp toggle copy')
+  // dropdown options follow the theme (hover-only-readable bug)
+  assert.ok(src.includes('.hams-select { color-scheme: light dark; }'), 'select color-scheme')
+  assert.ok(src.includes('.hams-select option { background: canvas; color: canvasText; }'), 'option colors')
+  // per-session strip selection with last-active inheritance (the host exposes
+  // no parent-session read face to plugins — see the note in apply())
+  assert.ok(src.includes('function readStripSel(sessionId)'), 'selection read is per-session')
+  assert.ok(src.includes('function rememberStripSel(sessionId, v)'), 'selection write is per-session')
+  assert.ok(src.includes('let lastActiveStripSel = null'), 'last-active inheritance memory')
+  // default-open: initialized project + untouched host layout tabs
+  assert.ok(src.includes('sessionSidebarUntouched(sessionId)'), 'untouched-layout gate')
+  assert.ok(src.includes('r.project?.initialized'), 'default-open keys off initialized')
+  assert.ok(src.includes('autoOpenedFor'), 'once per page lifetime')
 })
 
 test('client half: zh/en dictionaries keep identical key sets', async () => {
