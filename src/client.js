@@ -185,6 +185,8 @@ window.__ModuleLoader__.load({
         'pset.pickDir': '选择',
         'pset.pickThisDir': '使用该目录',
         'pset.pickCurrentDir': '用当前目录',
+        'pset.colName': '项目名',
+        'pset.colValue': '当前值',
         'pset.colMode': '工作模式',
         'pset.colMachine': '远程机器',
         'pset.colSched': '调度器',
@@ -408,6 +410,8 @@ window.__ModuleLoader__.load({
         'pset.pickDir': 'Select',
         'pset.pickThisDir': 'Use this directory',
         'pset.pickCurrentDir': 'Use current directory',
+        'pset.colName': 'Item',
+        'pset.colValue': 'Value',
         'pset.colMode': 'Mode',
         'pset.colMachine': 'Machine',
         'pset.colSched': 'Scheduler',
@@ -1423,11 +1427,12 @@ window.__ModuleLoader__.load({
     }
 
     // ---------- tier 3 Overview: project settings + one-click project self-check ----------
-    // The settings table is COLUMN-per-setting with two rows: row 1 = the live
-    // setting (dropdown cells, PUT on every change), row 2 = that setting's
-    // self-check verdict (aggregated from the run's steps server-tagged with a
-    // settingColumn). Column visibility cascades off the mode/simulator choices
-    // (a local project hides the machine/scheduler/remote-compute columns).
+    // The settings table is ROW-per-setting with three columns: the setting's
+    // name / the live value (dropdown cell, PUT on every change) / that
+    // setting's self-check verdict (aggregated from the run's steps
+    // server-tagged with a settingColumn). Row visibility cascades off the
+    // mode/simulator choices (a local project hides the machine/scheduler/
+    // remote-compute rows).
     const SETTING_COLS = [
       { id: 'run_mode', labelKey: 'pset.colMode', column: 'run_mode',
         options: [['local', 'pset.mode.local'], ['remote', 'pset.mode.remote']] },
@@ -1487,10 +1492,12 @@ window.__ModuleLoader__.load({
         return h('td', { key: c.id, className: cls, title: agg.title || agg.text }, icon + ' ' + esc(agg.text))
       }
       return h('table', { className: 'hams-table' },
-        h('thead', null, h('tr', null, cols.map((c) => h('th', { key: c.id }, tr(c.labelKey))))),
-        h('tbody', null,
-          h('tr', null, cols.map((c) => h('td', { key: c.id }, settingCell(c)))),
-          h('tr', null, cols.map((c) => resultCell(c)))))
+        h('thead', null, h('tr', null, [tr('pset.colName'), tr('pset.colValue'), tr('chk.colStatus')]
+          .map((c) => h('th', { key: c }, c)))),
+        h('tbody', null, cols.map((c) => h('tr', { key: c.id },
+          h('td', { key: 'name', style: { whiteSpace: 'nowrap' } }, tr(c.labelKey)),
+          h('td', { key: 'value' }, settingCell(c)),
+          resultCell(c)))))
     }
 
 

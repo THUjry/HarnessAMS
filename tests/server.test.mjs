@@ -396,7 +396,6 @@ test('checks: runLocalChecks rows — no sky130, Node/Python carry absolute path
     const results = await runLocalChecks({ config: { workspace_root: dir } })
     const items = results.map((r) => r.item)
     assert.deepEqual(items, ['Connectivity (local)', 'Node', 'Python', 'Disk capacity (workspace)', 'Workspace writable'])
-    assert.ok(!items.some((n) => /sky130/i.test(n)), 'the sky130 row is retired (2026-11-18)')
     const node = results.find((r) => r.item === 'Node')
     assert.ok(node.ok, node.detail)
     assert.equal(node.result, process.version)
