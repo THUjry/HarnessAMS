@@ -32,7 +32,7 @@ import path from 'node:path'
 import { findWorkspaceConfig } from './server/workspace.js'
 import { runLocalChecks } from './server/checks.js'
 import { localDiskUsage, workspaceDirs } from './server/disk.js'
-import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty } from './server/project.js'
+import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty, readSessionTasks, writeSessionTaskState } from './server/project.js'
 import { remoteMachinesStatus, fetchMachines, checkableMachines } from './server/machines.js'
 import { readSettings, validateSettings, writeSettings } from './server/settings.js'
 import { readCheckParams, validateCheckParams, writeCheckParams } from './server/checkparams.js'
@@ -114,6 +114,19 @@ async function handle(req, res, ctx) {
       if (w.error) { json(400, { error: w.error }); return }
       await clearTasksIfEmpty(project.path)
       json(200, { ok: true, project, tasks: w.tasks })
+      return
+    }
+    if (req.method === 'PUT' && route === '/api/session-tasks') {
+      // merge-write ONE session's entry ({ sessionId, state }) — never a stale
+      // full-file clobber of sibling sessions
+      const sessionId = url.searchParams.get('sessionId')
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const w = await writeSessionTaskState(project.path, body?.sessionId, body?.state)
+      if (w.error) { json(400, { error: w.error }); return }
+      json(200, { ok: true, project, sessions: w.sessions })
       return
     }
     if (req.method === 'PUT' && route === '/api/project-settings') {
@@ -319,6 +332,15 @@ async function handle(req, res, ctx) {
     const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
     if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
     json(200, { ok: true, project, ...(await readTasks(project.path)) })
+    return
+  }
+  if (route === '/api/session-tasks') {
+    // Per-session ACTIVE task state (sessions.json): GET returns the whole map
+    // (the sidebar hydrates its per-session entries from it).
+    const sessionId = url.searchParams.get('sessionId')
+    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+    json(200, { ok: true, project, ...(await readSessionTasks(project.path)) })
     return
   }
   if (route === '/api/report-stat') {

@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { batchOf, firstCall, setRemoteMachines } from './helpers.mjs'
-import { sessionProject, readTasks, writeTasks, tasksPath } from '../src/server/project.js'
+import { sessionProject, readTasks, writeTasks, tasksPath, readSessionTasks, writeSessionTaskState } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { fetchMachines, checkableMachines, remoteMachinesStatus } from '../src/server/machines.js'
 import {
@@ -411,4 +411,36 @@ test('checks: runLocalChecks rows — no sky130, Node/Python carry absolute path
     const wr = results.find((r) => r.item === 'Workspace writable')
     assert.ok(wr.ok, wr.detail)
   } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('session-tasks: sessions.json read/write roundtrip, validation, merge, prune', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'hams-sess-'))
+  try {
+    // read-missing is empty
+    assert.deepEqual((await readSessionTasks(dir)).sessions, {})
+    // write one session's entry (merge-write, not full-file)
+    let w = await writeSessionTaskState(dir, 'session-aaaa1111-2222-3332-4444-555555555555', { active: ['task-ab12cd34', 'task-ef56gh78'], display: 'task-ab12cd34' })
+    assert.ok(w.sessions['session-aaaa1111-2222-3332-4444-555555555555'])
+    // sibling session survives a second merge-write (no clobber)
+    w = await writeSessionTaskState(dir, 'session-bbbb1111-2222-3332-4444-555555555555', { active: ['task-zz99yy88'], display: 'overview' })
+    const r1 = await readSessionTasks(dir)
+    assert.ok(r1.sessions['session-aaaa1111-2222-3332-4444-555555555555'])
+    assert.ok(r1.sessions['session-bbbb1111-2222-3332-4444-555555555555'])
+    // validation: display must be 'overview' or a member of active
+    w = await writeSessionTaskState(dir, 'session-cccc1111-2222-3332-4444-555555555555', { active: ['task-okokok11'], display: 'task-notin' })
+    assert.equal(w.sessions['session-cccc1111-2222-3332-4444-555555555555'].display, 'overview')
+    // bad ids drop out; bad sessionId rejected
+    w = await writeSessionTaskState(dir, 'session-dddd1111-2222-3332-4444-555555555555', { active: ['task-okokok11', 'not an id!'], display: 'task-okokok11' })
+    assert.deepEqual(w.sessions['session-dddd1111-2222-3332-4444-555555555555'].active, ['task-okokok11'])
+    assert.ok((await writeSessionTaskState(dir, '', null)).error)
+    // null state deletes the entry
+    await writeSessionTaskState(dir, 'session-bbbb1111-2222-3332-4444-555555555555', null)
+    const r2 = await readSessionTasks(dir)
+    assert.ok(!r2.sessions['session-bbbb1111-2222-3332-4444-555555555555'])
+    // corrupt file degrades to empty, never throws
+    await writeFile(path.join(dir, '.harnessams', 'sessions.json'), '{not json', 'utf8')
+    assert.deepEqual((await readSessionTasks(dir)).sessions, {})
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
 })
