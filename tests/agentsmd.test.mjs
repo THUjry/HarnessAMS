@@ -113,22 +113,40 @@ test('agentsmd route+writers: .harnessams creation lays the template; POST /api/
     })
     const base = 'http://127.0.0.1/harnessams/api'
 
-    // PUT tasks = the .harnessams creation moment → AGENTS.md template appears
-    const t = await callPut(handler, base + '/tasks?sessionId=s1', { tasks: [{ name: 'demo' }] })
+    // PUT project-settings = the .harnessams creation moment → AGENTS.md template appears
+    // (writeTasks retired with the task concept, D-008; settings is one of the
+    // two remaining template-laying writers)
+    const t = await callPut(handler, base + '/project-settings?sessionId=s1', {
+      run_mode: 'remote', machine_id: 'node1', remote_dir: '.harnessams/selfcheck',
+      scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
+    })
     assert.equal(t.code, 200)
     const md1 = await readFile(agentsMdPath(ws), 'utf8')
     assert.ok(md1.includes(INSTRUCTION), 'template with the first-fill instruction')
     assert.ok(md1.includes('  machines: []'))
-
-    // PUT settings / PUT check-params stay idempotent (block present → untouched)
+    // a second settings write stays idempotent (block present → untouched)
     await callPut(handler, base + '/project-settings?sessionId=s1', {
       run_mode: 'remote', machine_id: 'node1', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     })
-    await callPut(handler, base + '/check-params?sessionId=s1', {
-      rcl: { r: [0.1, 1e6], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, unit_check: true, bias_check: true, strict_includes: false,
-    })
     assert.ok((await readFile(agentsMdPath(ws), 'utf8')).includes(INSTRUCTION), 'later writes never rewrite the block')
+
+    // the SESSION-CONFIG writer also lays the template when IT creates
+    // .harnessams first (the common case now: a session opening its sidebar)
+    const ws2 = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-sess-'))
+    try {
+      const handler2 = await registerRoutes({
+        workspaceRegistry: { list: () => [{ id: 'w2', path: ws2, title: 'P2', sessionIds: ['s2'] }] },
+        tools: { register: () => {}, get: () => undefined },
+      })
+      const c = await callPut(handler2, base + '/session-config?sessionId=s2', {
+        sessionId: 's2', state: { display: 'overview', reports: [], dashboard_selected: null },
+      })
+      assert.equal(c.code, 200)
+      assert.ok((await readFile(agentsMdPath(ws2), 'utf8')).includes(INSTRUCTION), 'session-config creation lays the template')
+    } finally {
+      await rm(ws2, { recursive: true, force: true })
+    }
 
     // POST /api/agents-md → values rewrite without the instruction
     const r = await callPost(handler, base + '/agents-md', { sessionId: 's1' })

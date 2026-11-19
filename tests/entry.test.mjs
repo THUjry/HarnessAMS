@@ -109,28 +109,34 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   assert.ok(src.includes("sec('guide.s6t', 'guide.s6')"), 'guide must cover the tool cards')
 })
 
-test('client half: single tab with the project overview on the first-level strip', async () => {
+test('client half: single tab — two-entry strip (project overview + this session), no task surface', async () => {
   const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
-  // The overview dropped back from its own top-level tab (2026-11-10, same day
-  // it was promoted): ONE tab remains, and the project overview is the default
-  // entry of its first-level strip, ahead of the task capsules and "new task".
+  // The overview dropped back from its own top-level tab (2026-11-10): ONE tab
+  // remains, and its first-level strip is exactly TWO entries since the task
+  // retirement (D-008, 2026-11-19) — the project overview (default) and the
+  // current session's own capsule. No new-task button, no task capsules, no
+  // name/description surface.
   assert.ok(!src.includes('OV_TAB_ID') && !src.includes('OV_TAB_KIND'), 'the top-level overview tab must be gone')
   assert.ok(!src.includes('OverviewSidebarBody'), 'the old top-level body name must be gone')
   assert.ok(src.includes('function ProjectOverviewView'), 'project overview view component')
-  assert.ok(src.includes("stripSel === 'overview' && h(ProjectOverviewView"), 'overview renders as the strip selection')
+  assert.ok(src.includes("config.display === 'overview' && h(ProjectOverviewView"), 'overview renders as the strip selection')
   assert.ok(src.includes("'tasks.projectOverview'"), 'project overview strip capsule copy key')
-  assert.ok(src.includes("'/session-tasks?sessionId='") && src.includes('putSessionTaskState'), 'per-session task state persists via sessions.json')
-  assert.ok(src.includes("tr('tasks.newTask')),"),
-    'the create button must read "new task" (not a bare +)')
+  assert.ok(src.includes("'tasks.sessionTab'"), 'session strip capsule copy key')
+  assert.ok(!src.includes('tasks.newTask') && !src.includes('NewTaskDialog') && !src.includes('createTask'),
+    'the whole new-task surface must be gone (D-008)')
+  assert.ok(!src.includes('hams-addbtn'), 'the strip add button is gone')
+  assert.ok(src.includes("'/session-config?sessionId='") && src.includes('putSessionConfig'), 'per-session config persists via sessions.json')
   // The sidebar follows session switches by tracking open state, not a pin
   assert.ok(!src.includes('STICKY_KEY') && !src.includes('PinToggle'), 'the pin mechanism must be gone')
   assert.ok(src.includes('const sidebarOpenState'), 'open-state tracking')
   assert.ok(src.includes('right.openTab(TAB_KIND)'), 'reopen targets the HarnessAMS tab')
   assert.ok(src.includes('overviewMemory'), 'same-project remount cache stays')
-  // The check sub-view keeps its contract
+  // The check sub-view keeps its contract (per-session since D-008)
   assert.ok(!src.includes("id: 'overview'"), 'overview must not be a TASK_VIEWS entry')
+  assert.ok(!src.includes("id: 'sim'"), 'the sim-settings placeholder is gone')
   assert.ok(/id: 'check', labelKey: 'tasks\.viewCheck'/.test(src), 'TASK_VIEWS must carry the check view')
-  assert.ok(src.includes("API + '/check-params"), 'check sub-view must call the check-params API')
+  assert.ok(src.includes("API + '/session-config"), 'check sub-view reads through the session-config API')
+  assert.ok(src.includes('fallback_params'), 'unconfirmed table shows the fallback source')
   assert.ok(src.includes('check.oldValue'), 'unconfirmed edits must show the old value')
 })
 
@@ -153,14 +159,18 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   // dropdown options follow the theme (hover-only-readable bug)
   assert.ok(src.includes('.hams-select { color-scheme: light dark; }'), 'select color-scheme')
   assert.ok(src.includes('.hams-select option { background: canvas; color: canvasText; }'), 'option colors')
-  // per-session ACTIVE task list with last-active inheritance (the host exposes
-  // no parent-session read face to plugins — see the note in apply()) and
-  // sessions.json persistence (round 3, 2026-11-18)
-  assert.ok(src.includes('const sessionTaskState = new Map()'), 'per-session active-task map')
-  assert.ok(src.includes('function taskStateOf(sessionId)'), 'first-sight inherit via taskStateOf')
+  // per-session CONFIG with fork-split first-seen (D-008): a forked session
+  // deep-copies the previously active session's CURRENT config (deliberately
+  // branch-point-independent); a brand-new session starts empty; every change
+  // merge-PUTs through sessions.json (v2)
+  assert.ok(src.includes('const sessionConfigState = new Map()'), 'per-session config map')
+  assert.ok(src.includes('function sessionConfigOf(sessionId, fork, fallbackSource)'), 'first-seen fork split via sessionConfigOf')
+  assert.ok(src.includes('function forkCopySource('), 'copy source: last-active, else the store recency tail')
+  assert.ok(src.includes('function cloneSessionConfig'), 'deep copy (fork inherits the whole config)')
+  assert.ok(src.includes('adoptWith(!!d?.fork, sessions)'), 'the server fork verdict drives the split')
   assert.ok(src.includes('const lastActiveSessionId = { id: null }'), 'last-active session memory')
-  assert.ok(src.includes('function putSessionTaskState(sessionId)'), 'merge-PUT persistence')
-  assert.ok(src.includes("API + '/session-tasks?sessionId='"), 'session-tasks API wired')
+  assert.ok(src.includes('function putSessionConfig(sessionId)'), 'merge-PUT persistence')
+  assert.ok(src.includes("API + '/session-config?sessionId='"), 'session-config API wired')
   // default-open: initialized project + untouched host layout tabs
   assert.ok(src.includes('sessionSidebarUntouched(sessionId)'), 'untouched-layout gate')
   assert.ok(src.includes('r.project?.initialized'), 'default-open keys off initialized')

@@ -1,6 +1,8 @@
-// Check-parameters storage + API contract: defaults on a missing file, per-key
-// fallback on a hand-corrupted file, PUT validation, and the GET/PUT routes
-// (sessionId → workspace via the registry, local projects only).
+// Check-parameters storage + API contract (per-session since D-008): module
+// read/validate semantics survive unchanged (the project file is the FALLBACK
+// layer), the retired /api/check-params routes answer with their retirement
+// contract, and /api/session-config carries fallback_params (+ the sessions
+// map with per-session confirmed tables).
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -8,6 +10,7 @@ import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { registerRoutes, callGet, callPut } from './helpers.mjs'
+import { writeSessionConfig } from '../src/server/project.js'
 import {
   defaultCheckParams, validateCheckParams, readCheckParams, checkParamsPath,
 } from '../src/server/checkparams.js'
@@ -48,39 +51,44 @@ test('checkparams: validateCheckParams rejects bad shapes, accepts good ones', (
   assert.ok(validateCheckParams({ ...good, strict_includes: 1 }).error)
 })
 
-test('checkparams routes: GET defaults, PUT persists, invalid PUT leaves the file untouched', async () => {
+test('checkparams routes retired; per-session table + fallback_params ride /api/session-config', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-chkapi-'))
   try {
     const handler = await registerRoutes({ workspaceRegistry: { list: () => [
-      { id: 'w1', path: dir, title: 'P1', sessionIds: ['s1'] },
+      { id: 'w1', path: dir, title: 'P1', sessionIds: ['s1', 'session-sess1111-2222-3332-4444-555555555555'] },
     ] } })
-    const base = 'http://127.0.0.1/harnessams/api/check-params'
+    // the retired routes answer with their retirement contract
+    const retired = await callGet(handler, 'http://127.0.0.1/harnessams/api/check-params?sessionId=s1')
+    assert.equal(retired.code, 404)
+    assert.match(retired.body.error, /retired/)
+    assert.equal((await callPut(handler, 'http://127.0.0.1/harnessams/api/check-params?sessionId=s1', {})).code, 405)
+
+    const base = 'http://127.0.0.1/harnessams/api/session-config'
     // unknown session -> 404
     assert.equal((await callGet(handler, base + '?sessionId=nope')).code, 404)
-    // no file -> defaults
+    // no project file -> fallback_params = built-in defaults; the asking
+    // session has no entry yet -> a fork verdict is computed (fail-open false
+    // for a sid with no DSH log)
     const g1 = await callGet(handler, base + '?sessionId=s1')
     assert.equal(g1.code, 200)
-    assert.deepEqual(g1.body.params, defaultCheckParams())
-    // PUT persists atomically with a version stamp
-    const next = {
-      ...defaultCheckParams(),
-      rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] },
-      bias_check: false,
-    }
-    const p1 = await callPut(handler, base + '?sessionId=s1', next)
-    assert.equal(p1.code, 200)
-    const saved = JSON.parse(await readFile(path.join(dir, '.harnessams', 'check_params.json'), 'utf8'))
-    assert.equal(saved.version, 1)
-    assert.equal(saved.bias_check, false)
-    assert.deepEqual(saved.rcl.r, [1, 100])
-    // GET reflects the saved values
+    assert.deepEqual(g1.body.fallback_params, defaultCheckParams())
+    assert.equal(g1.body.fork, false)
+    // a project-level file shifts the fallback (hand-editable baseline)
+    await mkdir(path.join(dir, '.harnessams'), { recursive: true })
+    await writeFile(checkParamsPath(dir), JSON.stringify({
+      rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, bias_check: false,
+    }), 'utf8')
     const g2 = await callGet(handler, base + '?sessionId=s1')
-    assert.deepEqual(g2.body.params.rcl.r, [1, 100])
-    assert.equal(g2.body.params.bias_check, false)
-    // invalid PUT -> 400 and the file stays as the last good write
-    const p2 = await callPut(handler, base + '?sessionId=s1', { ...next, rcl: { ...next.rcl, r: [10, 1] } })
-    assert.equal(p2.code, 400)
-    const g3 = await callGet(handler, base + '?sessionId=s1')
-    assert.deepEqual(g3.body.params.rcl.r, [1, 100])
+    assert.deepEqual(g2.body.fallback_params.rcl.r, [1, 100])
+    assert.equal(g2.body.fallback_params.bias_check, false)
+    // once the session HAS an entry, no fork verdict is carried (tombstone)
+    const sid = 'session-sess1111-2222-3332-4444-555555555555'
+    await writeSessionConfig(dir, sid, {
+      display: 'session', reports: [], dashboard_selected: null,
+      check_params: { ...defaultCheckParams(), unit_check: false },
+    })
+    const g3 = await callGet(handler, base + '?sessionId=' + sid)
+    assert.equal(g3.body.sessions[sid].check_params.unit_check, false)
+    assert.equal(g3.body.fork, undefined)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

@@ -11,27 +11,26 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { readJsonIfExists, resolveDir } from '../py.js'
 
-// --- Optional sim_analysis(report=true, task=…) injection target: the
-// HarnessAMS task dashboard. This plugin's own sidebar owns the task store at
-// <workspace>/.harnessams/tasks.json (the DSH workspace the sidebar session
-// runs in; server/project.js is the sidebar's writer). The store shape is still
-// mirrored below and the write stays defensive: anything unexpected is refused,
-// never rewritten, and every write is atomic (tmp + rename) against the
-// sidebar's own PUT channel.
+// --- sim_analysis(report=true) auto-registration target: the calling session's
+// HarnessAMS dashboard. Since the task retirement (2026-11-19, D-008) each DSH
+// session carries its own report list in <workspace>/.harnessams/sessions.json;
+// the calling session is identified EXACTLY through the tool execution context
+// (exec.agent.id IS the SessionId — probe-verified, see probe-taskmerge-20261119).
+// server/project.js owns the store and its validation; this side only merges one
+// report into one session entry through writeSessionConfig (atomic, defensive).
 
-const TASKS_DIR = '.harnessams'
-const TASKS_FILE = 'tasks.json'
+const SESSIONS_DIR = '.harnessams'
 const MAX_REPORTS = 32 // same cap as the sidebar's writer (server/project.js)
 
 // Walk up from startDir (max 8 levels) to the nearest ancestor holding a
-// .harnessams/ task-store directory. The store dir — not harnessams.json — is
+// .harnessams/ store directory. The store dir — not harnessams.json — is
 // the anchor because the DSH workspace root (where the sidebar's store lives)
 // can sit ABOVE the harnessams.json directory (e.g. repo root vs its
 // harnessams-workspace/). Returns { storeDir } or null.
-export function findTasksStore(startDir) {
+export function findSessionsStore(startDir) {
   let d = path.resolve(startDir)
   for (let i = 0; i < 8; i++) {
-    const storeDir = path.join(d, TASKS_DIR)
+    const storeDir = path.join(d, SESSIONS_DIR)
     if (fs.existsSync(storeDir) && fs.statSync(storeDir).isDirectory()) return { storeDir }
     const parent = path.dirname(d)
     if (parent === d) break
@@ -40,52 +39,29 @@ export function findTasksStore(startDir) {
   return null
 }
 
-// Append (or reuse) `reportPath` in task `taskRef` (id first, then exact name)
-// and select it on that task's dashboard. Refuses on any unexpected store
-// shape; returns { task, report } or { error } — never throws, never clobbers.
-export function registerReportIntoTask(storeDir, taskRef, reportPath) {
-  const storePath = path.join(storeDir, TASKS_FILE)
-  let store
-  try {
-    store = JSON.parse(fs.readFileSync(storePath, 'utf8'))
-  } catch (e) {
-    if (e.code === 'ENOENT') store = { version: 1, tasks: [] } // empty store = no tasks yet
-    else return { error: `task store unreadable (${storePath}): ${e.message}` }
-  }
-  if ((store?.version ?? 1) !== 1 || !Array.isArray(store?.tasks)) {
-    return { error: `unexpected task store shape (version ${store?.version}) — refusing to write` }
-  }
-  const ref = String(taskRef)
-  const task = store.tasks.find((t) => t?.id === ref) ?? store.tasks.find((t) => t?.name === ref)
-  if (!task) {
-    const names = store.tasks.map((t) => t?.name).filter(Boolean)
-    return {
-      error: names.length
-        ? `task not found: "${ref}" (tasks: ${names.join(', ')})`
-        : 'task store has no tasks yet — create one in the HarnessAMS task sidebar first',
-    }
-  }
+// Append (or reuse) `reportPath` in session `sessionId`'s entry and select it
+// on that session's dashboard. Creates the entry when absent; preserves the
+// entry's display/check_params. Returns { session, report } or { error } —
+// never throws, never clobbers sibling sessions (single-session merge write).
+export async function registerReportIntoSession(storeDir, sessionId, reportPath) {
+  const { readSessionConfigs, writeSessionConfig } = await import('../server/project.js')
+  const workspacePath = path.dirname(path.resolve(storeDir))
   const abs = path.resolve(reportPath)
-  const reports = Array.isArray(task.reports) ? task.reports : []
-  let entry = reports.find((r) => r && typeof r.path === 'string' && path.resolve(r.path) === abs)
-  if (!entry) {
+  const store = await readSessionConfigs(workspacePath)
+  const entry = store.sessions[sessionId] ?? { display: 'overview', reports: [], dashboard_selected: null }
+  const reports = Array.isArray(entry.reports) ? entry.reports : []
+  let report = reports.find((r) => r && typeof r.path === 'string' && path.resolve(r.path) === abs)
+  if (!report) {
     if (reports.length >= MAX_REPORTS) {
-      return { error: `task "${task.name}" already has ${MAX_REPORTS} reports (max)` }
+      return { error: `this session already has ${MAX_REPORTS} reports (max) — remove one in the sidebar dashboard first` }
     }
-    entry = { id: 'r-' + randomUUID().slice(0, 8), name: path.basename(abs), path: abs, added_at: new Date().toISOString() }
-    reports.push(entry)
-    task.reports = reports
+    report = { id: 'r-' + randomUUID().slice(0, 8), name: path.basename(abs), path: abs, added_at: new Date().toISOString() }
+    reports.push(report)
   }
-  task.dashboard_selected = entry.id
-  const tmp = storePath + '.tmp'
-  try {
-    fs.writeFileSync(tmp, JSON.stringify({ ...store, version: 1 }, null, 2) + '\n', 'utf8')
-    fs.renameSync(tmp, storePath)
-  } catch (e) {
-    try { fs.rmSync(tmp, { force: true }) } catch { /* best effort */ }
-    return { error: `task store write failed: ${e.message}` }
-  }
-  return { task: { id: task.id, name: task.name }, report: entry }
+  const state = { ...entry, reports, dashboard_selected: report.id }
+  const w = await writeSessionConfig(workspacePath, sessionId, state)
+  if (w.error) return { error: w.error }
+  return { session: sessionId, report }
 }
 
 // The sweep convention places run directories at <project>/sweep/RoundN/top;
@@ -716,21 +692,19 @@ export function analysisTools() {
         + 'report=true, also regenerates the sweep-result HTML report (interactive Plotly metric charts, '
         + 'summary cards, per-point table; works from file:// and inside the WebUI) at '
         + '<project>/Analysis/<project>_report.html — the project root defaults to the sweep/RoundN/top '
-        + 'structure of run_dir. With task=<id or exact name>, the generated report is also registered into '
-        + 'that HarnessAMS task\'s dashboard (nearest .harnessams/tasks.json above the project); a '
-        + 'registration failure never fails the analysis.',
+        + 'structure of run_dir — and registers the report into the CALLING session\'s HarnessAMS dashboard '
+        + '(the session identity comes from the execution context; nearest .harnessams/sessions.json above '
+        + 'the project). A registration failure never fails the analysis.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Run directory (sweep/RoundN/top) holding NN/point_meta.json' },
         out: { type: 'string', description: 'Output results.json path (default: <run_dir>/results.json; must stay at the default when report=true)' },
         simulator: { type: 'string', enum: ['spectre'], description: 'Override the detected simulator label' },
         report: { type: 'boolean', description: 'Also generate the HTML dashboard for the project (default false)' },
         round: { type: 'string', description: 'report only: round name to render (e.g. Round1; default: all Round*)' },
-        task: { type: 'string', description: 'report only: register the generated report into this task\'s dashboard '
-          + '(HarnessAMS sidebar): task id or exact task name. Omit to only generate the report.' },
         project_dir: { type: 'string', description: 'report only: project root containing sweep/Round*/top '
           + '(default: derived from run_dir\'s sweep/RoundN/top structure)' },
       },
-      async execute(args) {
+      async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
         // Collect step: point metas -> results.json. The report generator reads
         // results.json from the canonical <run_dir>/results.json location, so a
@@ -777,17 +751,23 @@ export function analysisTools() {
         result.output = (collect.stdout.trim() + '\n' + report.stdout.trim()).trim()
         result.report_dir = path.join(project, 'Analysis')
         result.report_path = report.reportPath
-        if (args.task) {
-          // Optional injection: the report is already on disk, so a failure here
-          // is reported, never thrown — the caller can retry with a fixed target.
-          const found = findTasksStore(project)
+        // Auto-registration into the CALLING session's dashboard (identity =
+        // exec.agent.id, which IS the SessionId — D-008). The report is already
+        // on disk, so a failure here is reported, never thrown.
+        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        if (!sid) {
+          result.registered = false
+          result.register_error = 'no session identity in the tool execution context — report generated at '
+            + result.report_path + ' but not registered (add it in the HarnessAMS sidebar dashboard)'
+        } else {
+          const found = findSessionsStore(project)
           if (!found) {
             result.registered = false
-            result.register_error = `no HarnessAMS task store (.harnessams/tasks.json) found above ${project} — create a task in the HarnessAMS task sidebar first`
+            result.register_error = `no HarnessAMS session store (.harnessams) found above ${project} — open the HarnessAMS sidebar in this workspace once first`
           } else {
-            const r = registerReportIntoTask(found.storeDir, args.task, report.reportPath)
+            const r = await registerReportIntoSession(found.storeDir, sid, report.reportPath)
             if (r.error) { result.registered = false; result.register_error = r.error }
-            else { result.registered = true; result.task = r.task; result.report = r.report }
+            else { result.registered = true; result.session = r.session; result.report = r.report }
           }
         }
         return result

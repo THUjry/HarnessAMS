@@ -1,14 +1,15 @@
-// Check parameters (2026-11-10, check-params tab era): per-project assembly-check
-// config at <workspace>/.harnessams/check_params.json, next to project_settings.json.
-// The task tab's check sub-view edits the whole object through one confirmed PUT;
-// the SmartAnaSim assembly-check library (scripts/common/common_workspace.py
-// read_check_params) reads the same file as its default source, so a UI change
-// takes effect on the next assembly run. Fail-open everywhere: a missing or
+// Check parameters — PROJECT-LEVEL FALLBACK since 2026-11-19 (decisions.md
+// D-008): confirmed params are per-session (sessions.json), and this file at
+// <workspace>/.harnessams/check_params.json is the middle of the resolution
+// chain the SmartAnaSim assembly-check library applies:
+//   built-in defaults  <-  check_params.json  <-  the session's confirmed table
+// (common_workspace.py read_check_params resolves the same chain via
+// DSH_SESSION_ID). The UI edits session entries only; this file remains a
+// hand-editable project baseline. Fail-open everywhere: a missing or
 // hand-corrupted file falls back per-key to the built-in defaults and must never
 // break an assembly run.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { ensureAgentsMdTemplate } from './agentsmd.js'
 
 const PARAMS_DIR = '.harnessams'
 const PARAMS_FILE = 'check_params.json'
@@ -57,7 +58,7 @@ export async function readCheckParams(workspacePath) {
   return { params }
 }
 
-// Validate a full object from the client PUT. Returns { params } or { error }.
+// Validate a full object (used for the per-session table in project.js). Returns { params } or { error }.
 export function validateCheckParams(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { error: 'check params must be an object' }
@@ -77,18 +78,4 @@ export function validateCheckParams(input) {
     out[k] = input[k]
   }
   return { params: out }
-}
-
-export async function writeCheckParams(workspacePath, params) {
-  const dir = path.join(workspacePath, PARAMS_DIR)
-  const finalPath = checkParamsPath(workspacePath)
-  await fsp.mkdir(dir, { recursive: true })
-  // .harnessams creation moment: lay down the AGENTS.md config-table template
-  // (empty table + first-fill instruction; idempotent, never throws).
-  await ensureAgentsMdTemplate(workspacePath)
-  // Atomic replace — same discipline as project_settings.json / tasks.json.
-  const tmp = finalPath + '.tmp'
-  await fsp.writeFile(tmp, JSON.stringify({ version: 1, ...params }, null, 2) + '\n', 'utf8')
-  await fsp.rename(tmp, finalPath)
-  return params
 }

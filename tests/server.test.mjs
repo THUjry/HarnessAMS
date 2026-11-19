@@ -7,7 +7,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { batchOf, firstCall, setRemoteMachines } from './helpers.mjs'
-import { sessionProject, readTasks, writeTasks, tasksPath, readSessionTasks, writeSessionTaskState } from '../src/server/project.js'
+import { sessionProject, readSessionConfigs, writeSessionConfig, sessionConfigsPath } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { fetchMachines, checkableMachines, remoteMachinesStatus } from '../src/server/machines.js'
 import {
@@ -41,32 +41,47 @@ test('project: sessionProject maps over the workspace registry', async () => {
   }
 })
 
-test('tasks: read-missing is empty, write->read roundtrip, validation', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'hams-tasks-'))
+test('session-config: v2 store read-missing is empty, write->read roundtrip, validation', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'hams-sesscfg-'))
+  const sid = 'session-aaaa1111-2222-3332-4444-555555555555'
   try {
-    assert.deepEqual((await readTasks(dir)).tasks, [])
+    assert.deepEqual((await readSessionConfigs(dir)).sessions, {})
+    assert.equal(path.basename(sessionConfigsPath(dir)), 'sessions.json')
 
-    const r = await writeTasks(dir, [{ name: 'OTA migration', description: 'all flavors' }])
-    assert.ok(!r.error, r.error)
-    assert.match(r.tasks[0].id, /^task-/)
-    const read1 = await readTasks(dir)
-    assert.equal(read1.tasks.length, 1)
-    assert.equal(read1.tasks[0].name, 'OTA migration')
-    const firstId = read1.tasks[0].id
-    const firstCreated = read1.tasks[0].created_at
+    // empty tombstone entry (a brand-new session's first write, D-008)
+    let w = await writeSessionConfig(dir, sid, { display: 'overview', reports: [], dashboard_selected: null })
+    assert.ok(!w.error, w.error)
+    assert.deepEqual(w.sessions[sid], { display: 'overview', reports: [], dashboard_selected: null })
 
-    // rewrite keeps server-assigned identity and created_at
-    const r2 = await writeTasks(dir, [{ id: firstId, name: 'OTA migration', description: 'updated' }, { name: 'new one' }])
-    assert.ok(!r2.error, r2.error)
-    const read2 = await readTasks(dir)
-    assert.equal(read2.tasks.length, 2)
-    assert.equal(read2.tasks[0].id, firstId)
-    assert.equal(read2.tasks[0].created_at, firstCreated)
-    assert.equal(read2.tasks[0].description, 'updated')
+    // reports ride in the session entry (legacy task payload, D-008); duplicate
+    // paths dedupe; dashboard_selected only survives while it points at a report
+    const rep = { id: 'r-ab12cd34', name: 'run1', path: path.join(dir, 'run1.html'), added_at: '2026-11-19T00:00:00.000Z' }
+    w = await writeSessionConfig(dir, sid, {
+      display: 'session', reports: [rep, { ...rep, id: 'r-dup0000' }], dashboard_selected: 'r-gone9999',
+    })
+    assert.equal(w.sessions[sid].reports.length, 1) // path dedupe
+    assert.equal(w.sessions[sid].dashboard_selected, null) // dangling selected drops
+    assert.equal(w.sessions[sid].display, 'session')
 
-    assert.ok((await writeTasks(dir, [{ name: '' }])).error)
-    assert.ok((await writeTasks(dir, 'nope')).error)
-    assert.ok(path.basename(tasksPath(dir)), 'tasks.json')
+    // confirmed check_params persist with the entry (validated shape)
+    w = await writeSessionConfig(dir, sid, {
+      display: 'session', reports: [], dashboard_selected: null,
+      check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, unit_check: false, bias_check: true, strict_includes: true },
+    })
+    assert.equal(w.sessions[sid].check_params.unit_check, false)
+    assert.equal(w.sessions[sid].check_params.strict_includes, true)
+    // invalid check_params -> whole write rejected
+    assert.ok((await writeSessionConfig(dir, sid, { display: 'overview', reports: [], dashboard_selected: null, check_params: { rcl: { r: [9, 9] } } })).error)
+    // a relative/non-html report path is rejected
+    assert.ok((await writeSessionConfig(dir, sid, { display: 'overview', reports: [{ path: 'rel.html' }], dashboard_selected: null })).error)
+    // bad display falls back to 'overview'
+    w = await writeSessionConfig(dir, sid, { display: 'task-xxxx', reports: [], dashboard_selected: null })
+    assert.equal(w.sessions[sid].display, 'overview')
+
+    // v1 file (the task-era shape) parses as EMPTY — clean break, D-008
+    await writeFile(path.join(dir, '.harnessams', 'sessions.json'),
+      JSON.stringify({ version: 1, sessions: { [sid]: { active: ['task-ab12cd34'], display: 'task-ab12cd34' } } }), 'utf8')
+    assert.deepEqual((await readSessionConfigs(dir)).sessions, {})
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
@@ -413,33 +428,38 @@ test('checks: runLocalChecks rows — no sky130, Node/Python carry absolute path
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('session-tasks: sessions.json read/write roundtrip, validation, merge, prune', async () => {
+test('session-config: single-session merge-write never clobbers siblings; prune + null-delete + corrupt degrade', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-sess-'))
+  const A = 'session-aaaa1111-2222-3332-4444-555555555555'
+  const B = 'session-bbbb1111-2222-3332-4444-555555555555'
   try {
-    // read-missing is empty
-    assert.deepEqual((await readSessionTasks(dir)).sessions, {})
-    // write one session's entry (merge-write, not full-file)
-    let w = await writeSessionTaskState(dir, 'session-aaaa1111-2222-3332-4444-555555555555', { active: ['task-ab12cd34', 'task-ef56gh78'], display: 'task-ab12cd34' })
-    assert.ok(w.sessions['session-aaaa1111-2222-3332-4444-555555555555'])
+    let w = await writeSessionConfig(dir, A, { display: 'session', reports: [], dashboard_selected: null })
+    assert.ok(!w.error, w.error)
     // sibling session survives a second merge-write (no clobber)
-    w = await writeSessionTaskState(dir, 'session-bbbb1111-2222-3332-4444-555555555555', { active: ['task-zz99yy88'], display: 'overview' })
-    const r1 = await readSessionTasks(dir)
-    assert.ok(r1.sessions['session-aaaa1111-2222-3332-4444-555555555555'])
-    assert.ok(r1.sessions['session-bbbb1111-2222-3332-4444-555555555555'])
-    // validation: display must be 'overview' or a member of active
-    w = await writeSessionTaskState(dir, 'session-cccc1111-2222-3332-4444-555555555555', { active: ['task-okokok11'], display: 'task-notin' })
-    assert.equal(w.sessions['session-cccc1111-2222-3332-4444-555555555555'].display, 'overview')
-    // bad ids drop out; bad sessionId rejected
-    w = await writeSessionTaskState(dir, 'session-dddd1111-2222-3332-4444-555555555555', { active: ['task-okokok11', 'not an id!'], display: 'task-okokok11' })
-    assert.deepEqual(w.sessions['session-dddd1111-2222-3332-4444-555555555555'].active, ['task-okokok11'])
-    assert.ok((await writeSessionTaskState(dir, '', null)).error)
+    w = await writeSessionConfig(dir, B, { display: 'overview', reports: [], dashboard_selected: null })
+    let r1 = await readSessionConfigs(dir)
+    assert.ok(r1.sessions[A] && r1.sessions[B])
+    assert.equal(Object.keys(r1.sessions).length, 2)
+    // bad sessionId rejected
+    assert.ok((await writeSessionConfig(dir, '', null)).error)
+    assert.ok((await writeSessionConfig(dir, 'not an id!', null)).error)
     // null state deletes the entry
-    await writeSessionTaskState(dir, 'session-bbbb1111-2222-3332-4444-555555555555', null)
-    const r2 = await readSessionTasks(dir)
-    assert.ok(!r2.sessions['session-bbbb1111-2222-3332-4444-555555555555'])
+    await writeSessionConfig(dir, B, null)
+    const r2 = await readSessionConfigs(dir)
+    assert.ok(!r2.sessions[B] && r2.sessions[A])
+    // pruning: oldest entries drop beyond 200 (insertion order = recency)
+    for (let i = 0; i < 205; i++) {
+      const err = await writeSessionConfig(dir, `session-${String(i).padStart(8, '0')}-2222-3332-4444-555555555555`,
+        { display: 'overview', reports: [], dashboard_selected: null })
+      assert.ok(!err.error, err.error)
+    }
+    const r3 = await readSessionConfigs(dir)
+    assert.equal(Object.keys(r3.sessions).length, 200)
+    assert.ok(!r3.sessions[A]) // oldest dropped
+    assert.ok(r3.sessions['session-00000204-2222-3332-4444-555555555555'])
     // corrupt file degrades to empty, never throws
     await writeFile(path.join(dir, '.harnessams', 'sessions.json'), '{not json', 'utf8')
-    assert.deepEqual((await readSessionTasks(dir)).sessions, {})
+    assert.deepEqual((await readSessionConfigs(dir)).sessions, {})
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

@@ -3,7 +3,7 @@
 // diff-able sync vehicle — plugins must not assemble injections in the back
 // half), this module only maintains ONE marked block at the head of the
 // workspace's own AGENTS.md:
-//   - .harnessams creation (writeTasks/writeSettings/writeCheckParams) also
+//   - .harnessams creation (writeSettings/writeSessionConfig) also
 //     lays down the block as an EMPTY table plus a first-fill instruction —
 //     any session that starts in the workspace sees the prompt and fills the
 //     table from measured checks before working (the user may explicitly

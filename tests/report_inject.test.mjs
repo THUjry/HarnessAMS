@@ -1,129 +1,108 @@
-// Tests for the sim_analysis(report=true, task=<id|name>) injection target:
-// locating the HarnessAMS task store above a project dir, the guarded
-// read-modify-write of tasks.json, and the full tool.execute flow (collect ->
-// report -> inject) against a minimal sweep fixture.
+// Tests for the sim_analysis(report=true) auto-registration target (D-008):
+// locating the HarnessAMS session store above a project dir, the guarded
+// single-session merge-write of sessions.json (v2), and the full
+// tool.execute(args, exec) flow (collect -> report -> register) against a
+// minimal sweep fixture — the calling session comes from exec.agent.id.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { analysisTools, findTasksStore, registerReportIntoTask } from '../src/tools/sim_analysis.js'
+import { analysisTools, findSessionsStore, registerReportIntoSession } from '../src/tools/sim_analysis.js'
 import { makeTool } from '../src/tool.js'
 
-const TASK_STORE = {
-  version: 1,
-  tasks: [
-    { id: 'task-a', name: 'OTA 装配验证', description: 'demo task', created_at: '2026-10-30T00:00:00.000Z' },
-    { id: 'task-b', name: 'R4 复现', description: '', created_at: '2026-10-30T00:00:00.000Z' },
-  ],
-}
+const SID_A = 'session-aaaa1111-2222-3332-4444-555555555555'
+const SID_B = 'session-bbbb1111-2222-3332-4444-555555555555'
 
 async function makeWorkspace() {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-inject-'))
   const storeDir = path.join(ws, '.harnessams')
   await mkdir(storeDir, { recursive: true })
-  await writeFile(path.join(storeDir, 'tasks.json'), JSON.stringify(TASK_STORE, null, 2) + '\n', 'utf8')
+  await writeFile(path.join(storeDir, 'sessions.json'), JSON.stringify({
+    version: 2,
+    sessions: {
+      [SID_A]: { display: 'session', reports: [], dashboard_selected: null },
+      [SID_B]: {
+        display: 'overview', reports: [], dashboard_selected: null,
+        check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, unit_check: true, bias_check: true, strict_includes: false },
+      },
+    },
+  }, null, 2) + '\n', 'utf8')
   return { ws, storeDir }
 }
 
-test('inject: findTasksStore walks up to the nearest .harnessams and returns null without one', async () => {
+test('inject: findSessionsStore walks up to the nearest .harnessams and returns null without one', async () => {
   const { ws } = await makeWorkspace()
   const deep = path.join(ws, 'proj', 'sub')
   await mkdir(deep, { recursive: true })
-  assert.deepEqual(findTasksStore(deep), { storeDir: path.join(ws, '.harnessams') })
+  assert.deepEqual(findSessionsStore(deep), { storeDir: path.join(ws, '.harnessams') })
 
   // nearest ancestor wins over a farther one
   const inner = path.join(deep, '.harnessams')
   await mkdir(inner, { recursive: true })
-  assert.deepEqual(findTasksStore(deep), { storeDir: inner })
+  assert.deepEqual(findSessionsStore(deep), { storeDir: inner })
 
   const bare = await mkdtemp(path.join(tmpdir(), 'hams-inject-bare-'))
-  assert.equal(findTasksStore(bare), null)
+  assert.equal(findSessionsStore(bare), null)
   await rm(bare, { recursive: true, force: true })
   await rm(ws, { recursive: true, force: true })
 })
 
-test('inject: registerReportIntoTask appends, selects, dedupes by path, preserves the store', async () => {
+test('inject: registerReportIntoSession appends, selects, dedupes by path, preserves siblings + check_params', async () => {
   const { ws, storeDir } = await makeWorkspace()
   const reportPath = path.join(ws, 'demo1', 'Analysis', 'demo1_report.html')
   try {
-    const r1 = registerReportIntoTask(storeDir, 'OTA 装配验证', reportPath) // by name
+    const r1 = await registerReportIntoSession(storeDir, SID_A, reportPath)
     assert.ok(!r1.error, r1.error)
-    assert.equal(r1.task.id, 'task-a')
+    assert.equal(r1.session, SID_A)
     assert.match(r1.report.id, /^r-[\w-]{1,8}$/)
     assert.equal(r1.report.path, path.resolve(reportPath))
     assert.equal(r1.report.name, 'demo1_report.html')
 
-    const store1 = JSON.parse(await readFile(path.join(storeDir, 'tasks.json'), 'utf8'))
-    const t1 = store1.tasks[0]
-    assert.equal(t1.description, 'demo task') // untouched fields survive
-    assert.equal(t1.reports.length, 1)
-    assert.equal(t1.dashboard_selected, r1.report.id)
+    const store1 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    const a1 = store1.sessions[SID_A]
+    assert.equal(a1.display, 'session') // untouched fields survive
+    assert.equal(a1.reports.length, 1)
+    assert.equal(a1.dashboard_selected, r1.report.id)
+    // sibling entry untouched (single-session merge, not a full-file rewrite)
+    assert.equal(store1.sessions[SID_B].check_params.rcl.r[0], 1)
 
     // same path again → same entry reused, still selected
-    const r2 = registerReportIntoTask(storeDir, 'task-a', reportPath) // by id
+    const r2 = await registerReportIntoSession(storeDir, SID_A, reportPath)
     assert.ok(!r2.error, r2.error)
     assert.equal(r2.report.id, r1.report.id)
-    const store2 = JSON.parse(await readFile(path.join(storeDir, 'tasks.json'), 'utf8'))
-    assert.equal(store2.tasks[0].reports.length, 1)
+    const store2 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store2.sessions[SID_A].reports.length, 1)
 
-    // other task untouched; a second report can go to task-b
-    const other = path.join(ws, 'demo2', 'Analysis', 'demo2_report.html')
-    const r3 = registerReportIntoTask(storeDir, 'task-b', other)
+    // an UNKNOWN session gets its entry created on demand (the sidebar adopts
+    // it later; check_params absent, display overview)
+    const sidC = 'session-cccc1111-2222-3332-4444-555555555555'
+    const r3 = await registerReportIntoSession(storeDir, sidC, path.join(ws, 'other.html'))
     assert.ok(!r3.error, r3.error)
-    const store3 = JSON.parse(await readFile(path.join(storeDir, 'tasks.json'), 'utf8'))
-    assert.equal(store3.tasks[0].reports.length, 1)
-    assert.equal(store3.tasks[1].reports.length, 1)
-    assert.equal(store3.tasks[1].dashboard_selected, r3.report.id)
-    assert.equal(store3.version, 1)
+    const store3 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store3.sessions[sidC].reports.length, 1)
+    assert.equal(store3.version, 2)
+
+    // 32-report cap on one session
+    const sidFull = 'session-ffff1111-2222-3332-4444-555555555555'
+    await writeFile(path.join(storeDir, 'sessions.json'), JSON.stringify({
+      version: 2,
+      sessions: {
+        [sidFull]: {
+          display: 'overview', dashboard_selected: null,
+          reports: Array.from({ length: 32 }, (_, i) => ({ id: 'r-' + i, name: 'r' + i, path: path.join(ws, 'r' + i + '.html'), added_at: 'x' })),
+        },
+      },
+    }), 'utf8')
+    const cap = await registerReportIntoSession(storeDir, sidFull, path.join(ws, 'new.html'))
+    assert.match(cap.error, /32 reports \(max\)/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }
 })
 
-test('inject: registerReportIntoTask refuses bad shapes and unknown tasks without writing', async () => {
-  const { ws, storeDir } = await makeWorkspace()
-  try {
-    const before = await readFile(path.join(storeDir, 'tasks.json'), 'utf8')
-
-    const miss = registerReportIntoTask(storeDir, 'nope', path.join(ws, 'x.html'))
-    assert.match(miss.error, /task not found: "nope" \(tasks: OTA 装配验证, R4 复现\)/)
-
-    // unwritable shape: version bumped by "someone else" → refuse, file intact
-    const storePath = path.join(storeDir, 'tasks.json')
-    await writeFile(storePath, JSON.stringify({ ...TASK_STORE, version: 2 }), 'utf8')
-    const bad = registerReportIntoTask(storeDir, 'task-a', path.join(ws, 'x.html'))
-    assert.match(bad.error, /unexpected task store shape \(version 2\)/)
-    assert.equal(await readFile(storePath, 'utf8'), JSON.stringify({ ...TASK_STORE, version: 2 }))
-
-    // broken JSON → refused, not clobbered
-    await writeFile(storePath, '{oops', 'utf8')
-    const broken = registerReportIntoTask(storeDir, 'task-a', path.join(ws, 'x.html'))
-    assert.match(broken.error, /task store unreadable/)
-
-    // missing file inside the store dir = empty store → guided error
-    await writeFile(storePath, before, 'utf8')
-    const empty = registerReportIntoTask(storeDir, 'task-a', path.join(ws, 'x.html'))
-    await rm(storePath)
-    const noTasks = registerReportIntoTask(storeDir, 'task-a', path.join(ws, 'x.html'))
-    assert.match(noTasks.error, /no tasks yet/)
-
-    // 32-report cap
-    await writeFile(storePath, before, 'utf8')
-    const filled = {
-      version: 1,
-      tasks: [{ ...TASK_STORE.tasks[0], reports: Array.from({ length: 32 }, (_, i) => ({ id: 'r-' + i, name: 'r' + i, path: path.join(ws, 'r' + i + '.html'), added_at: 'x' })) }],
-    }
-    await writeFile(storePath, JSON.stringify(filled), 'utf8')
-    const cap = registerReportIntoTask(storeDir, 'task-a', path.join(ws, 'new.html'))
-    assert.match(cap.error, /already has 32 reports \(max\)/)
-  } finally {
-    await rm(ws, { recursive: true, force: true })
-  }
-})
-
-test('inject: sim_analysis e2e — collects, generates the report and registers it into the task', async () => {
+test('inject: sim_analysis e2e — collects, generates the report and registers it into the CALLING session', async () => {
   const { ws, storeDir } = await makeWorkspace()
   try {
     // minimal sweep fixture: one round, two points over one grouping param
@@ -141,13 +120,14 @@ test('inject: sim_analysis e2e — collects, generates the report and registers 
     }), 'utf8')
 
     const tool = makeTool(analysisTools().find((d) => d.name === 'sim_analysis'))
-    const res = await tool.execute({ run_dir: top, report: true, task: 'OTA 装配验证' })
+    // exec.agent.id IS the SessionId (D-008) — the registration target
+    const res = await tool.execute({ run_dir: top, report: true }, { agent: { id: SID_A } })
     assert.equal(res.ok, true)
     assert.equal(res.simulator, 'spectre')
     assert.equal(res.summary.gain.n, 2)
     assert.match(res.results_file, /demoX[\\/]sweep[\\/]Round1[\\/]top[\\/]results\.json$/)
     assert.equal(res.registered, true)
-    assert.equal(res.task.id, 'task-a')
+    assert.equal(res.session, SID_A)
     assert.match(res.report_path, /demoX_report\.html$/)
 
     const reportOnDisk = await readFile(res.report_path, 'utf8') // throws if missing
@@ -156,33 +136,34 @@ test('inject: sim_analysis e2e — collects, generates the report and registers 
     // from the tool result now, but the lines stay model-facing output)
     assert.match(res.output, /\[collect\] spectre: 2 success \/ 0 partial \/ 0 failed -> /)
     assert.match(res.output, /\[report\] 1 round\(s\) -> /)
-    const store = JSON.parse(await readFile(path.join(storeDir, 'tasks.json'), 'utf8'))
-    assert.equal(store.tasks[0].reports.length, 1)
-    assert.equal(store.tasks[0].reports[0].path, path.resolve(res.report_path))
-    assert.equal(store.tasks[0].dashboard_selected, store.tasks[0].reports[0].id)
+    const store = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store.sessions[SID_A].reports.length, 1)
+    assert.equal(store.sessions[SID_A].reports[0].path, path.resolve(res.report_path))
+    assert.equal(store.sessions[SID_A].dashboard_selected, store.sessions[SID_A].reports[0].id)
 
-    // collect-only (no report) → no report fields, results.json still written
+    // collect-only (no report) → no registration fields, results.json still written
     const top2 = path.join(ws, 'demoY', 'sweep', 'Round2', 'top')
     await mkdir(path.join(top2, '00'), { recursive: true })
     await writeFile(path.join(top2, '00', 'point_meta.json'), JSON.stringify({
       point_index: 0, point_name: '00', status: 'success',
       params: { x: 1 }, signals: { m: 5 },
     }), 'utf8')
-    const plain = await tool.execute({ run_dir: top2 })
+    const plain = await tool.execute({ run_dir: top2 }, { agent: { id: SID_A } })
     assert.equal(plain.ok, true)
     assert.equal(plain.registered, undefined)
     assert.equal(plain.report_path, undefined)
 
-    // wrong task → analysis + report ok, registration refused with the task list
-    const bad = await tool.execute({ run_dir: top, report: true, task: 'ghost' })
-    assert.equal(bad.ok, true)
-    assert.equal(bad.registered, false)
-    assert.match(bad.register_error, /task not found: "ghost" \(tasks: OTA 装配验证, R4 复现\)/)
+    // NO session identity in exec (direct server-side call) → analysis + report
+    // ok, registration refused with a visible, actionable error
+    const noAgent = await tool.execute({ run_dir: top, report: true })
+    assert.equal(noAgent.ok, true)
+    assert.equal(noAgent.registered, false)
+    assert.match(noAgent.register_error, /no session identity/)
 
     // report=true + custom out → refused early (report reads the canonical location)
     await assert.rejects(() => tool.execute({
       run_dir: top, report: true, out: path.join(ws, 'elsewhere.json'),
-    }), /requires the default results\.json location/)
+    }, { agent: { id: SID_A } }), /requires the default results\.json location/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }
@@ -207,7 +188,7 @@ test('sim_analysis: numeric point ordering (>=100 dirs) and report inline-JSON e
     }), 'utf8')
 
     const tool = makeTool(analysisTools().find((d) => d.name === 'sim_analysis'))
-    const res = await tool.execute({ run_dir: top, report: true })
+    const res = await tool.execute({ run_dir: top, report: true }, { agent: { id: 'session-eeee1111-2222-3332-4444-555555555555' } })
     assert.equal(res.ok, true)
 
     const results = JSON.parse(await readFile(path.join(top, 'results.json'), 'utf8'))

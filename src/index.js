@@ -32,10 +32,11 @@ import path from 'node:path'
 import { findWorkspaceConfig } from './server/workspace.js'
 import { runLocalChecks } from './server/checks.js'
 import { localDiskUsage, workspaceDirs } from './server/disk.js'
-import { sessionProject, readTasks, writeTasks, clearTasksIfEmpty, readSessionTasks, writeSessionTaskState } from './server/project.js'
+import { sessionProject, readSessionConfigs, writeSessionConfig } from './server/project.js'
+import { isForkSession } from './server/forkdetect.js'
 import { remoteMachinesStatus, fetchMachines, checkableMachines } from './server/machines.js'
 import { readSettings, validateSettings, writeSettings } from './server/settings.js'
-import { readCheckParams, validateCheckParams, writeCheckParams } from './server/checkparams.js'
+import { readCheckParams } from './server/checkparams.js'
 import { syncAgentsMd } from './server/agentsmd.js'
 import { remoteBrowse } from './server/remotebrowse.js'
 import { startSelfcheck, getSelfcheck } from './server/selfcheck.js'
@@ -101,22 +102,10 @@ async function handle(req, res, ctx) {
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    // Write surface is narrow by design: tasks, project settings, check params,
+    // Write surface is narrow by design: per-session configs, project settings,
     // self-check runs and the AGENTS.md config block (all project-local file
     // writes; no remote execution surface lives here).
-    if (req.method === 'PUT' && route === '/api/tasks') {
-      const sessionId = url.searchParams.get('sessionId')
-      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
-      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-      let body
-      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
-      const w = await writeTasks(project.path, body?.tasks)
-      if (w.error) { json(400, { error: w.error }); return }
-      await clearTasksIfEmpty(project.path)
-      json(200, { ok: true, project, tasks: w.tasks })
-      return
-    }
-    if (req.method === 'PUT' && route === '/api/session-tasks') {
+    if (req.method === 'PUT' && route === '/api/session-config') {
       // merge-write ONE session's entry ({ sessionId, state }) — never a stale
       // full-file clobber of sibling sessions
       const sessionId = url.searchParams.get('sessionId')
@@ -124,7 +113,7 @@ async function handle(req, res, ctx) {
       if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
       let body
       try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
-      const w = await writeSessionTaskState(project.path, body?.sessionId, body?.state)
+      const w = await writeSessionConfig(project.path, body?.sessionId, body?.state)
       if (w.error) { json(400, { error: w.error }); return }
       json(200, { ok: true, project, sessions: w.sessions })
       return
@@ -141,20 +130,6 @@ async function handle(req, res, ctx) {
       if (v.error) { json(400, { error: v.error }); return }
       await writeSettings(project.path, v.settings)
       json(200, { ok: true, settings: v.settings })
-      return
-    }
-    if (req.method === 'PUT' && route === '/api/check-params') {
-      // Per-project check parameters (check_params.json): the check sub-view's
-      // confirm button PUTs the full edited object at once. Local projects only.
-      const sessionId = url.searchParams.get('sessionId')
-      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
-      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-      let body
-      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
-      const v = validateCheckParams(body)
-      if (v.error) { json(400, { error: v.error }); return }
-      await writeCheckParams(project.path, v.params)
-      json(200, { ok: true, params: v.params })
       return
     }
     if (req.method === 'POST' && route === '/api/selfcheck') {
@@ -193,7 +168,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, path: r.path, created: r.created })
       return
     }
-    json(405, { error: 'GET only (PUT /api/tasks, PUT /api/project-settings, PUT /api/check-params, POST /api/selfcheck, POST /api/agents-md)' })
+    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/project-settings, POST /api/selfcheck, POST /api/agents-md)' })
     return
   }
 
@@ -203,7 +178,7 @@ async function handle(req, res, ctx) {
       tiers: {
         console: 'sidebar entry "HarnessAMS" (client half)',
         project: ctx.workspaceRegistry ? 'workspaceRegistry mapped' : 'workspaceRegistry unavailable (tier 2 degraded)',
-        tasks: '/api/tasks?sessionId=…',
+        sessions: '/api/session-config?sessionId=…',
       },
     })
     return
@@ -249,12 +224,9 @@ async function handle(req, res, ctx) {
     return
   }
   if (route === '/api/check-params') {
-    const sessionId = url.searchParams.get('sessionId')
-    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
-    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-    let params
-    try { ({ params } = await readCheckParams(project.path)) } catch (e) { json(500, { error: `check_params.json unreadable: ${e.message}` }); return }
-    json(200, { ok: true, params })
+    // Retired with the task concept (2026-11-19): per-session check params live
+    // in sessions.json; this route only ever read the project-level file.
+    json(404, { error: 'check-params route retired — check params are per-session now (GET /api/session-config carries fallback_params)' })
     return
   }
   if (route === '/api/selfcheck') {
@@ -321,26 +293,30 @@ async function handle(req, res, ctx) {
     }
     return
   }
-  // ---- tier 2: project mapping + task store ----
+  // ---- tier 2: project mapping + per-session config store ----
   if (route === '/api/project') {
     const mapped = sessionProject(ctx.workspaceRegistry, url.searchParams.get('sessionId'))
     json(200, { ok: true, ...mapped })
     return
   }
-  if (route === '/api/tasks') {
+  if (route === '/api/session-config') {
+    // Per-session config (sessions.json): GET returns the whole map (the
+    // sidebar hydrates its per-session entries from it), plus
+    // - fallback_params: project-file∪built-in defaults — the greyed ghost
+    //   values behind the check sub-view and the effective params for any
+    //   session that has not confirmed its own table;
+    // - fork: computed ONLY while the asking session has no entry yet (the
+    //   client's first-seen flow splits copy-vs-empty on it; an existing entry
+    //   is the tombstone that stops re-detection).
     const sessionId = url.searchParams.get('sessionId')
     const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
     if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-    json(200, { ok: true, project, ...(await readTasks(project.path)) })
-    return
-  }
-  if (route === '/api/session-tasks') {
-    // Per-session ACTIVE task state (sessions.json): GET returns the whole map
-    // (the sidebar hydrates its per-session entries from it).
-    const sessionId = url.searchParams.get('sessionId')
-    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
-    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-    json(200, { ok: true, project, ...(await readSessionTasks(project.path)) })
+    const store = await readSessionConfigs(project.path)
+    let fallback_params
+    try { ({ params: fallback_params } = await readCheckParams(project.path)) } catch { /* corrupt file -> defaults */ }
+    let fork
+    if (sessionId && !store.sessions[sessionId]) fork = isForkSession(sessionId)
+    json(200, { ok: true, project, ...store, fallback_params, ...(fork !== undefined ? { fork } : {}) })
     return
   }
   if (route === '/api/report-stat') {
@@ -348,10 +324,10 @@ async function handle(req, res, ctx) {
     // report document. The generator rewrites the HTML on
     // every run, so the document stat alone is a sufficient freshness token —
     // no body fetch. Resolution mirrors /dash (opaque ids, no secrets).
-    const taskId = url.searchParams.get('taskId')
+    const sessionId = url.searchParams.get('sessionId')
     const reportId = url.searchParams.get('reportId')
-    if (!taskId || !reportId) { json(400, { error: 'taskId and reportId are required' }); return }
-    const hit = await resolveReportFile(ctx.workspaceRegistry, taskId, reportId, '')
+    if (!sessionId || !reportId) { json(400, { error: 'sessionId and reportId are required' }); return }
+    const hit = await resolveReportFile(ctx.workspaceRegistry, sessionId, reportId, '')
     if (hit.error) { json(hit.code ?? 404, { error: hit.error }); return }
     const st = await fsp.stat(hit.abs).catch(() => null)
     if (!st || !st.isFile()) { json(404, { error: 'not found' }); return }
@@ -378,17 +354,17 @@ async function handle(req, res, ctx) {
     return
   }
   if (route.startsWith('/dash/')) {
-    // Task-attached dashboard reports: /dash/<taskId>/<reportId>/<rel…> (empty
+    // Session-attached dashboard reports: /dash/<sessionId>/<reportId>/<rel…> (empty
     // rel = the report document itself). rel resolves against the report's own
     // directory so the document's relative references (data/*.js, images) keep
-    // working; the ids are opaque lookups into the task stores, not paths.
+    // working; the ids are opaque lookups into the session stores, not paths.
     const segs = route.slice('/dash/'.length).split('/').map((s) => {
       try { return decodeURIComponent(s) } catch { return null }
     })
-    if (segs.length < 2 || segs.slice(0, 2).some((s) => !s)) { json(400, { error: 'bad dashboard route (expected /dash/<taskId>/<reportId>/<rel…>)' }); return }
-    const [taskId, reportId] = segs
+    if (segs.length < 2 || segs.slice(0, 2).some((s) => !s)) { json(400, { error: 'bad dashboard route (expected /dash/<sessionId>/<reportId>/<rel…>)' }); return }
+    const [sessionId, reportId] = segs
     const rel = segs.slice(2).join('/')
-    const hit = await resolveReportFile(ctx.workspaceRegistry, taskId, reportId, rel)
+    const hit = await resolveReportFile(ctx.workspaceRegistry, sessionId, reportId, rel)
     if (hit.error) { json(hit.code ?? 404, { error: hit.error }); return }
     const st = await fsp.stat(hit.abs).catch(() => null)
     if (!st || !st.isFile()) { json(404, { error: 'not found' }); return }
