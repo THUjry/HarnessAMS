@@ -1,19 +1,22 @@
 // Tier 2 — project = DSH workspace: the session-to-workspace mapping over
-// ctx.workspaceRegistry (a project is nothing more than a DSH workspace, i.e. a local
-// folder; HarnessAMS keeps no workspace concept of its own), and the per-project task
-// store at <workspace>/.harnessams/tasks.json. Sessions are deliberately NOT modeled
-// server-side: every session of the same workspace sees the same task list (the
-// per-session SELECTED task is a client-side localStorage concern since 2026-11-18).
-import fs from 'node:fs'
+// ctx.workspaceRegistry (a project is nothing more than a DSH workspace, i.e. a
+// local folder; HarnessAMS keeps no workspace concept of its own), and the
+// per-session config store at <workspace>/.harnessams/sessions.json. The task
+// concept was retired (2026-11-19, decisions.md D-008): each DSH session IS the
+// work unit and carries its own dashboard reports + confirmed check params.
+// The legacy tasks.json file (and its v1 sessions.json shape) is deliberately
+// left on disk but never read — a v1 store parses as empty (clean break).
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
+import { validateCheckParams } from './checkparams.js'
 
 // Resolve the workspace (project) a session belongs to. The registry's sessionIds
 // projection is canonical-cwd based; the return value mirrors the DSH workspace record,
-// plus `initialized` = the workspace already has a .harnessams store (tasks/settings/
-// check params) — the client's sidebar default-open policy keys off it.
+// plus `initialized` = the workspace already has a .harnessams store (sessions/
+// settings) — the client's sidebar default-open policy keys off it.
 // Returns { project: { id, path, title, initialized } } or { project: null, reason }.
 export function sessionProject(registry, sessionId) {
   if (!registry || typeof registry.list !== 'function') {
@@ -26,30 +29,30 @@ export function sessionProject(registry, sessionId) {
     const ids = ws.sessionIds ?? []
     if (ids.includes(sessionId)) {
       let initialized = false
-      try { initialized = !!ws.path && fs.existsSync(path.join(ws.path, TASKS_DIR)) } catch { initialized = false }
+      try { initialized = !!ws.path && fs.existsSync(path.join(ws.path, STORE_DIR)) } catch { initialized = false }
       return { project: { id: ws.id, path: ws.path, title: ws.title, initialized } }
     }
   }
   return { project: null, reason: 'session is not accounted in any workspace (new session?)' }
 }
 
-const TASKS_DIR = '.harnessams'
-const TASKS_FILE = 'tasks.json'
-const MAX_TASKS = 200
+const STORE_DIR = '.harnessams'
+const SESSIONS_FILE = 'sessions.json'
+const SESSIONS_VERSION = 2
+const MAX_SESSION_ENTRIES = 200
 const MAX_NAME = 80
-const MAX_DESCRIPTION = 4000
 const MAX_REPORTS = 32
 const MAX_REPORT_PATH = 400
-const ID_RE = /^[\w-]{1,64}$/
+export const SESSION_ID_RE = /^[\w-]{1,128}$/
 
-// Dashboard reports attached to a task (the sidebar Dashboard sub-view): local
-// HTML files picked anywhere on disk via the add-report browser. Paths are
-// normalized to absolute here; duplicates by path are dropped within a task.
-// Ids follow the task-id pattern and are preserved when well-formed.
+// Dashboard reports attached to a session (the sidebar Dashboard sub-view): local
+// HTML files picked anywhere on disk via the add-report browser, or registered by
+// the sim_analysis tool. Paths are normalized to absolute here; duplicates by
+// path are dropped within a session.
 function normalizeReports(raw) {
   if (raw === undefined || raw === null) return { reports: [] }
-  if (!Array.isArray(raw)) return { error: 'task reports must be an array' }
-  if (raw.length > MAX_REPORTS) return { error: `too many reports on a task (max ${MAX_REPORTS})` }
+  if (!Array.isArray(raw)) return { error: 'session reports must be an array' }
+  if (raw.length > MAX_REPORTS) return { error: `too many reports on a session (max ${MAX_REPORTS})` }
   const out = []
   const seenPath = new Set()
   for (const r of raw) {
@@ -62,7 +65,7 @@ function normalizeReports(raw) {
     const key = p.toLowerCase()
     if (seenPath.has(key)) continue
     seenPath.add(key)
-    let id = typeof r.id === 'string' && ID_RE.test(r.id) ? r.id : null
+    let id = typeof r.id === 'string' && /^[\w-]{1,64}$/.test(r.id) ? r.id : null
     if (!id || out.some((x) => x.id === id)) id = 'r-' + randomUUID().slice(0, 8)
     const name = typeof r.name === 'string' && r.name.trim() ? r.name.trim().slice(0, MAX_NAME) : path.basename(p)
     const added_at = typeof r.added_at === 'string' && r.added_at ? r.added_at : new Date().toISOString()
@@ -71,133 +74,77 @@ function normalizeReports(raw) {
   return { reports: out }
 }
 
-export function tasksPath(workspacePath) {
-  return path.join(workspacePath, TASKS_DIR, TASKS_FILE)
-}
-
-// Read a project's task list; a missing store is an empty list, not an error.
-export async function readTasks(workspacePath) {
-  const p = tasksPath(workspacePath)
-  try {
-    const raw = JSON.parse(await fsp.readFile(p, 'utf8'))
-    const tasks = Array.isArray(raw?.tasks) ? raw.tasks : []
-    return { version: raw?.version ?? 1, tasks }
-  } catch (e) {
-    if (e.code === 'ENOENT') return { version: 1, tasks: [] }
-    throw e
+// Validate one session's config state. Returns { state } or { error }. The
+// check_params object is validated with the same rules as the retired
+// project-level writer (checkparams.js); it is stored only when confirmed.
+export function validateSessionState(state) {
+  if (state == null) return { state: null }
+  if (typeof state !== 'object' || Array.isArray(state)) return { error: 'state must be an object or null' }
+  const display = state.display === 'session' || state.display === 'overview' ? state.display : 'overview'
+  const rn = normalizeReports(state.reports)
+  if (rn.error) return { error: rn.error }
+  // dashboard_selected only survives while it points at one of this session's reports
+  const dashboard_selected = typeof state.dashboard_selected === 'string'
+    && rn.reports.some((x) => x.id === state.dashboard_selected)
+    ? state.dashboard_selected
+    : null
+  let check_params = undefined
+  if (state.check_params != null) {
+    const v = validateCheckParams(state.check_params)
+    if (v.error) return { error: v.error }
+    check_params = v.params
   }
+  return { state: { display, reports: rn.reports, dashboard_selected, ...(check_params ? { check_params } : {}) } }
 }
 
-// Validate and persist a full task list (the sidebar is the single writer, sending the
-// complete list on each change). Ids are preserved when well-formed; new tasks without
-// an id get one. created_at is stamped server-side for new tasks.
-export async function writeTasks(workspacePath, input) {
-  if (!Array.isArray(input)) return { error: 'body must be { "tasks": [...] }' }
-  if (input.length > MAX_TASKS) return { error: `too many tasks (max ${MAX_TASKS})` }
-  const existing = await readTasks(workspacePath)
-  const known = new Map(existing.tasks.map((t) => [t.id, t]))
-  const tasks = []
-  const seen = new Set()
-  for (const raw of input) {
-    if (!raw || typeof raw !== 'object') return { error: 'each task must be an object' }
-    const name = typeof raw.name === 'string' ? raw.name.trim() : ''
-    if (!name) return { error: 'task name is required' }
-    if (name.length > MAX_NAME) return { error: `task name too long (max ${MAX_NAME})` }
-    const description = typeof raw.description === 'string' ? raw.description : ''
-    if (description.length > MAX_DESCRIPTION) return { error: `task description too long (max ${MAX_DESCRIPTION})` }
-    let id = typeof raw.id === 'string' && /^[\w-]{1,64}$/.test(raw.id) ? raw.id : null
-    if (id && known.has(id)) id = known.get(id).id // keep original identity
-    if (!id) id = 'task-' + randomUUID().slice(0, 8)
-    if (seen.has(id)) return { error: `duplicate task id: ${id}` }
-    seen.add(id)
-    const rn = normalizeReports(raw.reports)
-    if (rn.error) return { error: rn.error }
-    // dashboard_selected only survives while it points at one of this task's reports
-    const sel = typeof raw.dashboard_selected === 'string' && rn.reports.some((x) => x.id === raw.dashboard_selected)
-      ? raw.dashboard_selected
-      : null
-    tasks.push({
-      id,
-      name,
-      description,
-      created_at: (id && known.has(id) && known.get(id).created_at) || new Date().toISOString(),
-      ...(rn.reports.length ? { reports: rn.reports, dashboard_selected: sel } : {}),
-    })
-  }
-  const dir = path.join(workspacePath, TASKS_DIR)
-  const finalPath = tasksPath(workspacePath)
-  await fsp.mkdir(dir, { recursive: true })
-  // .harnessams creation moment: lay down the AGENTS.md config-table template
-  // (empty table + first-fill instruction; idempotent, never throws).
-  await ensureAgentsMdTemplate(workspacePath)
-  // Atomic replace: the store now has two writers (this sidebar PUT channel and
-  // sim_report's report injection) — a torn read must never be observable.
-  const tmp = finalPath + '.tmp'
-  await fsp.writeFile(tmp, JSON.stringify({ version: 1, tasks }, null, 2) + '\n', 'utf8')
-  await fsp.rename(tmp, finalPath)
-  return { tasks }
+export function sessionConfigsPath(workspacePath) {
+  return path.join(workspacePath, STORE_DIR, SESSIONS_FILE)
 }
 
-// Remove the task store when a project has no tasks left (keep workspaces clean).
-export async function clearTasksIfEmpty(workspacePath) {
-  const p = tasksPath(workspacePath)
+// Read the per-session config store. A missing file, a corrupt file, or a v1
+// store (the task-era {active, display} shape) all parse as empty — v1 entries
+// reference task ids that no longer exist, so they are discarded wholesale.
+export async function readSessionConfigs(workspacePath) {
   try {
-    const { tasks } = await readTasks(workspacePath)
-    if (tasks.length === 0 && fs.existsSync(p)) await fsp.rm(p)
-  } catch { /* best effort */ }
-}
-
-// ---------- per-session active-task state (2026-11-18 round 3) ----------
-// <workspace>/.harnessams/sessions.json: which tasks each DSH session keeps
-// ACTIVE (highlighted capsules) plus the one currently displayed. Disk-
-// persisted by user ruling (a reload must NOT lose it); entries are keyed by
-// the raw DSH session id and reference this project's task ids.
-const SESSIONS_FILE = 'sessions.json'
-const MAX_SESSION_ENTRIES = 200
-const MAX_ACTIVE_PER_SESSION = 50
-export function sessionTasksPath(workspacePath) {
-  return path.join(workspacePath, TASKS_DIR, SESSIONS_FILE)
-}
-export async function readSessionTasks(workspacePath) {
-  try {
-    const raw = await fsp.readFile(sessionTasksPath(workspacePath), 'utf8')
-    const v = JSON.parse(raw)
-    const sessions = v && typeof v === 'object' && !Array.isArray(v) ? v.sessions : null
+    const raw = JSON.parse(await fsp.readFile(sessionConfigsPath(workspacePath), 'utf8'))
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.version !== SESSIONS_VERSION) {
+      return { sessions: {} }
+    }
+    const sessions = raw.sessions
     if (!sessions || typeof sessions !== 'object' || Array.isArray(sessions)) return { sessions: {} }
     const out = {}
     for (const [sid, st] of Object.entries(sessions)) {
-      if (typeof sid !== 'string' || !sid || sid.length > 128 || !st || typeof st !== 'object') continue
-      const active = Array.isArray(st.active)
-        ? [...new Set(st.active)].filter((x) => typeof x === 'string' && ID_RE.test(x)).slice(0, MAX_ACTIVE_PER_SESSION)
-        : []
-      const display = st.display === 'overview' || (typeof st.display === 'string' && active.includes(st.display)) ? st.display : 'overview'
-      out[sid] = { active, display }
+      if (!SESSION_ID_RE.test(sid) || !st || typeof st !== 'object') continue
+      const v = validateSessionState(st)
+      if (v.error) continue // entry-level fail-open: drop malformed siblings
+      out[sid] = v.state
     }
     return { sessions: out }
   } catch { return { sessions: {} } } // missing / corrupt -> empty, never throw
 }
+
 // Read-modify-write of ONE session's entry (single UI writer, but a stale
 // full-file PUT from an old tab would clobber sibling sessions — merge instead).
-export async function writeSessionTaskState(workspacePath, sessionId, state) {
-  if (typeof sessionId !== 'string' || !sessionId || sessionId.length > 128) return { error: 'bad sessionId' }
-  const cur = await readSessionTasks(workspacePath)
+export async function writeSessionConfig(workspacePath, sessionId, state) {
+  if (typeof sessionId !== 'string' || !SESSION_ID_RE.test(sessionId)) return { error: 'bad sessionId' }
+  const v = validateSessionState(state)
+  if (v.error) return { error: v.error }
+  const cur = await readSessionConfigs(workspacePath)
   const sessions = { ...cur.sessions }
   delete sessions[sessionId] // re-insert at the end: insertion order doubles as recency for pruning
-  if (state != null) {
-    const active = Array.isArray(state?.active)
-      ? [...new Set(state.active)].filter((x) => typeof x === 'string' && ID_RE.test(x)).slice(0, MAX_ACTIVE_PER_SESSION)
-      : []
-    const display = state?.display === 'overview' || (typeof state?.display === 'string' && active.includes(state.display)) ? state.display : 'overview'
-    sessions[sessionId] = { active, display }
-  }
+  if (v.state != null) sessions[sessionId] = v.state
   let entries = Object.entries(sessions)
   while (entries.length > MAX_SESSION_ENTRIES) entries = entries.slice(1)
-  const dir = path.join(workspacePath, TASKS_DIR)
+  const dir = path.join(workspacePath, STORE_DIR)
+  const fresh = !fs.existsSync(dir)
   try {
     await fsp.mkdir(dir, { recursive: true })
-    const tmp = sessionTasksPath(workspacePath) + '.tmp'
-    await fsp.writeFile(tmp, JSON.stringify({ version: 1, sessions: Object.fromEntries(entries) }, null, 2) + '\n', 'utf8')
-    await fsp.rename(tmp, sessionTasksPath(workspacePath))
+    // .harnessams creation moment: lay down the AGENTS.md config-table template
+    // (empty table + first-fill instruction; idempotent, never throws).
+    if (fresh) await ensureAgentsMdTemplate(workspacePath)
+    const tmp = sessionConfigsPath(workspacePath) + '.tmp'
+    await fsp.writeFile(tmp, JSON.stringify({ version: SESSIONS_VERSION, sessions: Object.fromEntries(entries) }, null, 2) + '\n', 'utf8')
+    await fsp.rename(tmp, sessionConfigsPath(workspacePath))
   } catch (e) {
     return { error: 'sessions.json write failed: ' + String(e?.message ?? e) }
   }

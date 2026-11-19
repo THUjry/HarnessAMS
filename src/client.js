@@ -5,15 +5,18 @@
 //           dsh-ssh host registry with each alias's configured remote root), digital
 //           assets (vendored .js packages with licenses + package/workspace copy
 //           locations), disk usage;
-//   tier 2: project = DSH workspace (a local folder) — the task list is shared by
-//           every session of the workspace; the SELECTED task is per-session
-//           (localStorage v2 map, forked sessions inherit their parent's entry);
-//   tier 3: right-sidebar task tab — the first-level strip
-//           opens on the project overview (health-check buttons + settings +
-//           one-click self-check, project-scoped so same-project session switches
-//           never refresh it), then one capsule per task with "new task" to create;
-//           the Dashboard sub-view shows the task-registered local HTML reports
-//           (browse-to-add / dropdown / reload).
+//   tier 2: project = DSH workspace (a local folder) — every SESSION is a work
+//           unit (the task concept was retired 2026-11-19, decisions.md D-008):
+//           each session carries its own dashboard reports and confirmed check
+//           params in <workspace>/.harnessams/sessions.json;
+//   tier 3: right-sidebar tab — the first-level strip is exactly two entries,
+//           the project overview (project-scoped so same-project session switches
+//           never refresh it) and THIS session's own panel with its Dashboard
+//           (local HTML reports: browse-to-add / dropdown / reload; sim_analysis
+//           registers into the calling session) and Checks sub-views. A first-
+//           seen FORKED session (log-marker verdict from the server) starts from
+//           a copy of the previously active session's config — deliberately
+//           branch-point-independent; a brand-new session starts empty.
 //           Remote connectivity is dsh-ssh's (@linxin666): tools go by alias, the
 //           user's interactive shell is dsh-ssh's own terminal panel — this client
 //           adds no SSH surface of its own.
@@ -74,7 +77,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': 'SmartAnaSim 单包安装即注册全部 11 个工具：spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、batch（通用 LSF 提交 / 轮询 / 取回）、共享（分析 / 进度 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 任务侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「new task」建新任务，任务内「仪表盘」— HTML 报告查看器（sim_analysis 生成报告即自动登记，也可浏览添加已有报告）、「参数检查」— 项目级检查参数编辑；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」HTML 报告查看器（sim_analysis 生成报告即自动登记进本会话，也可浏览添加已有报告；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
         'hosts.ok': 'dsh-ssh：{n} 台主机',
         'hosts.missing': 'dsh-ssh 不可用',
@@ -122,17 +125,10 @@ window.__ModuleLoader__.load({
         'tasks.loadingProject': '正在加载项目…',
         'tasks.noProject': '此会话没有对应项目。',
         'tasks.projectOverview': '项目总览',
+        'tasks.sessionTab': '会话',
         'tasks.projectLabel': '项目：',
         'tasks.viewCheck': '参数检查',
         'tasks.viewDashboard': '仪表盘',
-        'tasks.viewSim': '仿真设置',
-        'tasks.deleteAria': '删除 {name}',
-        'tasks.newTask': '新建任务',
-        'tasks.deleteConfirm': '删除任务“{name}”？',
-        'tasks.descPlaceholder': '任务描述…',
-        'tasks.nameLabel': '名称',
-        'tasks.descOptional': '描述（可选）',
-        'tasks.create': '创建',
         'dash.noReports': '（暂无报告）',
         'dash.addTitle': '添加 HTML 报告',
         'dash.refresh': '刷新报告（强制重载）',
@@ -147,12 +143,12 @@ window.__ModuleLoader__.load({
         'dash.manualLabel': '或输入报告的绝对路径',
         'dash.manualPlaceholder': 'D:\\path\\to\\report.html',
         'dash.add': '添加',
-        'tasks.simTitle': '仿真设置',
-        'tasks.simPlaceholder': '占位 — 本任务的 SmartAnaSim 配置将在后续里程碑落地。',
-        'tasks.headerOpen': '打开 HarnessAMS 任务侧栏（项目总览与任务）',
-        'tasks.guideDesc': '项目总览、任务、检查与使用引导',
-        'check.title': '装配层检查参数',
-        'check.desc': '装配脚本的检查阈值与开关；确认后写入 check_params.json，下次装配生效。',
+        'tasks.headerOpen': '打开 HarnessAMS 侧栏（项目总览与会话面板）',
+        'tasks.guideDesc': '项目总览、会话面板、检查与使用引导',
+        'check.title': '装配层检查参数（本会话）',
+        'check.desc': '本会话的检查阈值与开关；确认后随会话保存（sessions.json），下次装配生效。',
+        'check.sourceOwn': '已确认 — 本会话参数生效中',
+        'check.sourceFallback': '未确认 — 按项目缺省（check_params.json）∪内置缺省生效',
         'check.colParam': '参数',
         'check.colValue': '值',
         'check.colNote': '说明',
@@ -299,7 +295,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'SmartAnaSim registers all 11 tools on install: spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), batch (generic LSF submit / poll / fetch), shared (analysis / progress / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS task sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “new task” creates a task, and inside a task “Dashboard” — HTML report viewer (sim_analysis registers generated reports automatically; existing reports can be browsed in) and “Checks” — project-level check-parameter editing; for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, an HTML report viewer (sim_analysis registers generated reports into the calling session automatically; existing reports can be browsed in; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
         'hosts.ok': 'dsh-ssh: {n} host(s)',
         'hosts.missing': 'dsh-ssh not available',
@@ -347,17 +343,10 @@ window.__ModuleLoader__.load({
         'tasks.loadingProject': 'Loading project…',
         'tasks.noProject': 'No project for this session.',
         'tasks.projectOverview': 'Project overview',
+        'tasks.sessionTab': 'Session',
         'tasks.projectLabel': 'Project: ',
         'tasks.viewCheck': 'Checks',
         'tasks.viewDashboard': 'Dashboard',
-        'tasks.viewSim': 'Sim settings',
-        'tasks.deleteAria': 'Delete {name}',
-        'tasks.newTask': 'New task',
-        'tasks.deleteConfirm': 'Delete task “{name}”?',
-        'tasks.descPlaceholder': 'Task description…',
-        'tasks.nameLabel': 'Name',
-        'tasks.descOptional': 'Description (optional)',
-        'tasks.create': 'Create',
         'dash.noReports': '(no reports)',
         'dash.addTitle': 'Add an HTML report',
         'dash.refresh': 'Reload the report (hard reload)',
@@ -372,12 +361,12 @@ window.__ModuleLoader__.load({
         'dash.manualLabel': 'Or type the report’s absolute path',
         'dash.manualPlaceholder': '/path/to/report.html',
         'dash.add': 'Add',
-        'tasks.simTitle': 'Simulation settings',
-        'tasks.simPlaceholder': 'Placeholder — SmartAnaSim configuration for this task lands here in later milestones.',
-        'tasks.headerOpen': 'Open the HarnessAMS sidebar (project overview and tasks)',
-        'tasks.guideDesc': 'Project overview, tasks, checks and a guide',
-        'check.title': 'Assembly check parameters',
-        'check.desc': 'Thresholds and switches for the assembly-layer checks; confirming writes check_params.json and takes effect on the next assembly.',
+        'tasks.headerOpen': 'Open the HarnessAMS sidebar (project overview and session panel)',
+        'tasks.guideDesc': 'Project overview, session panel, checks and a guide',
+        'check.title': 'Assembly check parameters (this session)',
+        'check.desc': 'This session\'s check thresholds and switches; confirming saves them with the session (sessions.json) and they take effect on the next assembly.',
+        'check.sourceOwn': 'Confirmed — this session\'s table is in effect',
+        'check.sourceFallback': 'Not confirmed — project defaults (check_params.json) ∪ built-in defaults are in effect',
         'check.colParam': 'Parameter',
         'check.colValue': 'Value',
         'check.colNote': 'Note',
@@ -655,10 +644,6 @@ window.__ModuleLoader__.load({
   background: color-mix(in srgb, currentColor 7%, transparent); }
 .hams-tasktab.cur { font-weight: 600; box-shadow: inset 0 -2px 0 currentColor; }
 .hams-tasktab .hams-tabname { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.hams-tasktab .hams-x { opacity: .55; cursor: pointer; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); line-height: 1; }
-.hams-tasktab .hams-x:hover { opacity: 1; color: #e05252; }
-.hams-addbtn { border: 1px dashed color-mix(in srgb, currentColor 35%, transparent); background: none;
-  color: inherit; border-radius: 6px; padding: 2px 9px; cursor: pointer; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); }
 .hams-body { padding: 8px 10px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 0; display: flex; flex-direction: column; overflow-wrap: anywhere; }
 .hams-dialog-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,.38); display: flex;
   align-items: center; justify-content: center; z-index: 90; }
@@ -670,7 +655,6 @@ window.__ModuleLoader__.load({
 .hams-dialog h3 { margin: 0 0 10px; font-size: calc(14.5px + var(--dsh-content-font-delta, 0px)); font-weight: 600; }
 .hams-field { margin: 8px 0; }
 .hams-field label { display: block; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); opacity: .7; margin-bottom: 3px; }
-.hams-taskdesc { margin-top: 8px; }
 .hams-subtabs { display: flex; gap: 2px; border-bottom: 1px solid color-mix(in srgb, currentColor 15%, transparent);
   margin-bottom: 6px; flex: none; }
 .hams-subtab { padding: 3px 10px; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); cursor: pointer; color: inherit; background: none;
@@ -1240,18 +1224,18 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // ---------- tier 3: per-project task sidebar ----------
+    // ---------- tier 3: per-project session sidebar ----------
 
-    // Lowest navigation level inside a task: dashboard / check parameters / sim
-    // settings (sim settings is a placeholder until its milestone lands). The
-    // remote-terminal sub-view was removed with the dsh-remote retirement — the
-    // user's interactive shell is @linxin666/dsh-ssh's own terminal panel. Above
-    // this sits the first-level strip (project overview + task capsules), and
-    // above that the tab itself — see ProjectOverviewView.
+    // Lowest navigation level inside the session panel: dashboard / check
+    // parameters (the sim-settings placeholder was removed with the task
+    // retirement — SmartAnaSim keeps no per-task UI). The remote-terminal
+    // sub-view was removed with the dsh-remote retirement — the user's
+    // interactive shell is @linxin666/dsh-ssh's own terminal panel. Above this
+    // sits the two-entry strip (project overview + this session), and above
+    // that the tab itself — see ProjectOverviewView.
     const TASK_VIEWS = [
       { id: 'dashboard', labelKey: 'tasks.viewDashboard' },
       { id: 'check', labelKey: 'tasks.viewCheck' },
-      { id: 'sim', labelKey: 'tasks.viewSim' },
     ]
 
     // The DSH host occasionally remounts the sidebar slot body mid-conversation
@@ -1275,40 +1259,65 @@ window.__ModuleLoader__.load({
       try { localStorage.setItem(TASK_VIEW_KEY, v) } catch { /* private mode */ }
     }
 
-    // First-level strip state inside the task tab, PER SESSION (user decision
-    // 2026-11-18, round 3): each session keeps its own ACTIVE TASK LIST (a set
-    // of task ids shown as highlighted capsules) plus the one currently
-    // displayed ('overview' or a task id). A first-seen session inherits the
-    // previously active session's list (fork and new-session continuation both
-    // land there — the host exposes no parent-session read face to plugins).
-    // PERSISTED to <workspace>/.harnessams/sessions.json (user ruling: a reload
-    // must NOT lose it) — module memory is the runtime truth, every change
-    // merge-PUTs the session's entry; blank sessions keep theirs in memory
-    // until the workspace mapping lands.
-    const sessionTaskState = new Map() // sessionId -> { active: Set<taskId>, display: 'overview' | taskId }
+    // First-level strip + session config state, PER SESSION (decisions.md
+    // D-008, 2026-11-19): each DSH session is a work unit carrying its own
+    // config — which view the body shows ('overview' | 'session'), its
+    // dashboard reports and confirmed check params — PERSISTED to
+    // <workspace>/.harnessams/sessions.json (a reload must NOT lose it).
+    // Module memory is the runtime truth; every change merge-PUTs the
+    // session's entry. A FIRST-SEEN session splits on the server's fork
+    // verdict (log-marker based): a fork DEEP-COPIES the previously active
+    // session's CURRENT config — deliberately branch-point-independent (the
+    // fork parent is not identified, no branch-cut state is reconstructed);
+    // a brand-new session starts EMPTY, and its written entry doubles as the
+    // tombstone that stops fork re-detection.
+    const sessionConfigState = new Map() // sessionId -> { display, reports[], dashboard_selected, check_params? }
     const lastActiveSessionId = { id: null }
     const hydratedProjects = new Set() // projectPath values whose sessions.json is already in the map
-    function taskStateOf(sessionId) {
-      const empty = { active: new Set(), display: 'overview' }
-      if (!sessionId) return empty
-      if (!sessionTaskState.has(sessionId)) {
-        // first sight: inherit the previously ACTIVE session's list — for a
-        // fork the previous active session is the fork source in the normal
-        // flow (fork does not switch sessions; the user clicks the child next)
-        const prev = lastActiveSessionId.id ? sessionTaskState.get(lastActiveSessionId.id) : null
-        sessionTaskState.set(sessionId, prev
-          ? { active: new Set(prev.active), display: prev.display }
-          : empty)
+    const emptySessionConfig = () => ({ display: 'overview', reports: [], dashboard_selected: null })
+    function cloneSessionConfig(src) {
+      if (!src || typeof src !== 'object') return emptySessionConfig()
+      return {
+        display: src.display === 'session' ? 'session' : 'overview',
+        reports: Array.isArray(src.reports) ? src.reports.map((r) => ({ ...r })) : [],
+        dashboard_selected: typeof src.dashboard_selected === 'string' ? src.dashboard_selected : null,
+        ...(src.check_params && typeof src.check_params === 'object'
+          ? { check_params: JSON.parse(JSON.stringify(src.check_params)) }
+          : {}),
       }
-      return sessionTaskState.get(sessionId)
     }
-    function putSessionTaskState(sessionId) {
+    function sessionConfigOf(sessionId, fork, fallbackSource) {
+      if (!sessionId) return emptySessionConfig()
+      if (!sessionConfigState.has(sessionId)) {
+        const prev = fork ? (fallbackSource ?? null) : null
+        sessionConfigState.set(sessionId, prev ? cloneSessionConfig(prev) : emptySessionConfig())
+      }
+      return sessionConfigState.get(sessionId)
+    }
+    // Copy source for a first-seen FORK (deliberately branch-point-independent,
+    // D-008): the last-ACTIVE session of this page lifetime when there is one,
+    // else the store's most recently written entry (sessions.json insertion
+    // order doubles as recency — the fork source is almost always the last
+    // writer). Never the session itself.
+    function forkCopySource(sessionsMap, selfId) {
+      if (lastActiveSessionId.id) {
+        const own = sessionConfigState.get(lastActiveSessionId.id)
+        if (own) return own
+      }
+      if (sessionsMap && typeof sessionsMap === 'object') {
+        const keys = Object.keys(sessionsMap).filter((k) => k !== selfId)
+        const last = keys[keys.length - 1]
+        if (last && sessionsMap[last]) return sessionsMap[last]
+      }
+      return null
+    }
+    function putSessionConfig(sessionId) {
       if (!sessionId) return
-      const st = sessionTaskState.get(sessionId) ?? null
-      fetchJson(API + '/session-tasks?sessionId=' + encodeURIComponent(sessionId), {
+      const st = sessionConfigState.get(sessionId) ?? null
+      fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, state: st ? { active: [...st.active], display: st.display } : null }),
+        body: JSON.stringify({ sessionId, state: st ? cloneSessionConfig(st) : null }),
       }).catch(() => { /* offline: the in-memory map keeps working */ })
     }
 
@@ -1793,11 +1802,13 @@ window.__ModuleLoader__.load({
       const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
       const [project, setProject] = useState(undefined) // undefined=loading, null=none
       const [reason, setReason] = useState(null)
-      const [tasks, setTasks] = useState([])
+      // NOTE: the initial state must READ the map without INSERTING — a forked
+      // session's first-seen copy (below) depends on the map NOT containing the
+      // session until the server's fork verdict arrives. sessionConfigOf() is
+      // reserved for the adopt paths.
+      const [config, setConfig] = useState(() => cloneSessionConfig(sessionConfigState.get(sessionId) ?? emptySessionConfig()))
       const [view, setView] = useState(readTaskView)
       const [error, setError] = useState(null)
-      const [dialogOpen, setDialogOpen] = useState(false)
-      const [descDraft, setDescDraft] = useState(null)
 
       const projectPath = project?.path ?? null
 
@@ -1826,63 +1837,48 @@ window.__ModuleLoader__.load({
         return () => clearInterval(timer)
       }, [])
 
-      // Per-session active-task state: reload on session switch (hydrating
-      // the project's sessions.json once per project), a FIRST-SEEN session
-      // inherits the previously active session's list (fork child /
-      // new-session continuation — see taskStateOf) and the inherited entry is
-      // persisted right away. After the adopt, this session becomes the
-      // "previously active" for the next first-seen one.
-      const [stripState, setStripState] = useState(() => taskStateOf(sessionId))
-      const stripSel = stripState.display // what the body shows: 'overview' | task id
+      // Per-session config: reload on session switch. A FIRST-SEEN session asks
+      // the server for its fork verdict (computed only while the entry is
+      // missing): fork => deep-copy the previously active session's CURRENT
+      // config (branch-point-independent by design, D-008); otherwise start
+      // empty. Either way the entry is persisted right away — the write doubles
+      // as the tombstone that stops fork re-detection. After the adopt, this
+      // session becomes the "previously active" for the next first-seen one.
       useEffect(() => {
         let alive = true
-        if (!sessionId) { setStripState(taskStateOf(null)); return }
-        const adopt = () => {
-          const first = !sessionTaskState.has(sessionId)
-          setStripState(taskStateOf(sessionId))
-          if (first) putSessionTaskState(sessionId)
+        if (!sessionId) { setConfig(emptySessionConfig()); return }
+        const adoptWith = (fork, sessionsMap) => {
+          const first = !sessionConfigState.has(sessionId)
+          const source = first ? forkCopySource(sessionsMap, sessionId) : null
+          setConfig(cloneSessionConfig(sessionConfigOf(sessionId, fork, source)))
+          if (first) putSessionConfig(sessionId)
           lastActiveSessionId.id = sessionId
         }
-        if (hydratedProjects.has(projectPath)) { adopt(); return () => { alive = false } }
-        fetchJson(API + '/session-tasks?sessionId=' + encodeURIComponent(sessionId))
+        if (sessionConfigState.has(sessionId)) { adoptWith(false); return () => { alive = false } }
+        fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId))
           .then((d) => {
             if (!alive) return
             hydratedProjects.add(projectPath)
             const sessions = d?.sessions ?? {}
             for (const [sid, st] of Object.entries(sessions)) {
-              if (st && typeof st === 'object') {
-                sessionTaskState.set(sid, { active: new Set(Array.isArray(st.active) ? st.active : []), display: st.display ?? 'overview' })
+              if (st && typeof st === 'object' && !sessionConfigState.has(sid)) {
+                sessionConfigState.set(sid, cloneSessionConfig(st))
               }
             }
-            adopt()
+            adoptWith(!!d?.fork, sessions)
           })
-          .catch(() => { if (alive) adopt() }) // offline: run on the in-memory map
+          .catch(() => { if (alive) adoptWith(false) }) // offline: empty start (fail-open like the server)
         return () => { alive = false }
       }, [sessionId, projectPath])
       // event-handler mutator: apply fn to a copy, keep the module map truthful
       // and merge-PUT the session's entry to sessions.json
-      const mutateStrip = (fn) => {
-        const next = { active: new Set(stripState.active), display: stripState.display }
+      const mutateConfig = (fn) => {
+        const next = cloneSessionConfig(config)
         fn(next)
-        if (sessionId) sessionTaskState.set(sessionId, next)
-        setStripState(next)
-        putSessionTaskState(sessionId)
+        if (sessionId) sessionConfigState.set(sessionId, next)
+        setConfig(next)
+        putSessionConfig(sessionId)
       }
-      // sanitize after the task list (re)loads: drop deleted ids from the
-      // active set and fall the display back to the overview when its task is
-      // gone (module map stays truthful — Map.set is idempotent, so a React
-      // double-invoke of the updater is harmless)
-      const sanitizeAgainst = (fresh) => setStripState((prev) => {
-        const alive = new Set(fresh.map((t) => t.id))
-        const active = new Set([...prev.active].filter((id) => alive.has(id)))
-        const display = prev.display !== 'overview' && !alive.has(prev.display) ? 'overview' : prev.display
-        const next = { active, display }
-        if (sessionId && (next.display !== prev.display || next.active.size !== prev.active.size)) {
-          sessionTaskState.set(sessionId, next)
-          putSessionTaskState(sessionId)
-        }
-        return next
-      })
 
       useEffect(() => {
         let alive = true
@@ -1917,43 +1913,25 @@ window.__ModuleLoader__.load({
         return () => { alive = false; if (timer) clearTimeout(timer) }
       }, [sessionId])
 
-      // Remote projects are connection anchors — no task store, no check surface.
-      useEffect(() => {
-        let alive = true
-        if (!projectPath || !sessionId) { setTasks([]); return }
-        fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId))
-          .then((d) => {
-            if (!alive) return
-            const fresh = d.tasks ?? []
-            setTasks(fresh)
-            // sanitize: active ids that no longer exist (deleted, or inherited
-            // from another project's session) drop out; a gone display falls
-            // back to the project overview — the tab's default display
-            sanitizeAgainst(fresh)
-          })
-          .catch((e) => { if (alive) setError(String(e.message ?? e)) })
-        return () => { alive = false }
-      }, [projectPath, sessionId])
-
       // The Dashboard sub-view stays live while visible (auto-refresh):
-      // sim_analysis(report=true, task=…) appends to tasks.json behind the
-      // sidebar's back, so poll the store every 10 s while the sub-view is open
-      // and the tab visible; persist-in-flight ticks are skipped so a just-applied
-      // optimistic update is never flashed over by a stale list, and the list
-      // state is only touched when the server copy actually differs.
+      // sim_analysis(report=true) appends to the calling session's entry behind
+      // the sidebar's back, so poll the store every 10 s while the sub-view is
+      // open and the tab visible; persist-in-flight ticks are skipped so a
+      // just-applied optimistic update is never flashed over by a stale entry,
+      // and the config state is only touched when the server copy differs.
       useEffect(() => {
         if (view !== 'dashboard' || !projectPath || !sessionId) return
         let alive = true
         const refetch = () => {
           if (!alive || persistingRef.current) return
-          fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId))
+          fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId))
             .then((d) => {
               if (!alive) return
-              const fresh = d.tasks ?? []
-              setTasks((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh))
-              sanitizeAgainst(fresh)
+              const fresh = cloneSessionConfig(d?.sessions?.[sessionId])
+              setConfig((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh))
+              sessionConfigState.set(sessionId, fresh)
             })
-            .catch(() => { /* keep the current list */ })
+            .catch(() => { /* keep the current entry */ })
         }
         const timer = setInterval(() => { if (!document.hidden) refetch() }, 10_000)
         const onVisible = () => { if (!document.hidden) refetch() }
@@ -1967,25 +1945,29 @@ window.__ModuleLoader__.load({
       }, [view, projectPath, sessionId])
 
       // The check buttons and the diagnosis handoff live in the project overview
-      // view (ProjectOverviewView); the task body itself needs no checks fetch.
+      // view (ProjectOverviewView); the session body itself needs no checks fetch.
 
-      // persist(mutator) re-bases the change on the LATEST server list before the
-      // full-list PUT: the store has a second writer now (sim_report's report
-      // injection writes tasks.json behind the sidebar's back), so sending the
-      // mount-time snapshot would clobber injected reports — the rebase shrinks
-      // the clobber window to milliseconds. Returns the server-confirmed list,
-      // or null on failure (the optimistic update stays, error shows inline).
+      // persistConfig(mutator) re-bases the change on the LATEST server entry
+      // before the single-session PUT: the store has a second writer
+      // (sim_analysis's report registration writes this session's entry behind
+      // the sidebar's back), so sending the mount-time snapshot would clobber
+      // injected reports — the rebase shrinks the clobber window to
+      // milliseconds. Returns the server-confirmed entry, or null on failure
+      // (the optimistic update stays, error shows inline).
       const persistingRef = useRef(false)
-      const persist = async (mutator) => {
+      const persistConfig = async (mutator) => {
         persistingRef.current = true
         try {
-          const latest = await fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId)).catch(() => null)
-          const next = mutator(latest?.tasks ?? tasks)
-          setTasks(next)
-          const r = await fetchJson(API + '/tasks?sessionId=' + encodeURIComponent(sessionId),
-            { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ tasks: next }) })
-          const saved = r.tasks ?? next
-          setTasks(saved)
+          const latest = await fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId)).catch(() => null)
+          const base = latest?.sessions?.[sessionId] ?? config
+          const next = mutator(cloneSessionConfig(base))
+          setConfig(next)
+          sessionConfigState.set(sessionId, next)
+          const r = await fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId),
+            { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, state: next }) })
+          const saved = cloneSessionConfig(r?.sessions?.[sessionId] ?? next)
+          setConfig(saved)
+          sessionConfigState.set(sessionId, saved)
           return saved
         } catch (e) {
           setError(String(e.message ?? e))
@@ -1994,97 +1976,37 @@ window.__ModuleLoader__.load({
           persistingRef.current = false
         }
       }
-
-      const selected = stripSel !== 'overview' ? (tasks.find((t) => t.id === stripSel) ?? null) : null
-
-      const createTask = async (name, description) => {
-        const saved = await persist((latest) => [...latest, { name, description: description || '' }])
-        if (saved && saved.length) {
-          const id = saved[saved.length - 1].id
-          mutateStrip((s) => { s.active.add(id); s.display = id })
-        }
-      }
-      const removeTask = (id) => {
-        const t = tasks.find((x) => x.id === id)
-        if (!t) return
-        if (!window.confirm(tr('tasks.deleteConfirm', { name: t.name }))) return
-        mutateStrip((s) => {
-          s.active.delete(id)
-          if (s.display === id) {
-            const rest = [...s.active]
-            s.display = rest.length ? rest[rest.length - 1] : 'overview'
-          }
-        })
-        persist((latest) => latest.filter((x) => x.id !== id))
-      }
-      const saveDescription = () => {
-        if (!selected || descDraft === null) return
-        persist((latest) => latest.map((t) => t.id === selected.id ? { ...t, description: descDraft } : t))
-        setDescDraft(null)
-      }
-      // Dashboard sub-view mutator: applies fn to the selected task and persists
-      // the whole list (same single-writer channel as description edits).
-      const updateTask = (fn) => persist((latest) => latest.map((t) => t.id === selected.id ? fn(t) : t))
+      // sub-view mutator (dashboard reports / check params): applies fn to this
+      // session's entry through the rebased persist channel.
+      const updateConfig = (fn) => persistConfig(fn)
 
       return h('div', { ref: rootRef, style: { height: '100%', display: 'flex', flexDirection: 'column', minHeight: 0, fontSize: 'var(--dsh-content-font-size, 14px)' } },
-        // first-level strip (modeled after dsh-ssh-ops' server tabs): the project
-        // overview pseudo-capsule first — the tab's default display, not
-        // deletable — then one capsule per task and the "new task" button; the
-        // tab's whole navigation lives on this one level
+        // first-level strip (modeled after dsh-ssh-ops' server tabs): exactly
+        // two entries — the project overview pseudo-capsule (the tab's default
+        // display, not deletable) and THIS session's own capsule (full session
+        // id in the tooltip); the task concept is retired, no creation button
         h('div', { className: 'hams-tabstrip' },
           h('div', {
-            className: 'hams-tasktab' + (stripSel === 'overview' ? ' active' : ''),
+            className: 'hams-tasktab' + (config.display === 'overview' ? ' active' : ''),
             title: tr('tasks.projectOverview'),
-            onClick: () => mutateStrip((s) => { s.display = 'overview' }),
+            onClick: () => mutateConfig((s) => { s.display = 'overview' }),
           }, h('span', { className: 'hams-tabname' }, tr('tasks.projectOverview'))),
-          tasks.map((t) => h('div', {
-              key: t.id,
-              // active = in this session's ACTIVE task set; cur = the one the
-              // body currently shows. Click: activate+show, or toggle OUT when
-              // it is already the shown one (drops it from the active set).
-              className: 'hams-tasktab' + (stripState.active.has(t.id) ? ' active' : '') + (t.id === stripSel ? ' cur' : ''),
-              title: t.name,
-              onClick: () => {
-                setDescDraft(null)
-                mutateStrip((s) => {
-                  if (s.display === t.id && s.active.has(t.id)) { s.active.delete(t.id); s.display = 'overview' }
-                  else { s.active.add(t.id); s.display = t.id }
-                })
-              },
-            },
-            h('span', { className: 'hams-tabname' }, t.name),
-            h('span', { className: 'hams-x', role: 'button', 'aria-label': tr('tasks.deleteAria', { name: t.name }),
-              onClick: (e) => { e.stopPropagation(); removeTask(t.id) } }, '×'))),
-          project && h('button', { className: 'hams-addbtn', title: tr('tasks.newTask'), onClick: () => setDialogOpen(true) },
-            tr('tasks.newTask')),
+          h('div', {
+            className: 'hams-tasktab' + (config.display === 'session' ? ' active cur' : ''),
+            title: sessionId ?? '',
+            onClick: () => mutateConfig((s) => { s.display = 'session' }),
+          }, h('span', { className: 'hams-tabname' }, tr('tasks.sessionTab'))),
         ),
         h('div', { className: 'hams-body' },
           error && h('div', { className: 'hams-err' }, error),
           project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
           project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
-          project && stripSel === 'overview' && h(ProjectOverviewView, { sessionId }),
-          // the task branch GROWS instead of clipping (flex 1 0 auto): short
+          project && config.display === 'overview' && h(ProjectOverviewView, { sessionId }),
+          // the session branch GROWS instead of clipping (flex 1 0 auto): short
           // content still fills the pane (dashboard iframe), long content
           // lengthens the single .hams-body scroll region below
-          selected && h('div', { style: { marginTop: '8px', flex: '1 0 auto', display: 'flex', flexDirection: 'column' } },
-            // task-level info: name+date row and the description editor stay
-            // always visible above the sub tabs (project-level info lives in the
-            // project overview view)
-            h('div', { className: 'hams-row' },
-              h('b', null, selected.name),
-              h('span', { className: 'hams-dim' }, selected.created_at ? selected.created_at.slice(0, 10) : '')),
-            h('div', { className: 'hams-taskdesc' },
-              h('textarea', {
-                className: 'hams-textarea',
-                rows: 2,
-                value: descDraft ?? selected.description ?? '',
-                placeholder: tr('tasks.descPlaceholder'),
-                onChange: (e) => setDescDraft(e.target.value),
-              }),
-              descDraft !== null && h('div', { className: 'hams-row' },
-                h('button', { className: 'hams-btn hams-btn-sm', onClick: saveDescription }, tr('common.save')),
-                h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDescDraft(null) }, tr('common.cancel')))),
-            // lowest level: per-task sub navigation (dashboard / check params / sim)
+          project && config.display === 'session' && h('div', { style: { marginTop: '8px', flex: '1 0 auto', display: 'flex', flexDirection: 'column' } },
+            // lowest level: this session's sub navigation (dashboard / check params)
             h('div', { className: 'hams-subtabs', role: 'tablist' },
               TASK_VIEWS.map((v) => h('button', {
                 key: v.id,
@@ -2093,36 +2015,9 @@ window.__ModuleLoader__.load({
                 'aria-selected': view === v.id,
                 onClick: () => { rememberTaskView(v.id); setView(v.id) },
               }, tr(v.labelKey)))),
-            view === 'dashboard' && h(TaskDashboard, { task: selected, updateTask }),
-            view === 'check' && h(CheckParams, { sessionId }),
-            view === 'sim' && h('div', { className: 'hams-dash' },
-              h('b', null, tr('tasks.simTitle')), h('br'),
-              tr('tasks.simPlaceholder'))),
-        ),
-        dialogOpen && h(NewTaskDialog, {
-          onCancel: () => setDialogOpen(false),
-          onCreate: async (n, d) => { setDialogOpen(false); await createTask(n, d) },
-        }),
+            view === 'dashboard' && h(SessionDashboard, { sessionId, config, updateConfig }),
+            view === 'check' && h(CheckParams, { sessionId, updateConfig }))),
       )
-    }
-
-    function NewTaskDialog({ onCancel, onCreate }) {
-      const [name, setName] = useState('')
-      const [description, setDescription] = useState('')
-      const valid = name.trim().length > 0
-      return h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) onCancel() } },
-        h('div', { className: 'hams-dialog' },
-          h('h3', null, tr('tasks.newTask')),
-          h('div', { className: 'hams-field' },
-            h('label', null, tr('tasks.nameLabel')),
-            h('input', { className: 'hams-input', autoFocus: true, value: name,
-              onChange: (e) => setName(e.target.value), onKeyDown: (e) => { if (e.key === 'Enter' && valid) onCreate(name.trim(), description) } })),
-          h('div', { className: 'hams-field' },
-            h('label', null, tr('tasks.descOptional')),
-            h('textarea', { className: 'hams-textarea', value: description, onChange: (e) => setDescription(e.target.value) })),
-          h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
-            h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')),
-            h('button', { className: 'hams-btn', disabled: !valid, onClick: () => onCreate(name.trim(), description) }, tr('tasks.create')))))
     }
 
     // Sidebar embed pass for the report iframe (same-origin by construction —
@@ -2157,12 +2052,12 @@ window.__ModuleLoader__.load({
     // effect) and this component polls the current report's /api/report-stat —
     // a regenerated document (mtime/size change) reloads through the nonce,
     // so an externally re-run sim_analysis shows up without a manual ↻.
-    function TaskDashboard({ task, updateTask }) {
+    function SessionDashboard({ sessionId, config, updateConfig }) {
       const [nonce, setNonce] = useState(0)
       const [dialogOpen, setDialogOpen] = useState(false)
-      const reports = task.reports ?? []
-      const selectedId = reports.some((r) => r.id === task.dashboard_selected)
-        ? task.dashboard_selected
+      const reports = config.reports ?? []
+      const selectedId = reports.some((r) => r.id === config.dashboard_selected)
+        ? config.dashboard_selected
         : (reports[0]?.id ?? null)
       const current = reports.find((r) => r.id === selectedId) ?? null
 
@@ -2177,7 +2072,7 @@ window.__ModuleLoader__.load({
         let alive = true
         const check = () => {
           if (!alive || document.hidden) return
-          fetchJson(API + '/report-stat?taskId=' + encodeURIComponent(task.id)
+          fetchJson(API + '/report-stat?sessionId=' + encodeURIComponent(sessionId)
             + '&reportId=' + encodeURIComponent(current.id))
             .then((r) => {
               if (!alive) return
@@ -2195,24 +2090,24 @@ window.__ModuleLoader__.load({
           clearInterval(timer)
           document.removeEventListener('visibilitychange', onVisible)
         }
-      }, [current?.id, task.id])
+      }, [current?.id, sessionId])
 
       const addReport = (absPath, name) => {
         // Client-generated id (same shape the server assigns) so adding +
         // selecting the new report is one persist round-trip.
         const id = 'r-' + Math.random().toString(36).slice(2, 10)
         const base = absPath.split(/[\\/]/).pop() || absPath
-        updateTask((t) => ({
-          ...t,
-          reports: [...(t.reports ?? []), { id, name: name || base, path: absPath }],
+        updateConfig((c) => ({
+          ...c,
+          reports: [...(c.reports ?? []), { id, name: name || base, path: absPath }],
           dashboard_selected: id,
         }))
       }
-      const removeCurrent = () => updateTask((t) => {
-        const rest = (t.reports ?? []).filter((r) => r.id !== selectedId)
-        return { ...t, reports: rest, dashboard_selected: rest[0]?.id ?? null }
+      const removeCurrent = () => updateConfig((c) => {
+        const rest = (c.reports ?? []).filter((r) => r.id !== selectedId)
+        return { ...c, reports: rest, dashboard_selected: rest[0]?.id ?? null }
       })
-      const dashUrl = current ? '/harnessams/dash/' + encodeURIComponent(task.id) + '/' + encodeURIComponent(current.id) + '/' : null
+      const dashUrl = current ? '/harnessams/dash/' + encodeURIComponent(sessionId) + '/' + encodeURIComponent(current.id) + '/' : null
 
       return h('div', { className: 'hams-dashview' },
         h('div', { className: 'hams-row hams-dashtoolbar' },
@@ -2221,7 +2116,7 @@ window.__ModuleLoader__.load({
               value: selectedId ?? '',
               disabled: !reports.length,
               title: current ? current.path : tr('dash.noReports'),
-              onChange: (e) => updateTask((t) => ({ ...t, dashboard_selected: e.target.value })),
+              onChange: (e) => updateConfig((c) => ({ ...c, dashboard_selected: e.target.value })),
             },
             reports.length
               ? reports.map((r) => h('option', { key: r.id, value: r.id }, esc(r.name)))
@@ -2301,14 +2196,19 @@ window.__ModuleLoader__.load({
             h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')))))
     }
 
-    // Check-parameters sub-view (task tab): editable table of the assembly-layer
-    // check thresholds/switches stored in check_params.json (project-level). The
-    // six R/C/L numbers are strings while drafting; the confirm button validates,
-    // PUTs the whole object, and the server re-validates. While a draft differs
-    // from the saved value the cell keeps the old value visible in gray
-    // parentheses so the pre-confirm state is always readable.
-    function CheckParams({ sessionId }) {
-      const [params, setParams] = useState(null) // saved copy (null = loading)
+    // Check-parameters sub-view (session panel): editable table of the
+    // assembly-layer check thresholds/switches stored in THIS session's
+    // sessions.json entry (per-session since D-008). The initial table is the
+    // session's confirmed copy, or the project-file∪built-in fallback while
+    // unconfirmed (the source line under the title says which is in effect).
+    // The six R/C/L numbers are strings while drafting; the confirm button
+    // validates locally, then saves through the rebased single-session persist
+    // channel and the server re-validates. While a draft differs from the
+    // loaded value the cell keeps the old value visible in gray parentheses so
+    // the pre-confirm state is always readable.
+    function CheckParams({ sessionId, updateConfig }) {
+      const [params, setParams] = useState(null) // loaded copy (null = loading)
+      const [hasOwn, setHasOwn] = useState(false) // session confirmed its own table
       const [draft, setDraft] = useState(null) // working copy; numbers as strings
       const [error, setError] = useState(null)
       const [saveError, setSaveError] = useState(null)
@@ -2333,10 +2233,19 @@ window.__ModuleLoader__.load({
 
       useEffect(() => {
         let alive = true
-        setParams(null); setDraft(null); setError(null); setSaveError(null)
+        setParams(null); setDraft(null); setHasOwn(false); setError(null); setSaveError(null)
         if (!sessionId) return
-        fetchJson(API + '/check-params?sessionId=' + encodeURIComponent(sessionId))
-          .then((r) => { if (alive && r?.params) { setParams(r.params); setDraft(toDraft(r.params)) } })
+        fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId))
+          .then((r) => {
+            if (!alive) return
+            const own = r?.sessions?.[sessionId]?.check_params
+            const effective = own ?? r?.fallback_params
+            if (effective) {
+              setHasOwn(!!own)
+              setParams(effective)
+              setDraft(toDraft(effective))
+            }
+          })
           .catch((e) => { if (alive) setError(tr('check.loadFailed', { msg: String(e.message ?? e) })) })
         return () => { alive = false }
       }, [sessionId])
@@ -2356,10 +2265,11 @@ window.__ModuleLoader__.load({
         const next = toNumeric(draft)
         setSaving(true)
         try {
-          const r = await fetchJson(API + '/check-params?sessionId=' + encodeURIComponent(sessionId),
-            { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) })
-          setParams(r.params ?? next)
-          setDraft(toDraft(r.params ?? next))
+          const saved = await updateConfig((c) => ({ ...c, check_params: next }))
+          const confirmed = saved?.check_params ?? next
+          setHasOwn(true)
+          setParams(confirmed)
+          setDraft(toDraft(confirmed))
         } catch (e) {
           setSaveError(tr('check.saveFailed', { msg: String(e.message ?? e) }))
         } finally {
@@ -2406,6 +2316,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'hams-dash' },
         h('b', null, tr('check.title')),
         h('div', { className: 'hams-dim' }, tr('check.desc')),
+        params && h('div', { className: 'hams-dim' }, tr(hasOwn ? 'check.sourceOwn' : 'check.sourceFallback')),
         error && h('div', { className: 'hams-err' }, esc(error)),
         saveError && h('div', { className: 'hams-err' }, esc(saveError)),
         !params && !error && h('div', { className: 'hams-dim' }, tr('common.loading')),

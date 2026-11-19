@@ -1,14 +1,14 @@
-// Sidebar Dashboard: serving the local HTML reports attached to a task (see
-// project.js — reports[] in the task store) and the one-level directory listing
-// behind the add-report browser dialog. A report may sit anywhere on the local
-// disk; it is served read-only together with its sibling files (data/*.js,
-// images) so relative references inside the document keep working — the
-// report's own directory is the serving boundary, resolved per request through
-// the workspace registry's task stores (the route carries no secrets: just
-// opaque task/report ids).
+// Sidebar Dashboard: serving the local HTML reports attached to a session (see
+// project.js — reports[] in the per-session config store) and the one-level
+// directory listing behind the add-report browser dialog. A report may sit
+// anywhere on the local disk; it is served read-only together with its sibling
+// files (data/*.js, images) so relative references inside the document keep
+// working — the report's own directory is the serving boundary, resolved per
+// request through the workspace registry's session stores (the route carries
+// no secrets: just opaque session/report ids).
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { readTasks } from './project.js'
+import { readSessionConfigs } from './project.js'
 
 // Reports load scripts next to themselves (gen_sweep_report emits
 // data/Round<N>.js); a wrong MIME silently kills them, so types are by
@@ -37,19 +37,19 @@ export function mimeFor(absPath) {
   return MIME_TYPES[path.extname(absPath).toLowerCase()] ?? 'application/octet-stream'
 }
 
-// Resolve <taskId>/<reportId>/<rel> across every registered workspace's task
-// store: rel is interpreted against the report file's own directory. Returns
-// { abs } on success or { error, code } for the route to translate.
-export async function resolveReportFile(registry, taskId, reportId, rel) {
+// Resolve <sessionId>/<reportId>/<rel> across every registered workspace's
+// session store: rel is interpreted against the report file's own directory.
+// Returns { abs } on success or { error, code } for the route to translate.
+export async function resolveReportFile(registry, sessionId, reportId, rel) {
   if (!registry || typeof registry.list !== 'function') {
     return { error: 'workspaceRegistry service unavailable', code: 503 }
   }
   for (const ws of registry.list()) {
     if (!ws?.path) continue
-    const { tasks } = await readTasks(ws.path).catch(() => ({ tasks: [] }))
-    const task = tasks.find((t) => t?.id === taskId)
-    if (!task) continue
-    const report = (task.reports ?? []).find((r) => r?.id === reportId)
+    const { sessions } = await readSessionConfigs(ws.path).catch(() => ({ sessions: {} }))
+    const entry = sessions[sessionId]
+    if (!entry) continue
+    const report = (entry.reports ?? []).find((r) => r?.id === reportId)
     if (!report) continue
     const base = path.dirname(path.resolve(report.path))
     // empty rel = the report document itself (the iframe's trailing-slash URL);
@@ -60,7 +60,7 @@ export async function resolveReportFile(registry, taskId, reportId, rel) {
     }
     return { abs }
   }
-  return { error: 'report not found (task or report id unknown, or the report was removed)', code: 404 }
+  return { error: 'report not found (session or report id unknown, or the report was removed)', code: 404 }
 }
 
 // One-level listing for the add-report dialog: subdirectories plus *.html
