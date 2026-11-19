@@ -11,17 +11,19 @@
 //
 // Worker-script source: the batch tools live here but the simulator workers do
 // NOT — they ship with the SmartAnaSim plugin. The upload tree / worker lookup
-// root is the workspace harnessams.json `sim_scripts_dir` (normally pointing at
-// SmartAnaSim's scripts/ directory), so cross-package npm resolution is never
-// required (dev-mount loads plugins by absolute path). HARNESSAMS_SIM_SCRIPTS_DIR
-// overrides discovery (tests, custom layouts). The tree uploads as a unit with
-// its relative layout so any worker and its shared modules resolve remotely.
+// root is the project's workspace_config.json workspace.sim_scripts_dir
+// (normally the SmartAnaSim scripts/ directory; the project root is discovered
+// by walking up from the run directory for a .harnessams store), so
+// cross-package npm resolution is never required (dev-mount loads plugins by
+// absolute path). HARNESSAMS_SIM_SCRIPTS_DIR overrides discovery (tests, custom
+// layouts). The tree uploads as a unit with its relative layout so any worker
+// and its shared modules resolve remotely.
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
-import { findWorkspaceConfig } from './server/workspace.js'
+import { resolveWorkspacePaths } from './server/settings.js'
 import { shq } from './remote.js'
 
 const execFileAsync = promisify(execFile)
@@ -29,10 +31,12 @@ const execFileAsync = promisify(execFile)
 export const DEFAULT_INCLUDES = ['point_meta.json', 'sweep_progress.json',
   'errlog.txt', 'bsub.out', 'bsub.err']
 
-// Worker scripts root (see the header comment). Throws with guidance when no
-// usable root is configured — a wrong root would upload a partial tree whose
-// remote imports break, so failing early beats a confusing remote traceback.
-export function simScriptsDir() {
+// Worker scripts root (see the header comment). `anchor` is any path inside
+// the project (a run directory); the project root is the nearest ancestor with
+// a .harnessams store. Throws with guidance when no usable root exists — a
+// wrong root would upload a partial tree whose remote imports break, so
+// failing early beats a confusing remote traceback.
+export function simScriptsDir(anchor = process.cwd()) {
   const override = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
   if (override) {
     const abs = path.resolve(override)
@@ -41,10 +45,11 @@ export function simScriptsDir() {
     }
     return abs
   }
-  const dir = readWorkspaceConfig().config.sim_scripts_dir
-  if (dir && fs.existsSync(dir) && fs.statSync(dir).isDirectory()) return path.resolve(dir)
-  throw new Error('no worker scripts root: set sim_scripts_dir in the workspace harnessams.json '
-    + '(the SmartAnaSim plugin\'s scripts/ directory) or set HARNESSAMS_SIM_SCRIPTS_DIR')
+  const { sim_scripts_dir: dir } = resolveWorkspacePaths(anchor)
+  if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) return path.resolve(dir)
+  throw new Error(`no worker scripts root: ${dir} does not exist — set workspace.sim_scripts_dir `
+    + 'in the project\'s .harnessams/workspace_config.json (the SmartAnaSim plugin\'s scripts/ '
+    + 'directory) or set HARNESSAMS_SIM_SCRIPTS_DIR')
 }
 
 // Every Python script under the worker scripts root (relative POSIX paths).
@@ -85,21 +90,14 @@ export function resolveRemoteDir(remoteRoot, remoteDir) {
   return candidate
 }
 
-// Workspace config for the optional remote defaults, shared with the host-half
-// services (server/workspace.js resolves relative path fields the same way).
-export function readWorkspaceConfig() {
-  const ws = findWorkspaceConfig()
-  if (!ws) return { config: {}, dir: null }
-  return { config: ws.config, dir: path.dirname(ws.configPath) }
-}
-
-export function defaultRemotePython() {
-  return readWorkspaceConfig().config.remote_python || 'python3'
-}
+// Remote interpreter defaults (the retired harnessams.json remote_python /
+// remote_node / remote_scripts_dir keys are gone — per-call args and these
+// constants are the whole surface now).
+export const DEFAULT_REMOTE_PYTHON = 'python3'
+export const DEFAULT_REMOTE_NODE = 'node'
 
 export function defaultRemoteScriptsDir(remoteRoot) {
-  const configured = readWorkspaceConfig().config.remote_scripts_dir
-  return configured || remoteJoin(remoteRoot, '.harnessams', 'scripts')
+  return remoteJoin(remoteRoot, '.harnessams', 'scripts')
 }
 
 export function sanitizeRel(rel) {

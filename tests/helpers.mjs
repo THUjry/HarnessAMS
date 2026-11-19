@@ -81,20 +81,6 @@ export const callGet = (handler, url) => callRoute(handler, getReq(url))
 export const callPost = (handler, url, payload) => callRoute(handler, postReq(url, payload))
 export const callPut = (handler, url, payload) => callRoute(handler, putReq(url, payload))
 
-// ---- remote-machines env override -----------------------------------------
-// readRemoteMachines() reads the harnessams.json remote_machines map (or the
-// HARNESSAMS_REMOTE_MACHINES inline-JSON env override, which tests use to stay
-// hermetic); setRemoteMachines swaps that override and returns a restore fn.
-export function setRemoteMachines(map) {
-  const prev = process.env.HARNESSAMS_REMOTE_MACHINES
-  if (map === undefined) delete process.env.HARNESSAMS_REMOTE_MACHINES
-  else process.env.HARNESSAMS_REMOTE_MACHINES = JSON.stringify(map)
-  return () => {
-    if (prev === undefined) delete process.env.HARNESSAMS_REMOTE_MACHINES
-    else process.env.HARNESSAMS_REMOTE_MACHINES = prev
-  }
-}
-
 // ---- client.js static contract --------------------------------------------
 // The client half is a combo-loaded classic script (no ESM import), so its
 // contract is asserted against the source text.

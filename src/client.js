@@ -60,20 +60,19 @@ window.__ModuleLoader__.load({
         'common.collapse': '收起',
         'console.title': 'HarnessAMS 控制台',
         'console.infoFailed': 'info 读取失败：{msg}',
-        'console.workspace': '工作区：{path}',
-        'console.noWorkspace': '未找到 harnessams-workspace — 服务器检查需要 harnessams.json',
+        'console.config': '项目配置＝各工作区自己的 .harnessams/workspace_config.json（原家族 harnessams.json 已退役）',
         'guide.btn': '使用引导',
         'guide.caption': '第一次使用 HarnessAMS？从工作方式、提交作业到报告查看，一条引导走完。',
         'guide.title': '开始使用 HarnessAMS',
         'guide.back': '返回',
         'guide.done': '开始使用',
         'guide.s1t': '工作方式：本地还是远程',
-        'guide.s1': '本地 — spectre 本地闭环（装配 → 检查 → 仿真 → 解析 → 报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置；本页「机器」卡展示各别名，远端根路径配在 harnessams.json 的 remote_machines 段。',
+        'guide.s1': '本地 — spectre 本地闭环（装配 → 检查 → 仿真 → 解析 → 报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置；本页「机器」卡展示各别名，远端根路径是各项目自己的设置（项目总览设置表「远端根路径」行）。',
         'guide.s2t': '提交作业方式',
         'guide.s2': '直接提交 — 仿真在本机前台运行（spectre 本地扫掠）。batch — 经 dsh-ssh 提交 LSF 队列（batch_submit / batch_poll / batch_fetch，按机器别名直发）。',
         'guide.s2slurm': 'slurm —— 暂不支持。',
         'guide.s3t': '工作区位置',
-        'guide.s3': '本地 — harnessams.json 是唯一路径来源（workspace_root、PDK、回收站、脚本目录、remote_machines 远端根路径）。远程 — 路径即远端真实路径（dsh-ssh 按别名直达，无本地镜像）。',
+        'guide.s3': '配置＝各工作区自己的 .harnessams/workspace_config.json 单文件（运行设置含远端根路径、脚本目录、plotly、回收站）。远程 — 路径即远端真实路径（dsh-ssh 按别名直达，无本地镜像）。',
         'guide.s4t': '仿真插件套件',
         'guide.s4': 'SmartAnaSim 单包安装即注册全部 11 个工具：spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、batch（通用 LSF 提交 / 轮询 / 取回）、共享（分析 / 进度 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
@@ -84,11 +83,8 @@ window.__ModuleLoader__.load({
         'hosts.colAlias': '别名',
         'hosts.colHost': '主机',
         'hosts.colAuth': '认证',
-        'hosts.colRoot': '远端根路径',
-        'hosts.rootNone': '未配置',
-        'hosts.rootHint': '在 harnessams.json 的 remote_machines 段为该别名配置远端根路径',
         'hosts.empty': 'dsh-ssh 中还没有主机 — 请先在 dsh-ssh 面板里添加。',
-        'hosts.hint': '主机与凭据在 dsh-ssh 插件里管理；此处只读展示别名与远端根路径（remote_machines）。',
+        'hosts.hint': '主机与凭据在 dsh-ssh 插件里管理；此处只读展示注册表。各项目的远端根路径在项目总览的设置表里配置（随项目走）。',
         'chk.running': '检查中…',
         'chk.colItem': '检查项',
         'chk.colResult': '结果',
@@ -115,12 +111,6 @@ window.__ModuleLoader__.load({
         'assets.colRoute': '服务路由',
         'assets.colWsCopies': '工作区副本',
         'assets.noCopies': '（工作区无副本）',
-        'disk.title': '磁盘占用（本地工作区）',
-        'disk.refresh': '刷新占用',
-        'disk.colDir': '目录',
-        'disk.colSize': '大小',
-        'disk.colFiles': '文件数',
-        'disk.empty': '（工作区为空或未配置）',
         'tasks.noSession': '无活动会话',
         'tasks.loadingProject': '正在加载项目…',
         'tasks.noProject': '此会话没有对应项目。',
@@ -173,8 +163,8 @@ window.__ModuleLoader__.load({
         'check.badPair': '“{p}”须为正数且下限 < 上限',
         'pset.title': '项目设置',
         'pset.dirLabel': '工作目录',
-        'pset.dirLocalHint': '本地模式：自检产物写入本地工作区 selfcheck/ 目录',
-        'pset.dirRemoteRel': '相对路径按 $ROOT/ 解析',
+        'pset.dirLocalHint': '本地模式：自检产物写入本地 .harnessams/selfcheck/ 目录',
+        'pset.dirRemoteRel': '相对路径按远端根路径解析',
         'pset.browse': '浏览',
         'pset.browseTitle': '浏览远程工作目录',
         'pset.browsePickDir': '目录（点名称进入，或点「选择」使用该目录）',
@@ -185,6 +175,13 @@ window.__ModuleLoader__.load({
         'pset.colValue': '当前值',
         'pset.colMode': '工作模式',
         'pset.colMachine': '远程机器',
+        'pset.colRoot': '远端根路径',
+        'pset.rootHint': '绝对远端路径（以 / 开头），围栏工作目录',
+        'pset.rootMissing': '先在设置表填好「远端根路径」再浏览',
+        'pset.unsaved': '未保存',
+        'pset.confirmBtn': '确认',
+        'pset.confirming': '写入中…',
+        'pset.stagedHint': '表格有未确认修改（状态列红色）；「确认」写入 workspace_config.json 并同步 AGENTS.md',
         'pset.colSched': '调度器',
         'pset.colSim': '仿真器',
         'pset.colCompLocal': '本地计算',
@@ -278,20 +275,19 @@ window.__ModuleLoader__.load({
         'common.collapse': 'Show less',
         'console.title': 'HarnessAMS Console',
         'console.infoFailed': 'info failed: {msg}',
-        'console.workspace': 'Workspace: {path}',
-        'console.noWorkspace': 'harnessams-workspace not found — server checks need harnessams.json',
+        'console.config': 'Project config = each workspace\'s own .harnessams/workspace_config.json (the family harnessams.json is retired)',
         'guide.btn': 'Guide',
         'guide.caption': 'First time here? One guided pass over working modes, job submission and reports.',
         'guide.title': 'Get started with HarnessAMS',
         'guide.back': 'Back',
         'guide.done': 'Get started',
         'guide.s1t': 'Working mode: local or remote',
-        'guide.s1': 'Local — the spectre loop runs on this machine (assemble → check → simulate → parse → report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured in the dsh-ssh plugin; this page\'s “Machines” card lists the aliases, and each remote root is configured in harnessams.json\'s remote_machines section.',
+        'guide.s1': 'Local — the spectre loop runs on this machine (assemble → check → simulate → parse → report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured in the dsh-ssh plugin; this page\'s “Machines” card lists the aliases, and each remote root is a per-project setting (the “Remote root” row of the project overview settings table).',
         'guide.s2t': 'Job submission',
         'guide.s2': 'Direct — the simulation runs on this machine in the foreground (local spectre sweeps). batch — submit to an LSF queue over dsh-ssh (batch_submit / batch_poll / batch_fetch, sent straight to the machine alias).',
         'guide.s2slurm': 'slurm — not supported yet.',
         'guide.s3t': 'Workspace location',
-        'guide.s3': 'Local — harnessams.json is the single source of paths (workspace_root, PDK, trash, script dirs, remote_machines roots). Remote — paths are the real remote paths (dsh-ssh goes by alias, no local mirror).',
+        'guide.s3': 'Config = each workspace\'s own single file .harnessams/workspace_config.json (run settings incl. the remote root, script dir, plotly, trash). Remote — paths are the real remote paths (dsh-ssh goes by alias, no local mirror).',
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'SmartAnaSim registers all 11 tools on install: spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), batch (generic LSF submit / poll / fetch), shared (analysis / progress / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
@@ -302,11 +298,8 @@ window.__ModuleLoader__.load({
         'hosts.colAlias': 'alias',
         'hosts.colHost': 'host',
         'hosts.colAuth': 'auth',
-        'hosts.colRoot': 'remote root',
-        'hosts.rootNone': 'not configured',
-        'hosts.rootHint': 'set this alias\'s remote root in harnessams.json\'s remote_machines section',
         'hosts.empty': 'no hosts configured in dsh-ssh yet — add one in its panel.',
-        'hosts.hint': 'Hosts and credentials are managed by the dsh-ssh plugin; this card is a read-only view of aliases and remote roots (remote_machines).',
+        'hosts.hint': 'Hosts and credentials are managed by the dsh-ssh plugin; this card is a read-only view of the registry. Each project\'s remote root is configured in the project overview settings table (it belongs to the project).',
         'chk.running': 'Running…',
         'chk.colItem': 'Item',
         'chk.colResult': 'Result',
@@ -333,12 +326,6 @@ window.__ModuleLoader__.load({
         'assets.colRoute': 'Served at',
         'assets.colWsCopies': 'Workspace copies',
         'assets.noCopies': '(no workspace copies)',
-        'disk.title': 'Disk usage (local workspace)',
-        'disk.refresh': 'Refresh usage',
-        'disk.colDir': 'Directory',
-        'disk.colSize': 'Size',
-        'disk.colFiles': 'Files',
-        'disk.empty': '(workspace empty or not configured)',
         'tasks.noSession': 'no active session',
         'tasks.loadingProject': 'Loading project…',
         'tasks.noProject': 'No project for this session.',
@@ -391,8 +378,8 @@ window.__ModuleLoader__.load({
         'check.badPair': '"{p}" must be positive numbers with min < max',
         'pset.title': 'Project settings',
         'pset.dirLabel': 'Working directory',
-        'pset.dirLocalHint': 'local mode: self-check artifacts go under the local workspace\'s selfcheck/ directory',
-        'pset.dirRemoteRel': 'relative paths resolve under $ROOT/',
+        'pset.dirLocalHint': 'local mode: self-check artifacts go under the local .harnessams/selfcheck/ directory',
+        'pset.dirRemoteRel': 'relative paths resolve under the remote root',
         'pset.browse': 'Browse',
         'pset.browseTitle': 'Browse remote working directory',
         'pset.browsePickDir': 'Directories (click a name to enter, or "Select" to use it)',
@@ -403,6 +390,13 @@ window.__ModuleLoader__.load({
         'pset.colValue': 'Value',
         'pset.colMode': 'Mode',
         'pset.colMachine': 'Machine',
+        'pset.colRoot': 'Remote root',
+        'pset.rootHint': 'absolute remote path (starts with /); fences the working directory',
+        'pset.rootMissing': 'fill in the "Remote root" row before browsing',
+        'pset.unsaved': 'unsaved',
+        'pset.confirmBtn': 'Confirm',
+        'pset.confirming': 'Writing…',
+        'pset.stagedHint': 'The table has unconfirmed edits (red status cells); "Confirm" writes workspace_config.json and syncs AGENTS.md',
         'pset.colSched': 'Scheduler',
         'pset.colSim': 'Simulator',
         'pset.colCompLocal': 'Local compute',
@@ -557,6 +551,15 @@ window.__ModuleLoader__.load({
       if (!r.ok) throw new Error(body?.error ?? url + ' -> ' + r.status)
       return body
     }
+
+    // The ONE funnel the Overview buttons use: POST /api/tool with an action
+    // (run | status | env | save_agentsmd) plus optional pending settings —
+    // the same harnessams_selfcheck surface a conversational agent calls.
+    const callToolRoute = (body) => fetchJson(API + '/tool', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    })
 
     class Boundary extends React.Component {
       constructor(props) { super(props); this.state = { err: null } }
@@ -746,13 +749,10 @@ window.__ModuleLoader__.load({
           h('button', { className: 'hams-btn hams-btn-sm', style: { marginLeft: 'auto' }, title: tr('guide.title'), onClick: openGuide }, tr('guide.btn'))),
         h('div', { className: 'hams-meta' },
           infoErr ? h('span', { className: 'hams-bad' }, tr('console.infoFailed', { msg: infoErr }))
-            : info ? (info.workspace
-              ? tr('console.workspace', { path: info.workspace.root }) + (info.tiers?.project === 'workspaceRegistry mapped' ? '' : ' — ' + info.tiers?.project)
-              : tr('console.noWorkspace'))
-            : tr('common.loading')),
+            : (info ? tr('console.config') + (info.tiers?.project === 'workspaceRegistry mapped' ? '' : ' — ' + info.tiers?.project)
+              : tr('common.loading'))),
         h(Boundary, null, h(MachinesSection, null)),
         h(Boundary, null, h(AssetsSection, null)),
-        h(Boundary, null, h(DiskSection, null)),
         h(Boundary, null, h(DisplaySettingsSection, null)),
       )
     }
@@ -1139,11 +1139,10 @@ window.__ModuleLoader__.load({
         h('div', { className: 'hams-dim' }, tr('set.toolviewHint')))
     }
 
-    // Machines (tier 1): the dsh-ssh host registry read through /api/machines,
-    // with each alias's configured remote root (harnessams.json remote_machines).
-    // Host credentials and connections live in dsh-ssh itself — here we only show
-    // what is configured; an alias without a remote root renders the
-    // add-remote_machines hint instead of a root path.
+    // Machines (tier 1): the dsh-ssh host registry read through /api/machines —
+    // pure registry facts (the remote root is a per-project setting since the
+    // 2026-11-19 config consolidation, not a machine column). Host credentials
+    // and connections live in dsh-ssh itself.
     function MachinesSection() {
       const [machines, setMachines] = useState(null)
       useEffect(() => {
@@ -1157,14 +1156,11 @@ window.__ModuleLoader__.load({
             : h('span', { className: 'hams-badge hams-badge-bad', title: machines.reason ?? '' }, tr('hosts.missing'))),
         ),
         machines?.installed && (machines.machines?.length ?? 0) > 0 && h('table', { className: 'hams-table' },
-          h('thead', null, h('tr', null, [tr('hosts.colAlias'), tr('hosts.colHost'), tr('hosts.colAuth'), tr('hosts.colRoot')].map((c) => h('th', null, c)))),
+          h('thead', null, h('tr', null, [tr('hosts.colAlias'), tr('hosts.colHost'), tr('hosts.colAuth')].map((c) => h('th', null, c)))),
           h('tbody', null, machines.machines.map((m) => h('tr', { key: m.id },
             h('td', null, esc(m.name || m.host)),
             h('td', null, esc((m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22))),
-            h('td', null, esc(m.auth ?? '') + (m.auth === 'key' && !m.keyReady ? ' ⚠' : '')),
-            h('td', null,
-              m.configured ? esc(m.remoteRoot ?? '')
-                : h('span', { className: 'hams-warn', title: tr('hosts.rootHint') }, tr('hosts.rootNone'))))))),
+            h('td', null, esc(m.auth ?? '') + (m.auth === 'key' && !m.keyReady ? ' ⚠' : '')))))),
         machines?.installed && (machines.machines?.length ?? 0) === 0 && h('div', { className: 'hams-dim' }, tr('hosts.empty')),
         h('div', { className: 'hams-dim' }, tr('hosts.hint')),
       )
@@ -1204,23 +1200,6 @@ window.__ModuleLoader__.load({
                 ? h('span', { className: 'hams-dim' }, tr('assets.noCopies'))
                 : p.copies.map((c) => h('div', { key: c.path, title: c.path }, esc(c.path), ' — ', fmtBytes(c.bytes))))))),
         ),
-      )
-    }
-
-    function DiskSection() {
-      const [data, setData] = useState(null)
-      const [err, setErr] = useState(null)
-      const refresh = () => { setData(null); fetchJson(API + '/disk').then(setData).catch((e) => setErr(String(e.message ?? e))) }
-      useEffect(refresh, [])
-      return h('section', { className: 'hams-section' },
-        h('h2', null, tr('disk.title')),
-        h('button', { className: 'hams-btn', onClick: refresh }, tr('disk.refresh')),
-        err && h('div', { className: 'hams-err' }, err),
-        data && h('table', { className: 'hams-table' },
-          h('thead', null, h('tr', null, [tr('disk.colDir'), tr('disk.colSize'), tr('disk.colFiles')].map((c) => h('th', null, c)))),
-          h('tbody', null, data.entries.map((e) => h('tr', { key: e.name },
-            h('td', null, e.name), h('td', null, fmtBytes(e.bytes)), h('td', null, String(e.files)))))),
-        data && data.entries.length === 0 && h('div', { className: 'hams-dim' }, tr('disk.empty')),
       )
     }
 
@@ -1432,6 +1411,8 @@ window.__ModuleLoader__.load({
         options: [['local', 'pset.mode.local'], ['remote', 'pset.mode.remote']] },
       { id: 'machine_id', labelKey: 'pset.colMachine', column: 'machine', kind: 'machine',
         visible: (s) => s.run_mode === 'remote' },
+      { id: 'remote_root', labelKey: 'pset.colRoot', column: 'remote_root', kind: 'text',
+        visible: (s) => s.run_mode === 'remote' },
       { id: 'scheduler', labelKey: 'pset.colSched', column: 'scheduler',
         visible: (s) => s.run_mode === 'remote' && s.simulator === 'spectre',
         options: [['lsf', 'pset.sched.lsf'], ['direct', 'pset.sched.direct']] },
@@ -1458,20 +1439,29 @@ window.__ModuleLoader__.load({
       return { state: 'ok', text: steps[steps.length - 1].result, title }
     }
 
-    function SettingsTable({ settings, machines, run, onChange }) {
-      const cols = SETTING_COLS.filter((c) => !c.visible || c.visible(settings))
+    // The table edits STAGE into a draft (nothing hits the wire per cell);
+    // while the draft differs from the saved settings every status cell shows a
+    // red "unsaved" marker (the saved verdicts are stale by definition) until
+    // the Confirm button commits the whole object through POST /api/tool.
+    function SettingsTable({ draft, machines, run, onChange, dirty }) {
+      const cols = SETTING_COLS.filter((c) => !c.visible || c.visible(draft))
       const settingCell = (c) => {
         if (c.kind === 'machine') {
-          const known = machines.some((m) => m.id === settings.machine_id)
-          return h('select', { className: 'hams-select', value: settings.machine_id ?? '',
+          const known = machines.some((m) => m.id === draft.machine_id)
+          return h('select', { className: 'hams-select', value: draft.machine_id ?? '',
             onChange: (e) => onChange('machine_id', e.target.value || null) },
             h('option', { value: '' }, tr('pset.noMachine')),
-            (known ? [] : settings.machine_id
-              ? [h('option', { key: 'kept', value: settings.machine_id }, esc(settings.machine_id) + ' ?')] : []),
+            (known ? [] : draft.machine_id
+              ? [h('option', { key: 'kept', value: draft.machine_id }, esc(draft.machine_id) + ' ?')] : []),
             machines.map((m) => h('option', { key: m.id, value: m.id },
               esc(m.name || m.host) + (m.host && m.host !== m.name ? ' · ' + esc(m.host) : ''))))
         }
-        return h('select', { className: 'hams-select', value: settings[c.id] ?? '',
+        if (c.kind === 'text') {
+          return h('input', { className: 'hams-input', type: 'text', spellCheck: false,
+            placeholder: '/home/…', title: tr('pset.rootHint'),
+            value: draft[c.id] ?? '', onChange: (e) => onChange(c.id, e.target.value.trim() || null) })
+        }
+        return h('select', { className: 'hams-select', value: draft[c.id] ?? '',
           onChange: (e) => onChange(c.id, e.target.value) },
           c.options.map(([v, k]) => h('option', { key: v, value: v }, tr(k))))
       }
@@ -1480,6 +1470,9 @@ window.__ModuleLoader__.load({
           ?? (c.column === 'run_mode' && run?.summary
             ? { state: run.summary.ok ? 'ok' : 'bad', text: tr(run.summary.ok ? 'selfchk.summaryOk' : 'selfchk.summaryFail'), title: '' }
             : null)
+        if (dirty) {
+          return h('td', { key: c.id, className: 'hams-bad', title: tr('pset.stagedHint') }, '● ' + tr('pset.unsaved'))
+        }
         if (!agg) return h('td', { key: c.id, className: 'hams-faint' }, '—')
         const cls = agg.state === 'ok' ? 'hams-good' : agg.state === 'warn' ? 'hams-warn' : agg.state === 'skip' ? 'hams-faint' : 'hams-bad'
         const icon = agg.state === 'ok' ? '✅' : agg.state === 'warn' ? '⚠' : agg.state === 'skip' ? '⏭' : '✗'
@@ -1535,10 +1528,11 @@ window.__ModuleLoader__.load({
     // straight from the snapshot (silent revalidate, no blank flash) while a
     // different project simply misses and refetches clean.
     const overviewMemory = { path: null, project: null, checksInfo: null }
-    const selfcheckMemory = { path: null, settings: null, run: null, envRun: null }
+    const selfcheckMemory = { path: null, settings: null, draft: null, run: null, envRun: null }
 
     function ProjectSelfcheck({ sessionId, info, projectPath }) {
       const [settings, setSettings] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.settings : null))
+      const [draft, setDraft] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.draft : null))
       const [settingsError, setSettingsError] = useState(null)
       const [run, setRun] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.run : null))
       const [startError, setStartError] = useState(null)
@@ -1555,10 +1549,14 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         let alive = true
         const adopt = !!projectPath && selfcheckMemory.path === projectPath
-        if (!adopt) { setSettings(null); setSettingsError(null); setRun(null); setStartError(null); setEnvRun(null) }
+        if (!adopt) { setSettings(null); setDraft(null); setSettingsError(null); setRun(null); setStartError(null); setEnvRun(null) }
         if (!sessionId) return
         fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId))
-          .then((r) => { if (alive) setSettings((prev) => (JSON.stringify(prev) === JSON.stringify(r.settings) ? prev : r.settings)) })
+          .then((r) => {
+            if (!alive) return
+            setSettings((prev) => (JSON.stringify(prev) === JSON.stringify(r.settings) ? prev : r.settings))
+            setDraft((prev) => (prev == null || JSON.stringify(prev) === JSON.stringify(r.settings) ? r.settings : prev))
+          })
           .catch((e) => { if (alive && !adopt) setSettingsError(String(e.message ?? e)) })
         // No restore fetch here: a global "latest run" surface would bleed
         // verdicts across projects. The table only fills from a run THIS
@@ -1571,9 +1569,10 @@ window.__ModuleLoader__.load({
         if (!projectPath) return
         selfcheckMemory.path = projectPath
         selfcheckMemory.settings = settings
+        selfcheckMemory.draft = draft
         selfcheckMemory.run = run
         selfcheckMemory.envRun = envRun
-      }, [projectPath, settings, run, envRun])
+      }, [projectPath, settings, draft, run, envRun])
 
       const runId = run?.id ?? null
       const runStatus = run?.status ?? null
@@ -1581,7 +1580,7 @@ window.__ModuleLoader__.load({
         if (runStatus !== 'running') return
         let alive = true
         const refetch = () => {
-          fetchJson(API + '/selfcheck?id=' + encodeURIComponent(runId))
+          callToolRoute({ sessionId, action: 'status', run_id: runId })
             .then((r) => { if (alive && r?.run?.id === runId) setRun(r.run) })
             .catch(() => { /* keep the last snapshot */ })
         }
@@ -1595,84 +1594,88 @@ window.__ModuleLoader__.load({
         }
       }, [runId, runStatus])
 
-      const updateSetting = async (key, value) => {
-        const prev = settings
-        const next = { ...prev, [key]: value }
-        // The machine column only renders in remote mode, so a remote switch with
-        // machine_id unset would PUT-400 and roll straight back to local — the UI
-        // could never reach remote. Auto-pick the first machine on the way in.
-        if (key === 'run_mode' && value === 'remote' && !next.machine_id && machines.length) {
-          next.machine_id = machines[0].id
-        }
-        setSettings(next); setSettingsError(null)
-        try {
-          const r = await fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId),
-            { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) })
-          setSettings(r.settings ?? next)
-        } catch (e) {
-          setSettings(prev) // revert the optimistic cell
-          setSettingsError(tr('pset.saveFailed', { msg: String(e.message ?? e) }))
-        }
+      // staged edits: nothing leaves the browser until Confirm (or one of the
+      // action buttons, which also commit pending edits so UI/config/AGENTS.md
+      // can never diverge)
+      const updateSetting = (key, value) => {
+        setDraft((prev) => {
+          const next = { ...prev, [key]: value }
+          // The machine column only renders in remote mode, so a remote switch
+          // with machine_id unset would fail confirmation — auto-pick the first
+          // machine on the way in.
+          if (key === 'run_mode' && value === 'remote' && !next.machine_id && machines.length) {
+            next.machine_id = machines[0].id
+          }
+          return next
+        })
+        setSettingsError(null)
+      }
+
+      const dirty = !!draft && !!settings && JSON.stringify(draft) !== JSON.stringify(settings)
+      // pending edits ride along on every action (strict UI = config = AGENTS.md)
+      const pendingSettings = () => (dirty ? draft : undefined)
+
+      const commitOk = (r) => {
+        if (r && dirty) setSettings({ ...draft })
       }
 
       const startRun = async () => {
         setStartError(null)
+        const settingsArg = pendingSettings()
         try {
-          const r = await fetchJson(API + '/selfcheck', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId, lang: effectiveLang() }),
-          })
-          setRun({ id: r.runId, status: 'running', steps: [], diagnoses: [], scope: null })
+          const r = await callToolRoute({ sessionId, action: 'run', lang: effectiveLang(), settings: settingsArg })
+          commitOk(r)
+          setRun({ id: r.run_id, status: 'running', steps: [], diagnoses: [], scope: null })
         } catch (e) {
           setStartError(tr('selfchk.startFailed', { msg: String(e.message ?? e) }))
           setCheckAllPending(false)
         }
       }
 
-      // "list local environment" — display only (Node/Python rows carry their
-      // absolute executable paths); the values enter AGENTS.md via the save
-      // buttons, not via this listing.
+      // "list local environment" — the only read-only button (Node/Python rows
+      // carry their absolute executable paths); the values enter AGENTS.md via
+      // the save buttons, not via this listing.
       const runLocalEnv = async () => {
         setEnvRun({ status: 'running', results: null })
         try {
-          const r = await fetchJson(API + '/checks/run?sessionId=' + encodeURIComponent(sessionId) + '&check=local')
-          setEnvRun({ status: 'done', results: r.results })
+          const r = await callToolRoute({ sessionId, action: 'env' })
+          setEnvRun({ status: 'done', results: r.checks })
         } catch (e) {
           setEnvRun({ status: 'failed', error: String(e.message ?? e) })
         }
       }
 
-      // Measured-values sync into the workspace AGENTS.md config table (POST
-      // /api/agents-md rewrites the marked block; a first-fill prompt from the
-      // .harnessams-creation template is removed with the rewrite).
+      // save-to-AGENTS.md AND the table's Confirm button: writes any pending
+      // settings first, then rewrites the marked AGENTS.md block from measured
+      // values (a first-fill prompt from the .harnessams-creation template is
+      // removed with the rewrite).
       const saveAgents = async () => {
         setSaveState({ status: 'running' })
         try {
-          const r = await fetchJson(API + '/agents-md', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ sessionId }),
-          })
+          const r = await callToolRoute({ sessionId, action: 'save_agentsmd', settings: pendingSettings() })
+          commitOk(r)
           setSaveState({ status: 'done', path: r.path })
         } catch (e) {
           setSaveState({ status: 'failed', error: String(e.message ?? e) })
+          setSettingsError(tr('pset.saveFailed', { msg: String(e.message ?? e) }))
         }
       }
 
       // "check all & save": once THIS button's self-check run lands, write the
-      // measured values once (the flag keeps ordinary one-click runs save-free).
+      // measured values once (the flag keeps ordinary one-click runs save-free;
+      // the finalize-side auto-sync already refreshed AGENTS.md anyway).
       useEffect(() => {
         if (!checkAllPending || run?.status !== 'done') return
         setCheckAllPending(false)
         void saveAgents()
       }, [checkAllPending, run?.status])
 
-      const remote = settings?.run_mode === 'remote'
-      const machine = machines.find((m) => m.id === settings?.machine_id) ?? null
-      const dirPreview = String(settings?.remote_dir ?? '').startsWith('/')
-        ? settings.remote_dir
-        : (machine?.remotePath ? String(machine.remotePath).replace(/\/+$/, '') + '/' + settings?.remote_dir : '$ROOT/' + (settings?.remote_dir ?? ''))
+      const remote = draft?.run_mode === 'remote'
+      const machine = machines.find((m) => m.id === draft?.machine_id) ?? null
+      const root = String(draft?.remote_root ?? '').replace(/\/+$/, '')
+      const dirPreview = String(draft?.remote_dir ?? '').startsWith('/')
+        ? draft.remote_dir
+        : (root ? root + '/' + (draft?.remote_dir ?? '') : '$ROOT/' + (draft?.remote_dir ?? ''))
       const running = run?.status === 'running'
       const envRunning = envRun?.status === 'running'
       const saving = saveState?.status === 'running'
@@ -1680,8 +1683,8 @@ window.__ModuleLoader__.load({
       return h('div', { style: { marginTop: '10px' } },
         h('div', { className: 'hams-dim' }, h('b', null, tr('pset.title')), ' · ', tr('selfchk.title')),
         settingsError && h('div', { className: 'hams-err' }, esc(settingsError)),
-        !settings && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
-        settings && h('div', null,
+        !draft && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
+        draft && h('div', null,
           // working directory: always visible — "local" read-only, or the bound
           // remote directory picked through the dsh-ssh directory browser (the
           // free-typed text input is retired; the full-path preview stays)
@@ -1690,13 +1693,20 @@ window.__ModuleLoader__.load({
             remote
               ? h('span', { className: 'hams-dim', title: dirPreview,
                   style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                esc(settings.remote_dir || '—'))
+                esc(draft.remote_dir || '—'))
               : h('span', { className: 'hams-dim' }, 'local · ' + tr('pset.dirLocalHint')),
             remote && h('button', { className: 'hams-btn hams-btn-sm', style: { flexShrink: 0 },
-              disabled: !machine, title: tr('pset.browseTitle'), onClick: () => setBrowseOpen(true) }, tr('pset.browse'))),
+              disabled: !machine || !root, title: root ? tr('pset.browseTitle') : tr('pset.rootMissing'),
+              onClick: () => setBrowseOpen(true) }, tr('pset.browse'))),
           remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
             '→ ', esc(dirPreview), ' · ', tr('pset.dirRemoteRel')),
-          h(SettingsTable, { settings, machines, run, onChange: updateSetting }),
+          h(SettingsTable, { draft, machines, run, onChange: updateSetting, dirty }),
+          // confirm row: staged edits land in workspace_config.json (and AGENTS.md
+          // re-syncs) only here — red "unsaved" cells mark the pending state
+          h('div', { className: 'hams-row' },
+            h('button', { className: 'hams-btn hams-btn-sm', disabled: saving || running || !sessionId, onClick: () => void saveAgents() },
+              saving ? tr('pset.confirming') : tr('pset.confirmBtn')),
+            dirty && h('span', { className: 'hams-bad' }, tr('pset.stagedHint'))),
           // the button row: [save to AGENTS.md] [one-click self-check] [list
           // local environment] [check all & save] — the project-settings block
           // is the Overview's single entry since the health-check panel retired
@@ -1716,10 +1726,10 @@ window.__ModuleLoader__.load({
           saveState?.status === 'failed' && h('div', { className: 'hams-err' }, esc(tr('agents.saveFailed', { msg: saveState.error ?? '' }))),
           envRun?.status === 'failed' && h('div', { className: 'hams-err' }, esc(envRun.error)),
           envRun?.status === 'done' && h(LocalEnvResults, { run: envRun }),
-          browseOpen && remote && machine && h(RemoteDirBrowse, {
-            sessionId, machineId: machine.id, rootDir: machine.remotePath,
+          browseOpen && remote && machine && root && h(RemoteDirBrowse, {
+            sessionId, machineId: machine.id, rootDir: root,
             onCancel: () => setBrowseOpen(false),
-            onPick: (dir) => { setBrowseOpen(false); if (dir && dir !== settings.remote_dir) void updateSetting('remote_dir', dir) },
+            onPick: (dir) => { setBrowseOpen(false); if (dir && dir !== draft.remote_dir) updateSetting('remote_dir', dir) },
           }),
           h(SelfcheckSteps, { run }),
           run?.summary && h('div', { className: 'hams-row' },

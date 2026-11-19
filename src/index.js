@@ -1,51 +1,47 @@
 // HarnessAMS top-level plugin host half: the /harnessams/* API surface backing the
 // three-tier client UI (see client.js for the UI itself):
-//   tier 1 (global console page) — machines (the dsh-ssh host registry with each
-//            alias's configured remote root), digital assets, disk usage;
-//   tier 2 (project = DSH workspace) — session-to-workspace mapping + per-project task
-//            store at <workspace>/.harnessams/tasks.json;
-//   tier 3 (task sidebar) — the task store API plus the Overview project
-//            settings / self-check surface, consumed per active session: the local
-//            environment rows, the AGENTS.md project-config sync (POST
-//            /api/agents-md, server/agentsmd.js) and the remote working-directory
-//            browser (GET /api/remote-browse, server/remotebrowse.js).
+//   tier 1 (global console page) — machines (the dsh-ssh host registry), digital assets;
+//   tier 2 (project = DSH workspace) — session-to-workspace mapping + the per-session
+//            config store at <workspace>/.harnessams/sessions.json (D-008);
+//   tier 3 (session sidebar) — the Overview project settings / self-check surface:
+//            the four buttons and the settings table all land on ONE tool,
+//            harnessams_selfcheck (tools/selfcheck.js), through POST /api/tool —
+//            the same tool a conversational agent calls in-chat (its `settings`
+//            argument is the single config write face, workspace_config.json).
+//            The remote working-directory browser (GET /api/remote-browse) and
+//            the dashboard report viewer (/dash/<sessionId>/…) are separate
+//            read surfaces.
 // Routes are not token-gated by the DSH web server (verified): only local
 // management reads/writes live here — no credentials, no remote-execution passthrough.
-// The Dashboard viewer is display-only: it serves task-registered local HTML reports
-// read-only (/dash/<taskId>/<reportId>/…, bounded by each report's own directory) and
-// a one-level listing for the add-report picker (/api/browse) — no file writes.
-// Remote connectivity is delegated entirely to @linxin666/dsh-ssh (ssh_* tools by
-// alias, zero gating): the remote dir picker runs ssh_exec from the Overview,
-// the user's interactive shell is dsh-ssh's own terminal panel, and each
-// alias's remote root comes from the workspace harnessams.json `remote_machines`
-// map (merged into the machine records by listMachines in remote.js).
-// Model tools: the generic remote batch channel (batch_submit/batch_poll/batch_fetch;
-// worker scripts come from the workspace sim_scripts_dir) and the simulator-agnostic
-// analysis/ops tools (sim_analysis/sim_progress/safe_trash; the analysis pipeline is
-// pure JS in tools/sim_analysis.js, safe_trash in trash.js).
+// The Dashboard viewer is display-only: it serves session-registered local HTML
+// reports read-only (bounded by each report's own directory) and a one-level
+// listing for the add-report picker (/api/browse) — no file writes.
+// Remote connectivity is delegated entirely to @linxin666/dsh-ssh (ssh_* tools
+// by alias, zero gating); each project's remote root is its own setting
+// (workspace_config.json settings.remote_root — the family harnessams.json and
+// its remote_machines map are retired, 2026-11-19 D-009).
+// Model tools: harnessams_selfcheck (self-check + config), the generic remote
+// batch channel (batch_submit/batch_poll/batch_fetch; worker scripts come from
+// the project's workspace.sim_scripts_dir) and the simulator-agnostic
+// analysis/ops tools (sim_analysis/sim_progress/safe_trash).
 // The session tool cards read two extra read-only endpoints (/api/progress and
 // /api/progress-summary, server/progress.js) to draw the simulation progress
 // cards inside the conversation — no execution surface, pure file reads.
 import fsp from 'node:fs/promises'
 import os from 'node:os'
-import path from 'node:path'
-import { findWorkspaceConfig } from './server/workspace.js'
-import { runLocalChecks } from './server/checks.js'
-import { localDiskUsage, workspaceDirs } from './server/disk.js'
 import { sessionProject, readSessionConfigs, writeSessionConfig } from './server/project.js'
 import { isForkSession } from './server/forkdetect.js'
 import { remoteMachinesStatus, fetchMachines, checkableMachines } from './server/machines.js'
-import { readSettings, validateSettings, writeSettings } from './server/settings.js'
+import { readSettings } from './server/settings.js'
 import { readCheckParams } from './server/checkparams.js'
-import { syncAgentsMd } from './server/agentsmd.js'
 import { remoteBrowse } from './server/remotebrowse.js'
-import { startSelfcheck, getSelfcheck } from './server/selfcheck.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { progressPayload, progressSummaryPayload } from './server/progress.js'
 import { registerTools } from './tool.js'
 import { batchTools } from './tools/batch.js'
 import { analysisTools } from './tools/sim_analysis.js'
+import { selfcheckTools, runSelfcheckAction } from './tools/selfcheck.js'
 import { safeTrashTool } from './trash.js'
 
 export const name = 'dsh-harnessams'
@@ -54,11 +50,11 @@ export const name = 'dsh-harnessams'
 export const inject = ['webServer', 'workspaceRegistry', 'tools']
 
 export function toolDefinitions(ctx = {}) {
-  return [...batchTools(ctx), ...analysisTools(ctx), safeTrashTool()]
+  return [...selfcheckTools(ctx), ...batchTools(ctx), ...analysisTools(ctx), safeTrashTool()]
 }
-// Current analysis surface: sim_analysis (collect + optional report dashboard,
-// pure JS), sim_progress (local progress-file window);
-// safe_trash comes from trash.js with its mechanics.
+// Current tool surface: harnessams_selfcheck (self-check + project config),
+// batch_submit/batch_poll/batch_fetch (remote channel), sim_analysis /
+// sim_progress (pure JS analysis), safe_trash.
 
 export function apply(ctx) {
   ctx.effect(() => {
@@ -93,8 +89,6 @@ async function handle(req, res, ctx) {
   const route = url.pathname.replace(/^\/harnessams/, '') || '/'
   const json = (code, obj) => { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(obj)) }
 
-  const ws = findWorkspaceConfig()
-
   // ---- static assets (plotly single copy; whitelist lookup) ----
   if (route.startsWith('/assets/')) {
     serveAsset(req, res, route.slice('/assets/'.length))
@@ -102,9 +96,10 @@ async function handle(req, res, ctx) {
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    // Write surface is narrow by design: per-session configs, project settings,
-    // self-check runs and the AGENTS.md config block (all project-local file
-    // writes; no remote execution surface lives here).
+    // Write surface is narrow by design: per-session configs (sessions.json)
+    // and the single tool funnel (self-check + workspace_config.json settings +
+    // AGENTS.md sync — all project-local file writes; no remote execution
+    // surface lives here).
     if (req.method === 'PUT' && route === '/api/session-config') {
       // merge-write ONE session's entry ({ sessionId, state }) — never a stale
       // full-file clobber of sibling sessions
@@ -118,74 +113,51 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, project, sessions: w.sessions })
       return
     }
-    if (req.method === 'PUT' && route === '/api/project-settings') {
-      // Per-project settings (project_settings.json): the Overview settings table
-      // PUTs the full object on every dropdown change.
-      const sessionId = url.searchParams.get('sessionId')
-      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
-      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-      let body
-      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
-      const v = validateSettings(body)
-      if (v.error) { json(400, { error: v.error }); return }
-      await writeSettings(project.path, v.settings)
-      json(200, { ok: true, settings: v.settings })
-      return
-    }
-    if (req.method === 'POST' && route === '/api/selfcheck') {
-      // One-click project self-check under the CURRENT settings: the server
-      // reads project_settings.json itself (single source of truth) and runs the
-      // orchestration in the background; the client polls GET /api/selfcheck.
+    if (req.method === 'POST' && route === '/api/tool') {
+      // The one funnel behind the Overview's four buttons (and anything else
+      // that wants the same behavior in-chat): body { sessionId, action,
+      // settings?, run_id?, lang? } — the project resolves from the session,
+      // then the harnessams_selfcheck action runner executes. Passing settings
+      // stages a config write before the action (the table's confirm button).
       let body
       try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
       const sessionId = body?.sessionId
       if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
-      const lang = body?.lang === 'zh' ? 'zh' : 'en'
       const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
       if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-      if (!ws) { json(503, { error: 'harnessams-workspace/harnessams.json not found' }); return }
-      const r = await startSelfcheck(ctx, { sessionId, project, lang, ws, req })
+      const r = await runSelfcheckAction(ctx, {
+        sessionId,
+        project,
+        action: typeof body?.action === 'string' ? body.action : '',
+        settings: body?.settings,
+        runId: body?.run_id,
+        lang: body?.lang === 'zh' ? 'zh' : 'en',
+      })
       if (r.error) { json(r.code ?? 400, { error: r.error }); return }
-      json(200, { ok: true, runId: r.runId })
+      json(200, r)
       return
     }
-    if (req.method === 'POST' && route === '/api/agents-md') {
-      // Values sync behind the Overview "save to AGENTS.md" / "check all & save"
-      // buttons: one POST gathers settings + machines + local env + the latest
-      // self-check run and rewrites the marked block in <workspace>/AGENTS.md
-      // (server/agentsmd.js). The rewrite carries no first-fill instruction, so
-      // a stale one from the .harnessams-creation template is removed with it.
-      let body
-      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
-      const sessionId = body?.sessionId
-      if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
-      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
-      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-      let settings
-      try { ({ settings } = await readSettings(project.path)) } catch (e) { json(500, { error: `project_settings.json unreadable: ${e.message}` }); return }
-      const r = await syncAgentsMd(ctx, { project, settings })
-      if (r.error) { json(500, { error: r.error }); return }
-      json(200, { ok: true, path: r.path, created: r.created })
-      return
-    }
-    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/project-settings, POST /api/selfcheck, POST /api/agents-md)' })
+    json(405, { error: 'GET only (PUT /api/session-config, POST /api/tool)' })
     return
   }
 
   if (route === '/api/info') {
     json(200, {
-      ok: true, plugin: 'dsh-harnessams', workspace: ws ? { root: ws.config.workspace_root, config_path: ws.configPath } : null,
+      ok: true, plugin: 'dsh-harnessams',
+      config: 'per-project <workspace>/.harnessams/workspace_config.json (the family harnessams.json is retired)',
       tiers: {
         console: 'sidebar entry "HarnessAMS" (client half)',
         project: ctx.workspaceRegistry ? 'workspaceRegistry mapped' : 'workspaceRegistry unavailable (tier 2 degraded)',
         sessions: '/api/session-config?sessionId=…',
+        tool: 'POST /api/tool {sessionId, action: run|status|env|save_agentsmd} — the harnessams_selfcheck surface',
       },
     })
     return
   }
 
-  // ---- tier 3 Overview: local-env check rows + the machine list (the settings
-  // table's machine dropdown consumes the same projection) ----
+  // ---- tier 3 Overview: the machine list (the settings table's machine
+  // dropdown consumes the same projection; the remote root is a separate
+  // per-project setting, not a machine fact) ----
   if (route === '/api/checks') {
     const sessionId = url.searchParams.get('sessionId')
     const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
@@ -196,30 +168,19 @@ async function handle(req, res, ctx) {
       buttons: [{ id: 'local', item: 'Local environment' }],
       machines: list.ok ? checkableMachines(list.machines) : [],
       machinesTotal: list.ok ? (list.machines?.length ?? 0) : 0,
-      machinesUnconfigured: list.ok ? list.machines.filter((m) => !m.configured).map((m) => m.id) : [],
       machinesReason: list.ok ? null : list.reason,
     })
     return
   }
-  if (route === '/api/checks/run') {
-    const sessionId = url.searchParams.get('sessionId')
-    const check = url.searchParams.get('check')
-    if (!sessionId || !check) { json(400, { error: 'missing sessionId or check parameter' }); return }
-    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
-    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
-    if (check !== 'local') { json(400, { error: `unknown check: ${check} (the only check is local)` }); return }
-    if (!ws) { json(503, { error: 'harnessams-workspace/harnessams.json not found' }); return }
-    json(200, { ok: true, type: 'local', results: await runLocalChecks(ws) })
-    return
-  }
 
-  // ---- tier 3 Overview: project settings + self-check (local projects) ----
+  // ---- tier 3 Overview: project settings (workspace_config.json settings
+  // section; the write path is POST /api/tool with a settings object) ----
   if (route === '/api/project-settings') {
     const sessionId = url.searchParams.get('sessionId')
     const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
     if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
     let settings
-    try { ({ settings } = await readSettings(project.path)) } catch (e) { json(500, { error: `project_settings.json unreadable: ${e.message}` }); return }
+    try { ({ settings } = await readSettings(project.path)) } catch (e) { json(500, { error: `workspace_config.json unreadable: ${e.message}` }); return }
     json(200, { ok: true, settings })
     return
   }
@@ -229,64 +190,49 @@ async function handle(req, res, ctx) {
     json(404, { error: 'check-params route retired — check params are per-session now (GET /api/session-config carries fallback_params)' })
     return
   }
-  if (route === '/api/selfcheck') {
-    // id pins one run (a global "latest" run would bleed verdicts across
-    // projects). The client only ever polls a run it started itself.
-    const id = url.searchParams.get('id')
-    if (!id) { json(400, { error: 'id is required (the runId returned by POST /api/selfcheck)' }); return }
-    const run = getSelfcheck(id, ws)
-    if (!run) { json(404, { error: 'no such self-check run' }); return }
-    json(200, { ok: true, run })
-    return
-  }
 
-  // ---- tier 1: remote projects / assets / disk ----
+  // ---- tier 1: machines / assets ----
   if (route === '/api/machines') {
     json(200, { ok: true, ...(await remoteMachinesStatus(ctx.tools, req, ctx.workspaceRegistry)) })
     return
   }
   if (route === '/api/assets') {
-    // the workspace root drives the bounded copy scan in the response
-    json(200, { ok: true, ...assetsStatus(ws ? ws.config.workspace_root : null) })
-    return
-  }
-  if (route === '/api/disk') {
-    if (!ws) { json(503, { error: 'workspace config not found' }); return }
-    json(200, { ok: true, root: ws.config.workspace_root, entries: await localDiskUsage(ws) })
-    return
-  }
-  if (route === '/api/dirs') {
-    if (!ws) { json(503, { error: 'workspace config not found' }); return }
-    const root = ws.config.workspace_root
-    const demos = await workspaceDirs(ws)
-    json(200, { ok: true, workspace_root: root, config_path: ws.configPath, demos })
+    // package copies + served routes; no workspace scan (the family workspace
+    // root is retired — per-project copies live under each project's assets/)
+    json(200, { ok: true, ...assetsStatus() })
     return
   }
   if (route === '/api/browse') {
     // One-level directory listing for the add-report dialog; no path param =
-    // start at the workspace root (home dir as a last resort).
-    const r = await browseDir(url.searchParams.get('path'), ws ? ws.config.workspace_root : os.homedir())
+    // start at the home dir (report paths are absolute local paths anyway).
+    const r = await browseDir(url.searchParams.get('path'), os.homedir())
     if (r.error) { json(400, { error: r.error }); return }
     json(200, { ok: true, ...r })
     return
   }
   if (route === '/api/remote-browse') {
     // One remote directory level for the working-directory picker (settings
-    // table, remote mode): directories only, through the dsh-ssh exec funnel.
+    // table, remote mode): directories only, through the dsh-ssh exec funnel;
+    // the default listing root is the project's settings.remote_root.
     const sessionId = url.searchParams.get('sessionId')
     const machineId = url.searchParams.get('machineId')
     const dir = url.searchParams.get('dir')
     const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
     if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
     if (!machineId) { json(400, { error: 'missing machineId (a configured dsh-ssh host alias)' }); return }
+    let remoteRoot
     try {
-      const r = await remoteBrowse(ctx, machineId, dir)
+      const { settings } = await readSettings(project.path)
+      remoteRoot = settings.remote_root
+    } catch { remoteRoot = null }
+    try {
+      const r = await remoteBrowse(ctx, machineId, dir, remoteRoot)
       json(200, { ok: true, ...r })
     } catch (e) {
       const msg = String(e?.message ?? e)
       const code = /dsh-ssh hosts unavailable/.test(msg) ? 503
         : /no such dsh-ssh host/.test(msg) ? 404
-        : /no remote root configured/.test(msg) ? 409
+        : /remote_root is required/.test(msg) ? 409
         : /^dir /.test(msg) ? 400
         : 502
       json(code, { error: msg })
@@ -372,18 +318,5 @@ async function handle(req, res, ctx) {
     res.end(await fsp.readFile(hit.abs))
     return
   }
-  if (route.startsWith('/reports/')) {
-    // Embedded reports (decision #4): static read-only, whitelist root = workspace, no traversal
-    const rel = decodeURIComponent(route.slice('/reports/'.length)).replace(/\\/g, '/')
-    if (!ws || rel.includes('..')) { json(403, { error: 'forbidden' }); return }
-    const abs = path.resolve(ws.config.workspace_root, rel)
-    if (!abs.startsWith(path.resolve(ws.config.workspace_root)) || !(await fsp.stat(abs).catch(() => null))) { json(404, { error: 'not found' }); return }
-    const st = await fsp.stat(abs)
-    // MIME by extension: a blanket text/html silently kills the report's
-    // data/*.js scripts (browser refuses non-JS MIME on <script src>)
-    res.writeHead(200, { 'Content-Type': mimeFor(abs), 'Content-Length': st.size })
-    res.end(await fsp.readFile(abs))
-    return
-  }
-  json(404, { error: `unknown route: ${route} (the former /harnessams/ui console page moved into the DSH client UI — see the "HarnessAMS" sidebar entry)` })
+  json(404, { error: `unknown route: ${route} (the console lives in the DSH client UI — see the "HarnessAMS" sidebar entry; the self-check/config funnel is POST /api/tool)` })
 }

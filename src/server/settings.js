@@ -1,15 +1,26 @@
-// Project settings (project self-check): per-project config at
-// <workspace>/.harnessams/project_settings.json, next to tasks.json. The Overview
-// settings table edits it; the self-check orchestrator reads it as the single
-// source of truth for HOW a run executes (mode / machine / scheduler / simulator
-// / compute scripts). Local mode keeps the remote fields stored but unused, so
-// toggling the mode back and forth never loses the binding.
+// Per-project workspace config — the SINGLE config file (2026-11-19 D-009 wave):
+// <workspace>/.harnessams/workspace_config.json. It replaces both the retired
+// project_settings.json and the retired family harnessams.json, and carries two
+// sections:
+//   workspace — install/env facts (worker scripts root, plotly seed, trash dir).
+//     Not a UI surface: laid down once with resolved defaults at file creation
+//     and hand-edited only; every key still has a runtime default so a missing
+//     or partial section fails open.
+//   settings  — the run settings the Overview table stages + confirms through
+//     the harnessams_selfcheck tool (mode / machine / remote_root / remote_dir /
+//     scheduler / simulator / compute scripts). The remote root now lives HERE
+//     (settings.remote_root), not in a family map — the project is the single
+//     authority, so UI / config file / AGENTS.md can never disagree.
+// Per-session check params are NOT here (D-008: sessions.json carries the
+// confirmed table; checkparams.js reads the project fallback file).
+import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
 
-const SETTINGS_DIR = '.harnessams'
-const SETTINGS_FILE = 'project_settings.json'
+const PKG_ROOT = path.resolve(import.meta.dirname ?? '.', '..') // src/
+const STORE_DIR = '.harnessams'
+const CONFIG_FILE = 'workspace_config.json'
 
 const ENUMS = {
   run_mode: ['local', 'remote'],
@@ -23,6 +34,7 @@ export function defaultSettings() {
   return {
     run_mode: 'local',
     machine_id: null,
+    remote_root: null,
     remote_dir: '.harnessams/selfcheck',
     scheduler: 'lsf',
     simulator: 'spectre',
@@ -31,41 +43,143 @@ export function defaultSettings() {
   }
 }
 
-export function settingsPath(workspacePath) {
-  return path.join(workspacePath, SETTINGS_DIR, SETTINGS_FILE)
+// ---- workspace section: resolved defaults at creation -----------------------
+// sim_scripts_dir points at the SmartAnaSim scripts tree (the worker source for
+// batch_submit). In a dev checkout that is the sibling HarnessAMS-SmartAnaSim
+// package (PKG_ROOT is <plugin>/src, so the sibling sits TWO levels up); in an
+// installed layout the sibling dsh-harnessams-sim package — probe both, keep
+// the dev-shaped default when neither exists (hand-editable). Note path.join
+// folds '..' away, hence the explicit double parent.
+function defaultSimScriptsDir() {
+  const candidates = [
+    path.join(PKG_ROOT, '..', '..', 'HarnessAMS-SmartAnaSim', 'scripts'),
+    path.join(PKG_ROOT, '..', '..', 'dsh-harnessams-sim', 'scripts'),
+  ]
+  for (const c of candidates) {
+    try { if (fs.statSync(c).isDirectory()) return path.resolve(c) } catch { /* probe next */ }
+  }
+  return path.resolve(candidates[0])
 }
 
-// Read + normalize. A missing file is the defaults, not an error; a hand-edited
-// file with invalid values falls back per-key (the file is normally server-written,
-// so anything off-spec was edited externally and must not break the Overview).
-export async function readSettings(workspacePath) {
+export function defaultWorkspaceSection() {
+  return {
+    sim_scripts_dir: defaultSimScriptsDir(),
+    // the shipped copy inside this package — in an installed layout that IS the
+    // ~/.dsh node_modules location
+    plotly_asset: path.join(PKG_ROOT, 'assets', 'plotly.min.js'),
+    trash_dir: '.harnessams/trash',
+  }
+}
+
+// ---- file location + project-root discovery ---------------------------------
+
+export function configPath(workspacePath) {
+  return path.join(workspacePath, STORE_DIR, CONFIG_FILE)
+}
+
+// Nearest ancestor directory that has a .harnessams store — the project root
+// anchor for cwd-less consumers (trash, worker scripts). ≤8 levels, like the
+// python twin's walkers.
+export function findProjectRoot(startDir) {
+  let d = path.resolve(String(startDir ?? process.cwd()))
+  for (let i = 0; i < 8; i++) {
+    try { if (fs.statSync(path.join(d, STORE_DIR)).isDirectory()) return d } catch { /* keep walking */ }
+    const parent = path.dirname(d)
+    if (parent === d) return null
+    d = parent
+  }
+  return null
+}
+
+// ---- read/normalize ----------------------------------------------------------
+
+function parseConfig(raw) {
+  const workspace = defaultWorkspaceSection()
+  const settings = defaultSettings()
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return { config: { version: 1, workspace, settings }, defaults: true }
+  }
+  const wsIn = raw.workspace
+  if (wsIn && typeof wsIn === 'object' && !Array.isArray(wsIn)) {
+    for (const k of Object.keys(workspace)) {
+      const v = wsIn[k]
+      if (typeof v === 'string' && v.trim()) workspace[k] = v.trim()
+    }
+  }
+  const sIn = raw.settings
+  if (sIn && typeof sIn === 'object' && !Array.isArray(sIn)) {
+    for (const k of Object.keys(settings)) {
+      const v = sIn[k]
+      if (k === 'machine_id') {
+        if (typeof v === 'string' && v.trim()) settings.machine_id = v.trim().slice(0, 120)
+      } else if (k === 'remote_root') {
+        if (typeof v === 'string' && v.trim()) settings.remote_root = v.trim().replace(/\\/g, '/')
+      } else if (k === 'remote_dir') {
+        if (typeof v === 'string' && v.trim()) settings.remote_dir = v.trim().replace(/\\/g, '/')
+      } else if (k === 'scheduler' && v === 'none') {
+        settings.scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
+      } else if (ENUMS[k] && ENUMS[k].includes(v)) {
+        settings[k] = v
+      }
+    }
+  }
+  return { config: { version: 1, workspace, settings } }
+}
+
+// A missing file is the defaults, not an error (fresh project, first write
+// pending); a corrupt file throws — silently resetting settings would be worse.
+// Returns { config, defaults? }.
+export async function readConfig(workspacePath) {
   let raw = null
   try {
-    raw = JSON.parse(await fsp.readFile(settingsPath(workspacePath), 'utf8'))
+    raw = JSON.parse(await fsp.readFile(configPath(workspacePath), 'utf8'))
   } catch (e) {
     if (e.code !== 'ENOENT') throw e
   }
-  const settings = defaultSettings()
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { settings, defaults: true }
-  for (const k of Object.keys(settings)) {
-    const v = raw[k]
-    if (k === 'machine_id') {
-      if (typeof v === 'string' && v.trim()) settings.machine_id = v.trim().slice(0, 120)
-    } else if (k === 'remote_dir') {
-      if (typeof v === 'string' && v.trim()) settings.remote_dir = v.trim().replace(/\\/g, '/')
-    } else if (k === 'scheduler' && v === 'none') {
-      settings.scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
-    } else if (ENUMS[k] && ENUMS[k].includes(v)) {
-      settings[k] = v
-    }
-  }
-  return { settings }
+  return parseConfig(raw)
 }
 
-// Validate a full settings object from the client PUT. Returns { settings } or
-// { error }. remote_dir accepts a path relative to the machine's remotePath or an
-// absolute remote path; ".." is rejected here and resolveRemoteDir() re-fences it
-// against the remote workspace root at use time.
+export function readConfigSync(workspacePath) {
+  let raw = null
+  try {
+    raw = JSON.parse(fs.readFileSync(configPath(workspacePath), 'utf8'))
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e
+  }
+  return parseConfig(raw)
+}
+
+export async function readSettings(workspacePath) {
+  const { config } = await readConfig(workspacePath)
+  return { settings: config.settings }
+}
+
+// Resolve the workspace section's path keys against the project root (relative
+// values like ".harnessams/trash" are project-relative by design). The root is
+// the nearest ancestor of `anchor` holding a .harnessams store; with no store
+// found the section defaults apply, anchored at `anchor` itself. Sync — the
+// consumers (batch/trash) are synchronous call sites.
+export function resolveWorkspacePaths(anchor = process.cwd()) {
+  const base = findProjectRoot(anchor) ?? path.resolve(String(anchor ?? '.'))
+  let ws = defaultWorkspaceSection()
+  try {
+    const { config } = readConfigSync(base)
+    ws = config.workspace
+  } catch { /* corrupt or missing — defaults already in place */ }
+  return {
+    root: base,
+    sim_scripts_dir: path.isAbsolute(ws.sim_scripts_dir) ? ws.sim_scripts_dir : path.resolve(base, ws.sim_scripts_dir),
+    plotly_asset: path.isAbsolute(ws.plotly_asset) ? ws.plotly_asset : path.resolve(base, ws.plotly_asset),
+    trash_dir: path.isAbsolute(ws.trash_dir) ? ws.trash_dir : path.resolve(base, ws.trash_dir),
+  }
+}
+
+// ---- validate + write --------------------------------------------------------
+
+// Validate a full settings object (tool `settings` param / staged table
+// confirm). remote_root: absolute POSIX path fencing remote_dir (resolveRemoteDir
+// re-fences at use time); ".." rejected here. remote mode requires machine_id
+// AND remote_root.
 export function validateSettings(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { error: 'settings must be an object' }
@@ -77,8 +191,16 @@ export function validateSettings(input) {
       if (v == null || v === '') out.machine_id = null
       else if (typeof v === 'string' && v.trim()) out.machine_id = v.trim().slice(0, 120)
       else return { error: 'machine_id must be a non-empty string or null' }
+    } else if (k === 'remote_root') {
+      if (v == null || v === '') { out.remote_root = null; continue }
+      if (typeof v !== 'string' || !v.trim()) return { error: 'remote_root must be a non-empty string or null' }
+      const norm = v.trim().replace(/\\/g, '/')
+      if (!norm.startsWith('/')) return { error: 'remote_root must be an absolute remote path (starts with "/")' }
+      if (norm.length > 400) return { error: 'remote_root too long (max 400 chars)' }
+      if (norm.split('/').includes('..')) return { error: 'remote_root must not contain ".."' }
+      out.remote_root = norm.replace(/\/+$/, '') || '/'
     } else if (k === 'remote_dir') {
-      if (typeof v !== 'string' || !v.trim()) return { error: 'remote_dir is required (a path relative to the machine workspace, or absolute)' }
+      if (typeof v !== 'string' || !v.trim()) return { error: 'remote_dir is required (a path relative to remote_root, or absolute)' }
       const norm = v.trim().replace(/\\/g, '/')
       if (norm.length > 400) return { error: 'remote_dir too long (max 400 chars)' }
       if (norm.split('/').includes('..')) return { error: 'remote_dir must not contain ".."' }
@@ -88,22 +210,26 @@ export function validateSettings(input) {
       out[k] = v
     }
   }
-  if (out.run_mode === 'remote' && !out.machine_id) {
-    return { error: 'run_mode=remote requires machine_id (pick a dsh-ssh host alias)' }
+  if (out.run_mode === 'remote') {
+    if (!out.machine_id) return { error: 'run_mode=remote requires machine_id (pick a dsh-ssh host alias)' }
+    if (!out.remote_root) return { error: 'run_mode=remote requires remote_root (the absolute remote path that fences remote_dir)' }
   }
   return { settings: out }
 }
 
+// Read-modify-write of the settings section only — the workspace section
+// survives untouched. Fresh file: workspace defaults are laid down (the
+// "initialize with npm-default plotly / sibling scripts" ruling) and the
+// AGENTS.md config-table template rides the .harnessams creation moment.
 export async function writeSettings(workspacePath, settings) {
-  const dir = path.join(workspacePath, SETTINGS_DIR)
-  const finalPath = settingsPath(workspacePath)
+  const dir = path.join(workspacePath, STORE_DIR)
+  const finalPath = configPath(workspacePath)
+  const fresh = !fs.existsSync(dir)
+  const cur = await readConfig(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
-  // .harnessams creation moment: lay down the AGENTS.md config-table template
-  // (empty table + first-fill instruction; idempotent, never throws).
-  await ensureAgentsMdTemplate(workspacePath)
-  // Atomic replace — same discipline as tasks.json.
+  if (fresh) await ensureAgentsMdTemplate(workspacePath)
   const tmp = finalPath + '.tmp'
-  await fsp.writeFile(tmp, JSON.stringify({ version: 1, ...settings }, null, 2) + '\n', 'utf8')
+  await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings }, null, 2) + '\n', 'utf8')
   await fsp.rename(tmp, finalPath)
   return settings
 }

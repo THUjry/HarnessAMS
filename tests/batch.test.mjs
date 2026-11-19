@@ -1,10 +1,12 @@
 // Generic remote batch tools: machine resolution, upload/submit/poll/fetch against
 // a mocked @linxin666/dsh-ssh tool shell (structured values, no network, no SSH, no
 // LSF required). The scheduler=direct path is the node-local foreground mode (no
-// bsub). The worker-script upload tree comes from the workspace sim_scripts_dir;
-// tests point HARNESSAMS_SIM_SCRIPTS_DIR at a self-built fixture and
-// HARNESSAMS_REMOTE_MACHINES at an inline alias->root map so they never depend on
-// the real SmartAnaSim checkout or the real harnessams.json.
+// bsub). The worker-script upload tree comes from the project's
+// workspace_config.json workspace.sim_scripts_dir; tests point
+// HARNESSAMS_SIM_SCRIPTS_DIR at a self-built fixture, and the fencing remote root
+// is an explicit remote_root argument (the per-project settings.remote_root —
+// the family remote_machines map is retired), so nothing depends on the real
+// SmartAnaSim checkout or any workspace file.
 // The ssh_exec wrapping (timeout -s KILL) and the value shapes live in
 // remote.test.mjs / server.test.mjs; submit/direct idempotency guards are asserted
 // here against the generated commands.
@@ -19,7 +21,6 @@ import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { resolveMachine } from '../src/remote.js'
 import { buildDirectCommand, buildSubmitCommand, parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
-import { setRemoteMachines } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
@@ -48,20 +49,15 @@ process.env.HARNESSAMS_SIM_SCRIPTS_DIR = SCRIPTS_ROOT
 
 const REMOTE_ROOT = '/home/op/sim'
 
-// Remote-root map for the whole file (alias node1 -> REMOTE_ROOT). Set for the
-// process lifetime — the reject test clears it briefly and restores inline.
-setRemoteMachines({ node1: REMOTE_ROOT })
-
 function restoreEnv() {
-  setRemoteMachines({ node1: REMOTE_ROOT })
   if (OLD_SIM_SCRIPTS === undefined) process.env.HARNESSAMS_SIM_SCRIPTS_DIR = SCRIPTS_ROOT
   else process.env.HARNESSAMS_SIM_SCRIPTS_DIR = OLD_SIM_SCRIPTS
 }
 
 const HOSTS = [
   { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true },
-  // an alias present in the dsh-ssh registry but absent from remote_machines —
-  // the "configured host, no remote root" display state
+  // a second registry alias — the registry is pure facts now (roots are
+  // per-project settings, not machine columns), it resolves like any other
   { alias: 'lab9', host: '192.0.2.99', port: 22, user: 'op', auth: 'key', keyReady: true },
 ]
 
@@ -217,6 +213,7 @@ test('batch_submit uploads the worker scripts tree and run files, then records t
       run_dir: run,
       remote_dir: 'batch1',
       machine_id: 'node1',
+      remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
       worker_args: ['--config', 'sweep_config.json', '--max-parallel', '2'],
     }, {})
@@ -257,9 +254,9 @@ test('batch_submit rejects a worker outside the scripts root with guidance', asy
   try {
     const ctx = makeCtx()
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
-      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
+      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/no_such_worker.py',
-    }, {}), /worker script not found under the workspace sim_scripts_dir/)
+    }, {}), /worker script not found under the project sim_scripts_dir/)
   } finally {
     restoreEnv()
   }
@@ -273,6 +270,7 @@ test('batch_submit scheduler=direct runs the worker directly on the host (no bsu
       run_dir: run,
       remote_dir: 'fore',
       machine_id: 'node1',
+      remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
       scheduler: 'direct',
     }, {})
@@ -303,7 +301,7 @@ test('batch_poll reads the job file and reports completed', async () => {
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
-      machine_id: 'node1', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
+      machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
     }))
     const ctx = makeCtx({ poll: { meta: 2, total: 2 } })
     const res = await tool(ctx, 'batch_poll').execute({ run_dir: run }, {})
@@ -321,7 +319,7 @@ test('batch_fetch downloads the archive and extracts it into the run directory',
   const archive = await makeArchive()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
-      machine_id: 'node1', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
+      machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
     }))
     const ctx = makeCtx({ archive })
     const res = await tool(ctx, 'batch_fetch').execute({
@@ -345,16 +343,16 @@ test('batch tools reject escaped paths and unresolvable machines', async () => {
   try {
     const ctx = makeCtx()
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
-      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1', worker: '../evil.py',
+      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim', worker: '../evil.py',
     }, {}), /unsafe relative path/)
 
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
-      run_dir: makeRunDir(), remote_dir: '../evil', machine_id: 'node1',
+      run_dir: makeRunDir(), remote_dir: '../evil', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /escapes the remote workspace/)
 
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
-      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
+      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
       remote_scripts_dir: '/tmp/elsewhere', sync_scripts: true,
     }, {}), /remote_scripts_dir must be under the remote workspace/)
@@ -366,11 +364,15 @@ test('batch tools reject escaped paths and unresolvable machines', async () => {
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /missing required property "machine_id"/)
 
-    await assert.rejects(() => resolveMachine(makeCtx(), 'ghost'), /no such dsh-ssh host: ghost/)
+    await assert.rejects(() => resolveMachine(makeCtx(), 'ghost', REMOTE_ROOT), /no such dsh-ssh host: ghost/)
 
-    // alias exists in the dsh-ssh registry but has no remote root configured
-    // (lab9 is mock-only, so the real harnessams.json cannot mask this branch)
-    await assert.rejects(() => resolveMachine(makeCtx(), 'lab9'), /no remote root configured for host lab9/)
+    // the root is an explicit argument now: missing/bad values are rejected
+    // before the registry is even consulted
+    await assert.rejects(() => resolveMachine(makeCtx(), 'node1'), /remote_root is required for host node1/)
+    await assert.rejects(() => resolveMachine(makeCtx(), 'node1', 'rel/path'), /remote_root is required for host node1/)
+    // any registry alias resolves with a root (roots are per-project, not machine facts)
+    const lab9 = await resolveMachine(makeCtx(), 'lab9', REMOTE_ROOT)
+    assert.equal(lab9.remoteRoot, REMOTE_ROOT)
   } finally {
     restoreEnv()
   }
@@ -384,13 +386,13 @@ test('batch_submit enforces the template.scs upload convention', async () => {
     })
     const ctx = makeCtx()
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
-      run_dir: run, remote_dir: 'batch1', machine_id: 'node1',
+      run_dir: run, remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /netlist_template is "template_thorough.scs"/)
 
     const run2 = makeRunDir({ template: 'template_thorough.scs' })
     await tool(ctx, 'batch_submit').execute({
-      run_dir: run2, remote_dir: 'batch2', machine_id: 'node1',
+      run_dir: run2, remote_dir: 'batch2', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {})
     const uploads = ctx.calls.filter((c) => c.name === 'ssh_upload')
@@ -405,13 +407,13 @@ test('batch_submit surfaces upload failures and refuses to clobber a batch', asy
   try {
     const ctx = makeCtx({ failUpload: true })
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
-      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
+      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /upload failed/)
 
     const clobberCtx = makeCtx({ existing: 3 })
     await assert.rejects(() => tool(clobberCtx, 'batch_submit').execute({
-      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1',
+      run_dir: makeRunDir(), remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /already holds 3 point_meta\.json/)
   } finally {

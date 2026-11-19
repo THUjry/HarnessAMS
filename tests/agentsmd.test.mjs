@@ -1,23 +1,27 @@
-// AGENTS.md project-config table (server/agentsmd.js + the three .harnessams
-// writers): the .harnessams creation moment lays down an EMPTY table with the
-// first-fill instruction; the Overview buttons' values sync rewrites the marked
-// block WITHOUT the instruction (a stale prompt is removed with it); the block
-// is created fresh / prepended at the head / replaced in place. Route level via
-// the apply()-registered handler; the client half is pinned against the source.
-// Run: bare `node --test` from the repo root.
+// AGENTS.md project-config block (server/agentsmd.js + the .harnessams
+// writers): the .harnessams creation moment lays down an EMPTY flat table with
+// the first-fill instruction; the values sync (the harnessams_selfcheck tool's
+// save_agentsmd action — the buttons and the self-check finalize both land
+// there) rewrites the marked block WITHOUT the instruction (a stale prompt is
+// removed with it); the .harnessams pointer paragraph rides BOTH builds; the
+// block is created fresh / prepended at the head / replaced in place. Route
+// level via the apply()-registered handler; the client half is pinned against
+// the source. Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { ensureAgentsMdTemplate, latestSelfcheckRun, syncAgentsMd, agentsMdPath } from '../src/server/agentsmd.js'
-import { registerRoutes, callPost, callPut, batchOf, setRemoteMachines, clientSrc, assertDictKeys } from './helpers.mjs'
+import { writeSettings } from '../src/server/settings.js'
+import { registerRoutes, callPost, callPut, clientSrc, assertDictKeys } from './helpers.mjs'
 
 const BEGIN = '<!-- hams-config:begin'
 const END = '<!-- hams-config:end -->'
 const INSTRUCTION = 'Before starting any task in this workspace'
+const POINTER = 'Project state lives in `.harnessams/`'
 
-test('agentsmd: a fresh workspace gets the empty table + first-fill instruction, idempotent', async () => {
+test('agentsmd: a fresh workspace gets the empty flat table + pointer + first-fill instruction, idempotent', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-'))
   try {
     assert.deepEqual(await ensureAgentsMdTemplate(ws), { ok: true, created: true })
@@ -26,67 +30,59 @@ test('agentsmd: a fresh workspace gets the empty table + first-fill instruction,
     assert.ok(md1.includes(END))
     assert.ok(md1.includes('## Project Config (HarnessAMS)'))
     assert.ok(md1.includes(INSTRUCTION), 'first-fill instruction present')
+    assert.ok(md1.includes(POINTER), '.harnessams pointer rides the template too')
     assert.ok(md1.includes('hams_project_config:'))
-    assert.ok(md1.includes('  machines: []'))
-    assert.ok(md1.includes('  last_selfcheck: null'))
-    assert.ok(!md1.includes('remote_root'), 'no machine rows in the empty table')
+    // flat single-level fields, nulls for the not-yet-measured facts
+    assert.ok(md1.includes('  last_selfcheck_run_id: null'))
+    assert.ok(md1.includes('  last_selfcheck_overall: null'))
+    assert.ok(md1.includes('  run_mode: null'), 'unmeasured fields are the YAML null literal in the template')
+    assert.ok(!md1.includes('machines:'), 'no machines section anymore (registry facts stay out)')
 
     // a later call never rewrites — an agent-filled table survives
-    await writeFile(agentsMdPath(ws), md1.replace('  machines: []', '  machines: [agent-filled]'), 'utf8')
+    await writeFile(agentsMdPath(ws), md1.replace('  run_mode: null', '  run_mode: "agent-filled"'), 'utf8')
     assert.deepEqual(await ensureAgentsMdTemplate(ws), { ok: true, created: false })
-    assert.ok((await readFile(agentsMdPath(ws), 'utf8')).includes('[agent-filled]'))
+    assert.ok((await readFile(agentsMdPath(ws), 'utf8')).includes('"agent-filled"'))
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: values sync fills measured facts and REMOVES the stale instruction', async () => {
+test('agentsmd: values sync fills measured flat facts, keeps the pointer, REMOVES the stale instruction', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-sync-'))
   try {
     await ensureAgentsMdTemplate(ws)
     // content below the block must survive the in-place replace
     await writeFile(agentsMdPath(ws), (await readFile(agentsMdPath(ws), 'utf8')) + '\n# Project notes\n\nkeep me\n', 'utf8')
 
-    const settings = { run_mode: 'remote', machine_id: 'node1', remote_dir: '.harnessams/selfcheck',
+    const settings = { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
-    const r = await syncAgentsMd({ tools: { get: () => undefined } }, { project: { path: ws, title: 'demo' }, settings })
+    // no dsh-ssh in ctx at all anymore: the machines section is gone, the sync
+    // never touches the tool shell
+    const r = await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings })
     assert.equal(r.ok, true)
     assert.equal(r.created, false) // block already existed → in-place replace
     const md = await readFile(agentsMdPath(ws), 'utf8')
     assert.ok(!md.includes(INSTRUCTION), 'the values rewrite drops the first-fill instruction')
+    assert.ok(md.includes(POINTER), 'the pointer survives the values rewrite')
     assert.ok(md.includes('# Project notes'), 'content below the block survives')
     assert.ok(md.indexOf(BEGIN) < md.indexOf('# Project notes'), 'block stays at the head')
-    assert.ok(md.includes(`workspace: { root: ${JSON.stringify(ws)} }`), 'workspace root, JSON-escaped for yaml')
-    assert.ok(md.includes('  machines: []'), 'no dsh-ssh → empty machine list, not a failed sync')
-    assert.ok(md.includes(`    node:    { version: "${process.version}", path: ${JSON.stringify(process.execPath)} }`),
-      'node carries version AND absolute path')
-    assert.ok(md.includes('    run_mode: "remote"'))
-    assert.ok(md.includes('    machine: "node1"'))
-    assert.ok(md.includes('  last_selfcheck: null'))
-
-    // a configured machine rides along (ssh_list through the batch contract)
-    const restore = setRemoteMachines({ node1: '/home/op/sim' })
-    try {
-      const ctx = {
-        tools: {
-          get: (n) => (n === 'ssh_list' ? {} : undefined),
-          execute: async (input) => batchOf({ isError: false, value: { hosts: [
-            { alias: 'node1', host: '192.0.2.11', port: 22, user: 'test_user', auth: 'key', keyReady: true }] } }),
-        },
-      }
-      await syncAgentsMd(ctx, { project: { path: ws }, settings })
-      const md2 = await readFile(agentsMdPath(ws), 'utf8')
-      assert.ok(md2.includes('    - { alias: "node1", host: "192.0.2.11", port: 22, user: "test_user", auth: "key", remote_root: "/home/op/sim" }'))
-      assert.equal(md2.split(BEGIN).length - 1, 1, 'exactly one block after a second sync')
-    } finally { restore() }
+    assert.ok(md.includes(`  workspace_root: ${JSON.stringify(ws)}`), 'workspace root, JSON-escaped for yaml')
+    assert.ok(md.includes(`  node_version: "${process.version}"`), 'node version as a flat field')
+    assert.ok(md.includes(`  node_path: ${JSON.stringify(process.execPath)}`), 'node absolute path as a flat field')
+    assert.ok(md.includes('  run_mode: "remote"'))
+    assert.ok(md.includes('  machine: "node1"'))
+    assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
+    assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
+    assert.ok(!md.includes('machines:'), 'machines section retired')
+    assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block after the sync')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: latestSelfcheckRun picks the newest DONE run of this workspace', async () => {
+test('agentsmd: latestSelfcheckRun picks the newest DONE run under .harnessams/selfcheck', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-latest-'))
   try {
     assert.equal(await latestSelfcheckRun(ws), null)
     const mk = async (id, status, summary) => {
-      await mkdir(path.join(ws, 'selfcheck', id), { recursive: true })
-      await writeFile(path.join(ws, 'selfcheck', id, 'selfcheck_run.json'),
+      await mkdir(path.join(ws, '.harnessams', 'selfcheck', id), { recursive: true })
+      await writeFile(path.join(ws, '.harnessams', 'selfcheck', id, 'selfcheck_run.json'),
         JSON.stringify({ id, status, startedAt: '2026-11-18T10:00:00.000Z', finishedAt: '2026-11-18T10:01:00.000Z', summary }), 'utf8')
     }
     await mk('rc_20261118100000_aaaa', 'done', { local: true, remote: 'ok', ok: true })
@@ -104,7 +100,7 @@ test('agentsmd: latestSelfcheckRun picks the newest DONE run of this workspace',
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd route+writers: .harnessams creation lays the template; POST /api/agents-md syncs values', async () => {
+test('agentsmd route+writers: .harnessams creation lays the template; /api/tool save_agentsmd syncs values', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-route-'))
   try {
     const handler = await registerRoutes({
@@ -113,20 +109,17 @@ test('agentsmd route+writers: .harnessams creation lays the template; POST /api/
     })
     const base = 'http://127.0.0.1/harnessams/api'
 
-    // PUT project-settings = the .harnessams creation moment → AGENTS.md template appears
-    // (writeTasks retired with the task concept, D-008; settings is one of the
-    // two remaining template-laying writers)
-    const t = await callPut(handler, base + '/project-settings?sessionId=s1', {
-      run_mode: 'remote', machine_id: 'node1', remote_dir: '.harnessams/selfcheck',
+    // writeSettings (behind the tool's settings argument) = one of the two
+    // .harnessams creation moments → the AGENTS.md template appears
+    await writeSettings(ws, {
+      run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     })
-    assert.equal(t.code, 200)
     const md1 = await readFile(agentsMdPath(ws), 'utf8')
     assert.ok(md1.includes(INSTRUCTION), 'template with the first-fill instruction')
-    assert.ok(md1.includes('  machines: []'))
     // a second settings write stays idempotent (block present → untouched)
-    await callPut(handler, base + '/project-settings?sessionId=s1', {
-      run_mode: 'remote', machine_id: 'node1', remote_dir: '.harnessams/selfcheck',
+    await writeSettings(ws, {
+      run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     })
     assert.ok((await readFile(agentsMdPath(ws), 'utf8')).includes(INSTRUCTION), 'later writes never rewrite the block')
@@ -148,22 +141,28 @@ test('agentsmd route+writers: .harnessams creation lays the template; POST /api/
       await rm(ws2, { recursive: true, force: true })
     }
 
-    // POST /api/agents-md → values rewrite without the instruction
-    const r = await callPost(handler, base + '/agents-md', { sessionId: 's1' })
-    assert.equal(r.code, 200)
+    // POST /api/tool {action:save_agentsmd} → values rewrite without the
+    // instruction; pending settings ride along (the table's confirm button)
+    const r = await callPost(handler, base + '/tool', {
+      sessionId: 's1', action: 'save_agentsmd',
+      settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+        scheduler: 'direct', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' },
+    })
+    assert.equal(r.code, 200, JSON.stringify(r.body))
     assert.equal(r.body.ok, true)
     assert.equal(r.body.created, false)
     assert.equal(r.body.path, path.join(ws, 'AGENTS.md'))
     const md2 = await readFile(agentsMdPath(ws), 'utf8')
     assert.ok(!md2.includes(INSTRUCTION))
-    assert.ok(md2.includes('    run_mode: "remote"'), 'settings snapshot comes from project_settings.json')
+    assert.ok(md2.includes('  run_mode: "remote"'), 'settings snapshot comes from workspace_config.json')
+    assert.ok(md2.includes('  scheduler: "direct"'), 'the riding settings landed before the sync')
 
     // a second POST keeps exactly one block
-    await callPost(handler, base + '/agents-md', { sessionId: 's1' })
+    await callPost(handler, base + '/tool', { sessionId: 's1', action: 'save_agentsmd' })
     assert.equal(((await readFile(agentsMdPath(ws), 'utf8')).split(BEGIN).length - 1), 1)
 
-    assert.equal((await callPost(handler, base + '/agents-md', { sessionId: 'stranger' })).code, 404)
-    assert.equal((await callPost(handler, base + '/agents-md', {})).code, 400)
+    assert.equal((await callPost(handler, base + '/tool', { sessionId: 'stranger', action: 'save_agentsmd' })).code, 404)
+    assert.equal((await callPost(handler, base + '/tool', {})).code, 400)
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
@@ -186,7 +185,7 @@ test('agentsmd: apply() alone writes nothing — only the .harnessams writers an
 const src = await clientSrc()
 
 test('agentsmd client: button row order and wiring, new keys bilingual', () => {
-  assert.ok(src.includes("API + '/agents-md'"), 'the save buttons post to the agents-md route')
+  assert.ok(src.includes("API + '/tool'"), 'the buttons ride the single tool funnel')
   assert.ok(src.includes("API + '/remote-browse?'"), 'the dir browser fetches the remote-browse route')
   const iSave = src.indexOf("tr('agents.saveBtn')")
   const iRun = src.indexOf("tr('selfchk.run')", iSave)
@@ -196,10 +195,13 @@ test('agentsmd client: button row order and wiring, new keys bilingual', () => {
     'button order: save to AGENTS.md | one-click self-check | list local environment | check all & save')
   assert.ok(/setCheckAllPending\(true\); void startRun\(\)/.test(src), 'check-all runs the self-check then auto-saves on landing')
   assert.ok(src.includes('function RemoteDirBrowse') && src.includes('function LocalEnvResults'), 'the new components exist')
+  // confirm row: the staged table commits through the same funnel
+  assert.ok(src.includes("tr('pset.confirmBtn')"), 'confirm button present')
+  assert.ok(src.includes("tr('pset.unsaved')"), 'red unsaved marker present')
   assertDictKeys(src, [
     'agents.saveBtn', 'agents.saving', 'agents.saved', 'agents.saveFailed', 'agents.checkAll', 'agents.checkAllRunning',
     'pset.browse', 'pset.browseTitle', 'pset.browsePickDir', 'pset.pickDir', 'pset.pickThisDir', 'pset.pickCurrentDir',
-    'pset.colName', 'pset.colValue',
+    'pset.colName', 'pset.colValue', 'pset.confirmBtn', 'pset.unsaved', 'pset.stagedHint',
     'chk.btn.local', 'chk.truncated',
   ])
 })

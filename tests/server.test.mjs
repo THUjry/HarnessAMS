@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { batchOf, firstCall, setRemoteMachines } from './helpers.mjs'
+import { batchOf, firstCall } from './helpers.mjs'
 import { sessionProject, readSessionConfigs, writeSessionConfig, sessionConfigsPath } from '../src/server/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { fetchMachines, checkableMachines, remoteMachinesStatus } from '../src/server/machines.js'
@@ -140,45 +140,41 @@ const HOSTS = [
 const hostsValue = (hosts) => ({ isError: false, value: { hosts } })
 
 test('machines: ssh_list single channel carries the batch contract', async () => {
-  const restore = setRemoteMachines({ node1: '/home/op/sim/AutoAnalog' })
-  try {
-    const inputs = []
-    const tools = {
-      get: (name) => (name === 'ssh_list' ? { name } : undefined),
-      execute: async (input) => {
-        inputs.push(input)
-        // regression pin: dsh-tools 0.2.2-rc.x takes ToolBatchInput — the 0.2.1
-        // single-call shape {callId,name,arguments} crashes on calls.map wrapped
-        // as "Tool batch execution failed", and without a signal the pipeline
-        // crashes reading `signal.aborted`
-        assert.ok(Array.isArray(input.calls) && input.calls.length === 1, 'one-entry calls[] required')
-        const call = input.calls[0]
-        assert.equal(call.type, 'tool-call')
-        assert.equal(call.name, 'ssh_list')
-        assert.ok(call.id, 'call id required')
-        assert.deepEqual(JSON.parse(call.arguments || '{}'), {})
-        assert.ok(input.signal instanceof AbortSignal, 'AbortSignal required')
-        return batchOf(hostsValue(HOSTS))
-      },
-    }
-    const r = await fetchMachines(tools)
-    assert.ok(r.ok, r.reason)
-    assert.equal(r.source, 'tool shell (ssh_list)')
-    assert.equal(r.machines.length, 2)
-    const node1 = r.machines.find((m) => m.id === 'node1')
-    assert.equal(node1.alias, 'node1')
-    assert.equal(node1.host, '192.0.2.11')
-    assert.equal(node1.username, 'op')
-    assert.equal(node1.auth, 'key')
-    assert.equal(node1.keyReady, true)
-    assert.equal(node1.workspace, '/home/op/sim/AutoAnalog') // merged from remote_machines
-    assert.equal(node1.configured, true)
-    const farm = r.machines.find((m) => m.id === 'farm')
-    assert.equal(farm.configured, false)
-    assert.equal(farm.workspace, undefined)
-  } finally {
-    restore()
+  const inputs = []
+  const tools = {
+    get: (name) => (name === 'ssh_list' ? { name } : undefined),
+    execute: async (input) => {
+      inputs.push(input)
+      // regression pin: dsh-tools 0.2.2-rc.x takes ToolBatchInput — the 0.2.1
+      // single-call shape {callId,name,arguments} crashes on calls.map wrapped
+      // as "Tool batch execution failed", and without a signal the pipeline
+      // crashes reading `signal.aborted`
+      assert.ok(Array.isArray(input.calls) && input.calls.length === 1, 'one-entry calls[] required')
+      const call = input.calls[0]
+      assert.equal(call.type, 'tool-call')
+      assert.equal(call.name, 'ssh_list')
+      assert.ok(call.id, 'call id required')
+      assert.deepEqual(JSON.parse(call.arguments || '{}'), {})
+      assert.ok(input.signal instanceof AbortSignal, 'AbortSignal required')
+      return batchOf(hostsValue(HOSTS))
+    },
   }
+  const r = await fetchMachines(tools)
+  assert.ok(r.ok, r.reason)
+  assert.equal(r.source, 'tool shell (ssh_list)')
+  assert.equal(r.machines.length, 2)
+  const node1 = r.machines.find((m) => m.id === 'node1')
+  assert.equal(node1.alias, 'node1')
+  assert.equal(node1.host, '192.0.2.11')
+  assert.equal(node1.username, 'op')
+  assert.equal(node1.auth, 'key')
+  assert.equal(node1.keyReady, true)
+  // pure registry projection: no workspace/configured columns anymore (the
+  // remote root is a per-project setting, not a machine fact)
+  assert.equal(node1.workspace, undefined)
+  assert.equal(node1.configured, undefined)
+  const farm = r.machines.find((m) => m.id === 'farm')
+  assert.equal(farm.host, '10.0.0.8')
 })
 
 test('machines: absent tool and empty registry report reasons, never throw', async () => {
@@ -195,16 +191,16 @@ test('machines: absent tool and empty registry report reasons, never throw', asy
   assert.match(thrown.reason, /boom/)
 })
 
-test('machines: checkableMachines filters to configured hosts; remoteMachinesStatus projects roots', async () => {
+test('machines: checkableMachines projects the whole registry; remoteMachinesStatus is registry-only', async () => {
   const machines = [
-    { id: 'node1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', auth: 'key', keyReady: true, workspace: '/home/op/sim', configured: true },
-    { id: 'farm', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root', auth: 'agent', keyReady: false, workspace: undefined, configured: false },
+    { id: 'node1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op', auth: 'key', keyReady: true },
+    { id: 'farm', name: 'farm', host: '10.0.0.8', port: 2222, username: 'root', auth: 'agent', keyReady: false },
   ]
   const checkable = checkableMachines(machines)
-  assert.equal(checkable.length, 1)
+  assert.equal(checkable.length, 2) // picking a host = picking its alias; roots are per-project settings
   assert.deepEqual({ ...checkable[0] }, {
     id: 'node1', name: 'node1', host: '192.0.2.11', port: 22,
-    username: 'op', auth: 'key', keyReady: true, remotePath: '/home/op/sim',
+    username: 'op', auth: 'key', keyReady: true,
   })
   assert.deepEqual(checkableMachines([]), [])
   assert.deepEqual(checkableMachines(null), [])
@@ -212,20 +208,15 @@ test('machines: checkableMachines filters to configured hosts; remoteMachinesSta
   const tools = { get: () => ({}), execute: async () => batchOf(hostsValue(machines.map((m) => ({
     alias: m.id, host: m.host, port: m.port, user: m.username, auth: m.auth, keyReady: m.keyReady,
   })))) }
-  const restore = setRemoteMachines({ node1: '/home/op/sim' })
-  try {
-    const status = await remoteMachinesStatus(tools)
-    assert.equal(status.installed, true)
-    assert.equal(status.machines.length, 2)
-    assert.deepEqual(status.machines[0], {
-      id: 'node1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op',
-      auth: 'key', keyReady: true, remoteRoot: '/home/op/sim', configured: true,
-    })
-    assert.equal(status.machines[1].remoteRoot, null)
-    assert.equal(status.machines[1].configured, false)
-  } finally {
-    restore()
-  }
+  const status = await remoteMachinesStatus(tools)
+  assert.equal(status.installed, true)
+  assert.equal(status.machines.length, 2)
+  assert.deepEqual(status.machines[0], {
+    id: 'node1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op',
+    auth: 'key', keyReady: true,
+  })
+  assert.equal(status.machines[0].remoteRoot, undefined)
+  assert.equal(status.machines[0].configured, undefined)
 
   const down = await remoteMachinesStatus({ get: () => undefined })
   assert.equal(down.installed, false)
@@ -342,29 +333,29 @@ test('remote: uploadFile/downloadFile read the structured ok flags', async () =>
   assert.match(dl.text, /suspected MaxSessions/)
 })
 
-test('remote: resolveMachine pins the alias + remote-root contract', async () => {
-  const restore = setRemoteMachines({ node1: '/home/op/sim', lab9: '' })
-  try {
-    const ctx = {
-      tools: {
-        get: (n) => (n === 'ssh_list' ? { n } : undefined),
-        execute: async () => batchOf(hostsValue([
-          { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true },
-          { alias: 'lab9', host: '192.0.2.99', port: 22, user: 'op', auth: 'key', keyReady: true },
-        ])),
-      },
-    }
-    const t = await resolveMachine(ctx, 'node1')
-    assert.equal(t.alias, 'node1')
-    assert.equal(t.remoteRoot, '/home/op/sim')
-    assert.equal(t.machine.id, 'node1')
-
-    await assert.rejects(() => resolveMachine(ctx, undefined), /machine_id .* required/)
-    await assert.rejects(() => resolveMachine(ctx, 'ghost'), /no such dsh-ssh host: ghost \(known: node1, lab9\)/)
-    await assert.rejects(() => resolveMachine(ctx, 'lab9'), /no remote root configured for host lab9/)
-  } finally {
-    restore()
+test('remote: resolveMachine pins the alias + explicit remote-root contract', async () => {
+  const ctx = {
+    tools: {
+      get: (n) => (n === 'ssh_list' ? { n } : undefined),
+      execute: async () => batchOf(hostsValue([
+        { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true },
+        { alias: 'lab9', host: '192.0.2.99', port: 22, user: 'op', auth: 'key', keyReady: true },
+      ])),
+    },
   }
+  const t = await resolveMachine(ctx, 'node1', '/home/op/sim')
+  assert.equal(t.alias, 'node1')
+  assert.equal(t.remoteRoot, '/home/op/sim')
+  assert.equal(t.machine.id, 'node1')
+
+  // the root is a required explicit argument (the project's settings.remote_root)
+  await assert.rejects(() => resolveMachine(ctx, undefined), /machine_id .* required/)
+  await assert.rejects(() => resolveMachine(ctx, 'node1'), /remote_root is required for host node1/)
+  await assert.rejects(() => resolveMachine(ctx, 'node1', 'rel/path'), /remote_root is required for host node1/)
+  await assert.rejects(() => resolveMachine(ctx, 'ghost', '/home/op/sim'), /no such dsh-ssh host: ghost \(known: node1, lab9\)/)
+  // any registry alias resolves once a root is supplied (roots are per-project)
+  const lab9 = await resolveMachine(ctx, 'lab9', '/home/op/sim')
+  assert.equal(lab9.remoteRoot, '/home/op/sim')
 
   const broken = {
     tools: {
@@ -372,7 +363,7 @@ test('remote: resolveMachine pins the alias + remote-root contract', async () =>
       execute: async () => batchOf({ isError: true, content: [{ type: 'text', text: 'dsh-ssh down' }] }),
     },
   }
-  await assert.rejects(() => resolveMachine(broken, 'node1'), /dsh-ssh hosts unavailable: dsh-ssh down/)
+  await assert.rejects(() => resolveMachine(broken, 'node1', '/home/op/sim'), /dsh-ssh hosts unavailable: dsh-ssh down/)
 })
 
 test('remote: listMachines degrades when ssh_list is missing or empty', async () => {
@@ -380,14 +371,9 @@ test('remote: listMachines degrades when ssh_list is missing or empty', async ()
   assert.equal(absent.ok, false)
   assert.match(absent.reason, /ssh_list is not registered/)
 
-  const restore = setRemoteMachines(undefined)
-  try {
-    const empty = await listMachines({ tools: { get: () => ({}), execute: async () => batchOf(hostsValue([])) } })
-    assert.equal(empty.ok, false)
-    assert.match(empty.reason, /no hosts configured/)
-  } finally {
-    restore()
-  }
+  const empty = await listMachines({ tools: { get: () => ({}), execute: async () => batchOf(hostsValue([])) } })
+  assert.equal(empty.ok, false)
+  assert.match(empty.reason, /no hosts configured/)
 })
 
 // ---- local environment checks (checks.js) ----
@@ -408,7 +394,7 @@ test('checks: localEnvFacts carries node version + absolute path, python degrade
 test('checks: runLocalChecks rows — no sky130, Node/Python carry absolute paths', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-localchk-'))
   try {
-    const results = await runLocalChecks({ config: { workspace_root: dir } })
+    const results = await runLocalChecks(dir)
     const items = results.map((r) => r.item)
     assert.deepEqual(items, ['Connectivity (local)', 'Node', 'Python', 'Disk capacity (workspace)', 'Workspace writable'])
     const node = results.find((r) => r.item === 'Node')

@@ -40,10 +40,11 @@ test('assets: vendored .js packages with license and copy locations, reports gon
   assert.equal((assetsSrc.match(/license: 'MIT'/g) ?? []).length, 1, 'only plotly is vendored now')
   assert.ok(assetsSrc.includes('function scanCopies'), 'the bounded workspace copy scan must exist')
   assert.ok(assetsSrc.includes("'node_modules'") && assetsSrc.includes("startsWith('.')"), 'scan must skip node_modules and dot dirs')
-  // the client consumes packages from /api/assets; the sweep-report listing is gone
+  // the client consumes packages from /api/assets; the sweep-report listing is
+  // gone, and the route scans no workspace anymore (the family root is retired)
   assert.ok(!src.includes("API + '/dirs'"), 'the assets area must not list sweep reports anymore')
-  assert.ok(/assetsStatus\(ws \? ws\.config\.workspace_root : null\)/.test(indexSrc), '/api/assets must pass the workspace root for the copy scan')
-  assert.ok(indexSrc.includes("route === '/api/dirs'"), 'the dirs route stays (public surface; only client consumption was removed)')
+  assert.ok(/assetsStatus\(\)/.test(indexSrc), '/api/assets serves the package copies without a workspace scan')
+  assert.ok(!indexSrc.includes("route === '/api/dirs'"), 'the orphaned dirs route is retired')
   assertDictKeys(src, ['assets.colPkg', 'assets.colLicense', 'assets.colPkgCopy', 'assets.colRoute',
     'assets.colWsCopies', 'assets.noCopies', 'assets.notices'])
   assert.ok(!src.includes("'assets.sweepReports'") && !src.includes("'assets.sharedCopy'"), 'removed asset keys must stay out of both dictionaries')
