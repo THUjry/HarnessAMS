@@ -20,7 +20,8 @@ Checklist (per package, run from the package directory):
      browser half — combo-loaded classic script, single file), `server/` (host-half
      modules), `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js` (the 6 model
      tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/
-     `safe_trash`), `cordis.patch.yml`, `assets/` (`plotly.min.js` about 4.6 MB + the vendored
+     `safe_trash`), `icon.png` (the plugin-manager display icon), `cordis.patch.yml`,
+     `assets/` (`plotly.min.js` about 4.6 MB + the vendored
      xterm bundle — `xterm.js`, `xterm.css`, `xterm-addon-fit.js`, `xterm-addon-search.js`
      — + `THIRD_PARTY_NOTICES.md`; the Plotly and xterm attributions travel with the
      assets), `scripts/selfcheck/` (2 files:
@@ -33,8 +34,9 @@ Checklist (per package, run from the package directory):
      PDK model files, `docs/`, `tests/`,
      `install_suite/`, `.gitattributes`, or the repo-root README/AGENTS/CHANGELOG
      (running from `src/` keeps them out).
-   - `dsh-harnessams-suite` (run in `install_suite/`) must contain exactly `cordis.patch.yml`
-     (plus `package.json`); nothing else.
+   - `dsh-harnessams-suite` (run in `install_suite/`) must contain exactly `icon.png`
+     (the plugin-manager display icon) and `cordis.patch.yml` (plus `package.json`);
+     nothing else.
 3. Publish
    - `npm publish` from the package directory.
 4. Post-publish verification

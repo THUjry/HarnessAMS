@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "description": "HarnessAMS aggregate bundle: install all first-party HarnessAMS plugins in one step (pure patch package, no third-party plugins)",
   "type": "module",
+  "icon": "icon.png",
   "files": [
+    "icon.png",
     "cordis.patch.yml"
   ],
   "dsh": {
