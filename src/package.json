@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-project task sidebar) plus remote machines over @linxin666/dsh-ssh, per-project health checks, disk usage, digital assets, the generic remote batch channel (batch_submit/batch_poll/batch_fetch) and the simulator-agnostic analysis tools (collect/progress/report/trash)",
   "type": "module",
+  "icon": "icon.png",
   "main": "index.js",
   "exports": {
     ".": "./index.js",
@@ -21,6 +22,7 @@
     "batch.js",
     "remote.js",
     "trash.js",
+    "icon.png",
     "cordis.patch.yml",
     "selfcheck/",
     "assets/",
