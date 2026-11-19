@@ -2,7 +2,8 @@
 // (2026-11-18): the old free-typed text input is gone; picking a remote work
 // dir now walks the machine's real tree through the dsh-ssh exec funnel
 // (../remote.js execRemote — alias addressing, timeout-KILL wrapper, error
-// attribution). One level per call, directories only, bounded listing.
+// attribution). One level per call, directories only, bounded listing. The
+// default root is the project's settings.remote_root (passed by the route).
 import { execRemote, shq, resolveMachine } from '../remote.js'
 
 const MAX_ENTRIES = 200
@@ -27,12 +28,12 @@ export function parseLsDirs(stdout) {
   return out
 }
 
-// List one remote directory level. dir defaults to the machine's configured
-// remote root and must be absolute. Returns { dir, parent, dirs, truncated };
-// every failure mode throws with an attributable message (the route maps it
-// to a status code).
-export async function remoteBrowse(ctx, machineId, dir) {
-  const { machine, alias, remoteRoot } = await resolveMachine(ctx, machineId)
+// List one remote directory level. `remoteRoot` (the project's
+// settings.remote_root) is the default listing root; dir must be absolute.
+// Returns { dir, parent, dirs, truncated }; every failure mode throws with an
+// attributable message (the route maps it to a status code).
+export async function remoteBrowse(ctx, machineId, dir, remoteRoot) {
+  const { alias, remoteRoot: root } = await resolveMachine(ctx, machineId, remoteRoot)
   let target = String(dir ?? '').trim().replace(/\\/g, '/')
   if (!target) target = remoteRoot
   if (!target.startsWith('/')) {

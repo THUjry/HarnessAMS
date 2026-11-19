@@ -1,9 +1,9 @@
 // Project self-check tests (settings + orchestrator + verify assets + client
 // contracts). Run: bare `node --test` from the repo root.
 //
-// The flows call startSelfcheck() DIRECTLY with a temp workspace config (the
-// route-level ws discovery is global state; guards are covered separately) and
-// drive a mock ctx.tools shell that:
+// The flows call startSelfcheck() DIRECTLY with a temp project (runs live under
+// <project>/.harnessams/selfcheck since the 2026-11-19 storage fix) and drive a
+// mock ctx.tools shell that:
 //   - answers ssh_* (@linxin666/dsh-ssh) with scripted structured values —
 //     every ssh_exec command (wrapped in `timeout -s KILL ... sh -c "…"`)
 //     is bash -n validated here, same as server.test.mjs;
@@ -25,10 +25,11 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { apply, toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { defaultSettings, readSettings, validateSettings, writeSettings, settingsPath } from '../src/server/settings.js'
+import { defaultSettings, readSettings, validateSettings, writeSettings, configPath } from '../src/server/settings.js'
 import { startSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR } from '../src/server/selfcheck.js'
+import { runSelfcheckAction } from '../src/tools/selfcheck.js'
 import { verifyRun, siValue } from '../src/scripts/selfcheck/selfcheck_verify.mjs'
-import { assertValidShell, callRoute, getReq, setRemoteMachines, clientSrc, assertDictKeys } from './helpers.mjs'
+import { assertValidShell, callRoute, getReq, clientSrc, assertDictKeys } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -318,10 +319,10 @@ function makeHarness({ scenario = {} }) {
   return ctx
 }
 
-async function waitDone(runId, ws, timeoutMs = 60_000) {
+async function waitDone(runId, projectPath, timeoutMs = 60_000) {
   const t0 = Date.now()
   for (;;) {
-    const run = getSelfcheck(runId, ws)
+    const run = getSelfcheck(runId, projectPath)
     if (run?.status === 'done') return run
     if (Date.now() - t0 > timeoutMs) {
       throw new Error('run did not finish; steps: ' + JSON.stringify(run?.steps?.map((s) => [s.item, s.ok])))
@@ -330,22 +331,32 @@ async function waitDone(runId, ws, timeoutMs = 60_000) {
   }
 }
 
-async function waitDiagnoses(runId, ws, count, timeoutMs = 15_000) {
+async function waitDiagnoses(runId, projectPath, count, timeoutMs = 15_000) {
   const t0 = Date.now()
   for (;;) {
-    const run = getSelfcheck(runId, ws)
+    const run = getSelfcheck(runId, projectPath)
     if ((run?.diagnoses ?? []).length >= count) return run
     if (Date.now() - t0 > timeoutMs) throw new Error(`expected ${count} diagnoses, got ${JSON.stringify(run?.diagnoses)}`)
     await new Promise((r) => setTimeout(r, 30))
   }
 }
 
-async function startFlow({ scenario = {}, settings = {}, sessions, remote = false }) {
+// The finalize-side artifact cleanup is fire-and-forget — poll briefly for the
+// expected end state instead of asserting synchronously.
+async function waitArtifactsGone(runDir, timeoutMs = 5_000) {
+  const t0 = Date.now()
+  for (;;) {
+    const left = fs.readdirSync(runDir).filter((n) => !n.startsWith('selfcheck_run.json'))
+    if (!left.length) return left
+    if (Date.now() - t0 > timeoutMs) return left
+    await new Promise((r) => setTimeout(r, 20))
+  }
+}
+
+async function startFlow({ scenario = {}, settings = {} }) {
   const tmp = await tmpDir()
   const projectPath = path.join(tmp, 'project')
-  const wsRoot = path.join(tmp, 'wsroot')
   await fsp.mkdir(projectPath, { recursive: true })
-  await fsp.mkdir(wsRoot, { recursive: true })
   // worker scripts root for the batch tools (dummy tree; upload is mocked)
   const scriptsRoot = path.join(tmp, 'scripts')
   fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
@@ -359,69 +370,82 @@ async function startFlow({ scenario = {}, settings = {}, sessions, remote = fals
   const merged = { ...defaultSettings(), ...settings }
   await writeSettings(projectPath, merged)
 
-  let restoreMachines = null
-  if (remote) {
-    // alias node1 -> remote root, hermetic via the env override (lab9 stays
-    // unconfigured for the no-root guard test)
-    restoreMachines = setRemoteMachines({ node1: '/home/op/sim' })
-  }
   ctx.workspaceRegistry.list = () => [
     { id: 'ws-local', path: projectPath, title: 'Local project', sessionIds: [sessionId] },
   ]
-  const ws = { config: { workspace_root: wsRoot }, configPath: path.join(wsRoot, 'harnessams.json') }
   const start = await startSelfcheck(ctx, {
     sessionId,
     project: { id: 'ws-local', path: projectPath, title: 'Local project' },
     lang: 'en',
-    ws,
-    req: {},
   })
   const restoreAll = () => {
-    restoreMachines?.()
     if (prevScripts === undefined) delete process.env.HARNESSAMS_SIM_SCRIPTS_DIR
     else process.env.HARNESSAMS_SIM_SCRIPTS_DIR = prevScripts
   }
-  return { ctx, start, ws, tmp, projectPath, restoreAll, sessionId }
+  return { ctx, start, tmp, projectPath, restoreAll, sessionId }
 }
 
 // ---------------------------------------------------------------------------
 // 1) settings
 // ---------------------------------------------------------------------------
 
-test('settings: defaults, validation, persistence', async () => {
+test('settings: defaults, validation, persistence, workspace section', async () => {
   assert.deepEqual(defaultSettings(), {
-    run_mode: 'local', machine_id: null, remote_dir: '.harnessams/selfcheck',
+    run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
     scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
   })
   // valid full object round-trips
   const v = validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1',
-    remote_dir: '/abs/path', scheduler: 'direct', compute_script_remote: 'js' })
+    remote_root: '/home/op/sim', remote_dir: '/abs/path', scheduler: 'direct', compute_script_remote: 'js' })
   assert.ok(!v.error, v.error)
   assert.equal(v.settings.compute_script_remote, 'js')
   // enum + mode coupling guards
   assert.match(validateSettings({ ...defaultSettings(), simulator: 'ngspice' }).error, /simulator must be one of/)
   assert.match(validateSettings({ ...defaultSettings(), scheduler: 'none' }).error, /scheduler must be one of/)
   assert.match(validateSettings({ ...defaultSettings(), run_mode: 'remote' }).error, /run_mode=remote requires machine_id/)
+  assert.match(validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1' }).error,
+    /run_mode=remote requires remote_root/)
   assert.match(validateSettings({ ...defaultSettings(), remote_dir: 'a/../b' }).error, /must not contain/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_root: 'rel/path' }).error, /absolute remote path/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_root: '/a/../b' }).error, /must not contain/)
 
   const tmp = await tmpDir()
   const missing = await readSettings(tmp)
   assert.equal(missing.settings.run_mode, 'local') // missing file = defaults
   await writeSettings(tmp, v.settings)
+  const raw = JSON.parse(await fsp.readFile(configPath(tmp), 'utf8'))
+  // fresh file: single config carries the workspace section with resolved defaults
+  assert.equal(raw.version, 1)
+  assert.ok(raw.workspace.sim_scripts_dir, 'workspace defaults laid down at creation')
+  // the scripts default must be a RESOLVED sibling path (path.join folds '..',
+  // so a wrong parent level silently produces <plugin>\SmartAnaSim\scripts)
+  assert.ok(!raw.workspace.sim_scripts_dir.includes('..'), 'default sim_scripts_dir must be resolved: ' + raw.workspace.sim_scripts_dir)
+  const sibling = path.resolve(REPO, '..', 'HarnessAMS-SmartAnaSim', 'scripts')
+  if (fs.existsSync(sibling)) assert.equal(raw.workspace.sim_scripts_dir, sibling)
+  assert.equal(raw.workspace.trash_dir, '.harnessams/trash')
+  assert.ok(path.isAbsolute(raw.workspace.plotly_asset))
   const back = await readSettings(tmp)
   assert.equal(back.settings.machine_id, 'm1')
+  assert.equal(back.settings.remote_root, '/home/op/sim')
   assert.equal(back.settings.compute_script_remote, 'js')
+  // read-modify-write keeps a hand-edited workspace section intact
+  raw.workspace.plotly_asset = 'C:/custom/plotly.min.js'
+  await fsp.writeFile(configPath(tmp), JSON.stringify(raw, null, 2), 'utf8')
+  await writeSettings(tmp, { ...v.settings, machine_id: 'm2' })
+  const raw2 = JSON.parse(await fsp.readFile(configPath(tmp), 'utf8'))
+  assert.equal(raw2.workspace.plotly_asset, 'C:/custom/plotly.min.js')
+  assert.equal(raw2.settings.machine_id, 'm2')
   // local mode keeps remote fields stored
   const local = validateSettings({ ...v.settings, run_mode: 'local' })
   assert.ok(!local.error)
   assert.equal(local.settings.machine_id, 'm1')
   // hand-edited junk falls back per-key instead of breaking the Overview
-  await fsp.writeFile(settingsPath(tmp), '{"run_mode":"bogus","machine_id":"x"}', 'utf8')
+  await fsp.writeFile(configPath(tmp), '{"settings":{"run_mode":"bogus","machine_id":"x"}}', 'utf8')
   const dirty = await readSettings(tmp)
   assert.equal(dirty.settings.run_mode, 'local')
   assert.equal(dirty.settings.machine_id, 'x')
   // legacy scheduler=none (settings file from before the direct rename) migrates on read
-  await fsp.writeFile(settingsPath(tmp), '{"scheduler":"none"}', 'utf8')
+  await fsp.writeFile(configPath(tmp), '{"settings":{"scheduler":"none"}}', 'utf8')
   const legacy = await readSettings(tmp)
   assert.equal(legacy.settings.scheduler, 'direct')
 })
@@ -554,7 +578,7 @@ test('verify: three channels agree; a >1% drift fails', async () => {
 
 const driveRoute = (routes, req) => callRoute(routes[0].handler, req)
 
-test('routes: project-settings GET/PUT happy path + guards', async () => {
+test('routes: GET project-settings defaults + the /api/tool funnel + guards', async () => {
   const tmp = await tmpDir()
   const projectPath = path.join(tmp, 'proj')
   await fsp.mkdir(projectPath, { recursive: true })
@@ -568,48 +592,84 @@ test('routes: project-settings GET/PUT happy path + guards', async () => {
   assert.equal(ok.code, 200)
   assert.equal(ok.body.settings.run_mode, 'local') // defaults
 
+  // settings ride the tool funnel (the table's confirm button): written, then
+  // AGENTS.md synced in the same action
   const put = await driveRoute(routes, {
-    method: 'PUT', url: '/harnessams/api/project-settings?sessionId=s1', headers: {},
-    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1' })) },
+    method: 'POST', url: '/harnessams/api/tool', headers: {},
+    async *[Symbol.asyncIterator]() {
+      yield Buffer.from(JSON.stringify({
+        sessionId: 's1', action: 'save_agentsmd',
+        settings: { ...defaultSettings(), run_mode: 'remote', machine_id: 'm1', remote_root: '/home/op/sim' },
+      }))
+    },
   })
-  assert.equal(put.code, 200)
-  assert.equal(put.body.settings.machine_id, 'm1')
+  assert.equal(put.code, 200, JSON.stringify(put.body))
+  assert.ok(put.body.path.endsWith('AGENTS.md'))
+  assert.equal((await readSettings(projectPath)).settings.machine_id, 'm1')
   assert.equal((await readSettings(projectPath)).settings.scheduler, 'lsf')
 
   const badPut = await driveRoute(routes, {
-    method: 'PUT', url: '/harnessams/api/project-settings?sessionId=s1', headers: {},
-    async *[Symbol.asyncIterator]() { yield Buffer.from('{"run_mode":"nope"}') },
+    method: 'POST', url: '/harnessams/api/tool', headers: {},
+    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1', action: 'save_agentsmd', settings: { run_mode: 'nope' } })) },
   })
   assert.equal(badPut.code, 400)
 
   const noSession = await driveRoute(routes, getReq('/harnessams/api/project-settings?sessionId=zzz'))
   assert.equal(noSession.code, 404)
 
-  // no global restore-latest: a global "latest" run would bleed verdicts
-  // across projects, so an id-less GET is a hard 400
-  const noId = await driveRoute(routes, getReq('/harnessams/api/selfcheck'))
+  // action=status guards: run_id pins one run (a global "latest" run would
+  // bleed verdicts across projects)
+  const noId = await driveRoute(routes, {
+    method: 'POST', url: '/harnessams/api/tool', headers: {},
+    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1', action: 'status' })) },
+  })
   assert.equal(noId.code, 400)
 
-  const noRun = await driveRoute(routes, getReq('/harnessams/api/selfcheck?id=ghost-run'))
+  const noRun = await driveRoute(routes, {
+    method: 'POST', url: '/harnessams/api/tool', headers: {},
+    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1', action: 'status', run_id: 'ghost-run' })) },
+  })
   assert.equal(noRun.code, 404) // unknown run id: 404 regardless of real runs on disk (hermetic)
+
+  const unknownAction = await driveRoute(routes, {
+    method: 'POST', url: '/harnessams/api/tool', headers: {},
+    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1', action: 'nope' })) },
+  })
+  assert.equal(unknownAction.code, 400)
+
+  const unknownSession = await driveRoute(routes, {
+    method: 'POST', url: '/harnessams/api/tool', headers: {},
+    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 'ghost', action: 'run' })) },
+  })
+  assert.equal(unknownSession.code, 404)
 })
 
-test('route: selfcheck POST rejects unknown session / remote project', async () => {
+test('tool actions: env returns facts+checks; run/status round-trip; project resolution via session', async () => {
   const tmp = await tmpDir()
   const projectPath = path.join(tmp, 'proj')
   await fsp.mkdir(projectPath, { recursive: true })
+  await writeSettings(projectPath, { ...defaultSettings(), simulator: 'none' })
   const ctx = makeHarness({})
-  const routes = []
-  ctx.webServer.register = (r) => routes.push(r)
-  await apply(ctx)
+  ctx.workspaceRegistry.list = () => [{ id: 'ws1', path: projectPath, title: 'P', sessionIds: ['s1'] }]
+  const project = { id: 'ws1', path: projectPath, title: 'P' }
 
-  const body = (obj) => ({
-    method: 'POST', url: '/harnessams/api/selfcheck', headers: {},
-    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(obj)) },
-  })
+  const env = await runSelfcheckAction(ctx, { sessionId: 's1', project, action: 'env' })
+  assert.ok(env.ok)
+  assert.ok(env.facts.node.version.startsWith('v'))
+  assert.ok(env.checks.some((r) => r.item === 'Node'))
+  assert.ok(env.checks.some((r) => /Disk capacity/.test(r.item)))
 
-  const unknown = await driveRoute(routes, body({ sessionId: 'ghost' }))
-  assert.equal(unknown.code, 404)
+  const started = await runSelfcheckAction(ctx, { sessionId: 's1', project, action: 'run', lang: 'en' })
+  assert.ok(started.ok, started.error)
+  const run = await waitDone(started.run_id, projectPath)
+  assert.equal(run.summary.ok, true)
+  const status = await runSelfcheckAction(ctx, { sessionId: 's1', project, action: 'status', runId: started.run_id })
+  assert.ok(status.ok)
+  assert.equal(status.run.id, started.run_id)
+  // cross-project fence: another project's store never answers
+  const other = await tmpDir()
+  const miss = await runSelfcheckAction(ctx, { sessionId: 's1', project: { id: 'w2', path: other, title: 'O' }, action: 'status', runId: started.run_id })
+  assert.equal(miss.code, 404)
 })
 
 // ---------------------------------------------------------------------------
@@ -620,7 +680,7 @@ test('flow: simulator=none + local (python compute)', async () => {
   const f = await startFlow({ settings: { simulator: 'none' } })
   try {
     assert.ok(f.start.runId, f.start.error)
-    const run = await waitDone(f.start.runId, f.ws)
+    const run = await waitDone(f.start.runId, f.projectPath)
     assert.equal(run.summary.ok, true)
     assert.equal(run.summary.remote, 'skipped')
     const items = run.steps.map((s) => [s.item, s.ok])
@@ -631,16 +691,19 @@ test('flow: simulator=none + local (python compute)', async () => {
     assert.ok(items.every(([, ok]) => ok === true), JSON.stringify(items))
     // local-only: not a single rw_* call happened
     assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0)
-    // artifacts landed under the workspace selfcheck root
-    assert.ok(fs.existsSync(path.join(run.runDir, 'lpf', 'psf', '00_psf.csv')))
+    // run record survives under the project's .harnessams/selfcheck; a CLEAN
+    // run's artifacts are deleted at finalize (2026-11-19 ruling)
+    assert.ok(run.runDir.includes(path.join('.harnessams', 'selfcheck')), run.runDir)
     assert.ok(fs.existsSync(path.join(run.runDir, 'selfcheck_run.json')))
+    const left = await waitArtifactsGone(run.runDir)
+    assert.deepEqual(left, [], 'clean run must leave only selfcheck_run.json: ' + left.join(', '))
   } finally { f.restoreAll() }
 })
 
 test('flow: simulator=none + local (js compute)', async () => {
   const f = await startFlow({ settings: { simulator: 'none', compute_script_local: 'js' } })
   try {
-    const run = await waitDone(f.start.runId, f.ws)
+    const run = await waitDone(f.start.runId, f.projectPath)
     assert.equal(run.summary.ok, true)
     const verify = run.steps.find((s) => s.settingColumn === 'compute_local')
     assert.equal(verify.ok, true)
@@ -651,7 +714,7 @@ test('flow: simulator=none + local (js compute)', async () => {
 test('flow: simulator=spectre + local', async () => {
   const f = await startFlow({})
   try {
-    const run = await waitDone(f.start.runId, f.ws)
+    const run = await waitDone(f.start.runId, f.projectPath)
     assert.equal(run.summary.ok, true)
     const byCol = {}
     for (const s of run.steps) byCol[s.item] = s
@@ -668,16 +731,15 @@ test('flow: simulator=spectre + local', async () => {
   } finally { f.restoreAll() }
 })
 
-test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) passes', async () => {
+test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) passes; failed-run evidence kept then cleaned by the next run', async () => {
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', scheduler: 'lsf', compute_script_remote: 'js' },
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'lsf', compute_script_remote: 'js' },
     scenario: { lsfSubmitFail: true },
-    remote: true,
   })
   try {
     assert.ok(f.start.runId, f.start.error)
-    await waitDone(f.start.runId, f.ws)
-    const run = await waitDiagnoses(f.start.runId, f.ws, 1)
+    await waitDone(f.start.runId, f.projectPath)
+    const run = await waitDiagnoses(f.start.runId, f.projectPath, 1)
     assert.equal(run.summary.remote, 'ok-via-fallback')
     assert.equal(run.summary.ok, true)
 
@@ -713,6 +775,21 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) pass
 
     // R4 cross-check ran the local python verify on fetched artifacts
     assert.ok(f.ctx.__downloads.some((d) => /_psf\.csv$/.test(d.remotePath)))
+
+    // diagnosed run keeps its evidence (the diagnosis session inspects runDir)
+    await new Promise((r) => setTimeout(r, 200))
+    assert.ok(fs.existsSync(path.join(run.runDir, 'remote')), 'diagnosed run keeps artifacts')
+    // the NEXT run's start cleans historical evidence
+    const prevRunDir = run.runDir
+    const second = await startSelfcheck(f.ctx, {
+      sessionId: f.sessionId,
+      project: { id: 'ws-local', path: f.projectPath, title: 'Local project' },
+      lang: 'en',
+    })
+    assert.ok(second.runId, second.error)
+    await waitDone(second.runId, f.projectPath)
+    assert.ok(!fs.existsSync(path.join(prevRunDir, 'remote')), 'next run cleans historical evidence')
+    assert.ok(fs.existsSync(path.join(prevRunDir, 'selfcheck_run.json')), 'run record always survives')
   } finally { f.restoreAll() }
 })
 
@@ -721,14 +798,13 @@ test('flow: spectre + remote — scheduler=direct fails → verdict fails (nothi
   // primary-attempt failures unconditionally — a broken direct submit would
   // otherwise still report remote:'ok' / summary.ok:true.
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', scheduler: 'direct' },
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'direct' },
     scenario: { directRunFail: true },
-    remote: true,
   })
   try {
     assert.ok(f.start.runId, f.start.error)
-    await waitDone(f.start.runId, f.ws)
-    const run = await waitDiagnoses(f.start.runId, f.ws, 1)
+    await waitDone(f.start.runId, f.projectPath)
+    const run = await waitDiagnoses(f.start.runId, f.projectPath, 1)
     assert.equal(run.summary.remote, 'failed')
     assert.equal(run.summary.ok, false)
     assert.equal(run.summary.fallback, undefined)
@@ -740,13 +816,12 @@ test('flow: spectre + remote — scheduler=direct fails → verdict fails (nothi
 
 test('flow: spectre + remote — fallback also fails → final diagnosis covers the rest', async () => {
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', scheduler: 'lsf' },
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'lsf' },
     scenario: { lsfSubmitFail: true, directRunFail: true },
-    remote: true,
   })
   try {
-    await waitDone(f.start.runId, f.ws)
-    const run = await waitDiagnoses(f.start.runId, f.ws, 2)
+    await waitDone(f.start.runId, f.projectPath)
+    const run = await waitDiagnoses(f.start.runId, f.projectPath, 2)
     assert.equal(run.summary.remote, 'failed')
     assert.equal(run.summary.ok, false)
     const triggers = run.diagnoses.map((d) => d.trigger).sort()
@@ -761,11 +836,10 @@ test('flow: spectre + remote — fallback also fails → final diagnosis covers 
 
 test('flow: none + remote — upload, remote compute (python), download + js cross-check', async () => {
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', simulator: 'none', compute_script_local: 'js' },
-    remote: true,
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', simulator: 'none', compute_script_local: 'js' },
   })
   try {
-    const run = await waitDone(f.start.runId, f.ws)
+    const run = await waitDone(f.start.runId, f.projectPath)
     assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result])))
     const uploads = f.ctx.__uploads
     // per topo: every golden file + 2 verify scripts + 1 parser (counted from the
@@ -794,12 +868,11 @@ test('flow: none + remote — upload, remote compute (python), download + js cro
 
 test('flow: remote verify failure skips the cross-check step', async () => {
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', simulator: 'none' },
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', simulator: 'none' },
     scenario: { remoteVerifyFail: true },
-    remote: true,
   })
   try {
-    const run = await waitDone(f.start.runId, f.ws)
+    const run = await waitDone(f.start.runId, f.projectPath)
     assert.equal(run.summary.ok, false)
     const cross = run.steps.find((s) => /artifact download/.test(s.item))
     assert.equal(cross.ok, null) // skipped, not failed
@@ -811,30 +884,24 @@ test('flow: remote verify failure skips the cross-check step', async () => {
 // 8) start guards + re-entry
 // ---------------------------------------------------------------------------
 
-test('start guards: unknown machine / no remote root', async () => {
-  const f1 = await startFlow({ settings: { run_mode: 'remote', machine_id: 'nope' }, remote: true })
+test('start guards: unknown machine / missing remote root', async () => {
+  const f1 = await startFlow({ settings: { run_mode: 'remote', machine_id: 'nope', remote_root: '/home/op/sim' } })
   try {
     assert.equal(f1.start.code, 404)
     assert.match(f1.start.error, /no such dsh-ssh host: nope/)
   } finally { f1.restoreAll() }
 
-  // alias present in the dsh-ssh registry but absent from remote_machines -> 409
+  // remote mode without a remote_root in the project config -> 409
   const tmp = await tmpDir()
   const projectPath = path.join(tmp, 'project')
   await fsp.mkdir(projectPath, { recursive: true })
   const ctx = makeHarness({})
-  const restore = setRemoteMachines({ node1: '/home/op/sim' })
-  try {
-    await writeSettings(projectPath, { ...defaultSettings(), run_mode: 'remote', machine_id: 'lab9' })
-    const r = await startSelfcheck(ctx, {
-      sessionId: 's1', project: { id: 'ws-local', path: projectPath, title: 'P' }, lang: 'en',
-      ws: { config: { workspace_root: path.join(tmp, 'wsroot') } }, req: {},
-    })
-    assert.equal(r.code, 409)
-    assert.match(r.error, /no remote root configured for lab9/)
-  } finally {
-    restore()
-  }
+  await writeSettings(projectPath, { ...defaultSettings(), run_mode: 'remote', machine_id: 'lab9' })
+  const r = await startSelfcheck(ctx, {
+    sessionId: 's1', project: { id: 'ws-local', path: projectPath, title: 'P' }, lang: 'en',
+  })
+  assert.equal(r.code, 409)
+  assert.match(r.error, /requires remote_root/)
 })
 
 test('re-entry: a second start while running gets 409', async () => {
@@ -844,13 +911,13 @@ test('re-entry: a second start while running gets 409', async () => {
     const second = await startSelfcheck(f.ctx, {
       sessionId: f.sessionId,
       project: { id: 'ws-local', path: f.projectPath, title: 'P' },
-      lang: 'en', ws: f.ws, req: {},
+      lang: 'en',
     })
     assert.equal(second.code, 409)
     assert.match(second.error, /already running/)
     await f.ctx.__waitHang()
     f.ctx.__resolveHang()
-    const run = await waitDone(f.start.runId, f.ws)
+    const run = await waitDone(f.start.runId, f.projectPath)
     assert.equal(run.status, 'done')
   } finally { f.restoreAll() }
 })
@@ -889,14 +956,14 @@ test('persist serialization: status file stays valid JSON through a run and matc
   const f = await startFlow({ settings: { simulator: 'none' } })
   try {
     assert.ok(f.start.runId, f.start.error)
-    const file = path.join(f.ws.config.workspace_root, 'selfcheck', f.start.runId, 'selfcheck_run.json')
+    const file = path.join(f.projectPath, '.harnessams', 'selfcheck', f.start.runId, 'selfcheck_run.json')
     let corrupt = null
     // hammer the status file while the orchestrator writes it: every published
     // snapshot must parse as a complete JSON document (tmp+rename is the only
     // publish path, and the per-run chain keeps two writes from interleaving)
     const t0 = Date.now()
     while (Date.now() - t0 < 30_000) {
-      const live = getSelfcheck(f.start.runId, f.ws)
+      const live = getSelfcheck(f.start.runId, f.projectPath)
       if (live?.status === 'done') break
       let raw
       try { raw = fs.readFileSync(file) } catch { /* not published yet */ }
@@ -914,20 +981,25 @@ test('persist serialization: status file stays valid JSON through a run and matc
   } finally { f.restoreAll() }
 })
 
-test('client static contract: keys bilingual, endpoints wired, two-row table, poll', async () => {
+test('client static contract: keys bilingual, tool funnel wired, staged table, poll', async () => {
   const src = await clientSrc()
   assertDictKeys(src, [
     'pset.title', 'pset.dirLabel', 'pset.dirLocalHint', 'pset.dirRemoteRel',
-    'pset.colMode', 'pset.colMachine', 'pset.colSched',
+    'pset.colMode', 'pset.colMachine', 'pset.colRoot', 'pset.colSched',
     'pset.colSim', 'pset.colCompLocal', 'pset.colCompRemote', 'pset.mode.local', 'pset.mode.remote',
     'pset.sched.lsf', 'pset.sched.direct', 'pset.sim.spectre', 'pset.sim.none', 'pset.comp.python',
-    'pset.comp.js', 'pset.noMachine', 'pset.saveFailed',
+    'pset.comp.js', 'pset.noMachine', 'pset.saveFailed', 'pset.unsaved', 'pset.confirmBtn',
+    'pset.rootHint', 'pset.rootMissing', 'pset.stagedHint',
     'selfchk.title', 'selfchk.desc', 'selfchk.run', 'selfchk.running', 'selfchk.startFailed',
     'selfchk.scopeLocal', 'selfchk.scopeRemote', 'selfchk.noneYet', 'selfchk.skipped',
     'selfchk.summaryOk', 'selfchk.summaryFallback', 'selfchk.summaryFail', 'selfchk.diagDone', 'selfchk.diagFail',
   ])
-  assert.ok(src.includes("API + '/project-settings?"), 'client must call /api/project-settings')
-  assert.ok(src.includes("API + '/selfcheck?id='"), 'client must poll /api/selfcheck by run id')
+  assert.ok(src.includes("API + '/tool'"), 'all four buttons ride the single /api/tool funnel')
+  assert.ok(src.includes('const callToolRoute ='), 'tool funnel helper')
+  assert.ok(src.includes("action: 'status', run_id: runId"), 'poll via action=status')
+  assert.ok(src.includes("action: 'run'"), 'self-check start via action=run')
+  assert.ok(src.includes("action: 'env'"), 'local env listing via action=env')
+  assert.ok(src.includes("action: 'save_agentsmd'"), 'save/confirm via action=save_agentsmd')
   assert.ok(src.includes('function ProjectSelfcheck('))
   assert.ok(src.includes('function SettingsTable('))
   assert.ok(src.includes('function SelfcheckSteps('))
@@ -935,8 +1007,11 @@ test('client static contract: keys bilingual, endpoints wired, two-row table, po
   assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath })'), 'mounted in the Overview tab')
   assert.match(src, /,\s*3_000\s*\)/, '3s poll while running')
   assert.ok(src.includes("'local'"), 'local dir display branch')
-  // remote-switch auto-pick: the machine column only renders in remote mode, so
-  // without this the mode switch PUT-400s and rolls back — remote unreachable
+  // staged table: red unsaved marker + confirm button while the draft differs
+  assert.ok(src.includes("if (dirty)"), 'dirty branch in the status column')
+  assert.ok(src.includes("tr('pset.unsaved')"), 'red unsaved marker')
+  assert.ok(src.includes("JSON.stringify(draft) !== JSON.stringify(settings)"), 'dirty = draft vs saved')
+  // remote-switch auto-pick: the machine column only renders in remote mode
   assert.ok(src.includes("value === 'remote' && !next.machine_id && machines.length"),
     'remote switch must auto-pick a machine when none is set')
   assert.ok(src.includes('next.machine_id = machines[0].id'), 'auto-pick assigns machines[0].id')

@@ -6,11 +6,16 @@
 // (an earlier trash layout still found in some workspaces) restore as-is.
 import fs from 'node:fs'
 import path from 'node:path'
-import { readWorkspaceConfig } from './batch.js'
+import { resolveWorkspacePaths } from './server/settings.js'
 
-export function trashDir() {
-  const { config, dir } = readWorkspaceConfig()
-  return config.trash_dir ? path.resolve(config.trash_dir) : path.join(dir, '.trash')
+// Trash root: the owning project's workspace_config.json workspace.trash_dir
+// (default .harnessams/trash under the project root). `anchor` is any path
+// inside the project — for a trash action that is the target itself; without
+// one the nearest ancestor store of the process cwd decides (list/restore/purge
+// operate inside the trash root, so the anchor only picks WHICH project's
+// trash; .harnessams/trash under that root).
+export function trashDir(anchor) {
+  return resolveWorkspacePaths(anchor ?? process.cwd()).trash_dir
 }
 
 function nowStamp() {
@@ -54,7 +59,7 @@ function treeSize(p) {
   return total
 }
 
-function rootOf(opts) { return path.resolve(opts?.trashDir ?? trashDir()) }
+function rootOf(opts) { return path.resolve(opts?.trashDir ?? trashDir(opts?.anchor)) }
 
 // Fence a restore/purge target: a single name segment, resolved strictly inside
 // the trash root (realpath catches ../, absolute paths, drive letters and
@@ -174,9 +179,10 @@ export function purgeEntry(name, opts = {}) {
 export function safeTrashTool() {
   return {
     name: 'safe_trash',
-    description: 'Workspace trash (safety by default): move paths into <workspace>/.trash instead of deleting, '
-      + 'then list, restore, or explicitly purge an entry (restore/purge take an entry name exactly as list '
-      + 'reports it; names are fenced inside the trash directory).',
+    description: 'Project trash (safety by default): move paths into the owning project\'s '
+      + '.harnessams/trash instead of deleting, then list, restore, or explicitly purge an entry '
+      + '(restore/purge take an entry name exactly as list reports it; names are fenced inside the '
+      + 'trash directory).',
     parameters: {
       action: { type: 'string', required: true, enum: ['trash', 'list', 'restore', 'purge'],
         description: 'trash | list | restore | purge' },
@@ -198,7 +204,8 @@ export function safeTrashTool() {
       }
       if (args.action === 'trash') {
         if (!args.path) return { ok: false, error: 'trash requires path=<file or directory>' }
-        return { ok: true, output: trashPaths([String(args.path)]).join('\n') }
+        // anchor the trash root at the target's project (nearest .harnessams)
+        return { ok: true, output: trashPaths([String(args.path)], { anchor: String(args.path) }).join('\n') }
       }
       return { ok: false, error: `unknown action: ${args.action}` }
     },

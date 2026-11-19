@@ -475,22 +475,20 @@ if (MANIFEST.rounds.length) { loadRound(MANIFEST.rounds[0].file); }
 </html>
 `
 
-// Walk upward for harnessams.json (bare or inside harnessams-workspace/), at
-// most 8 levels, starting from the PROJECT directory — the report's plotly
-// resolution anchor. Corrupt configs are skipped and the walk continues.
-// NOT server/workspace.js's findWorkspaceConfig: that one anchors on
-// cwd/package/homedir, walks 6 levels and throws on a broken file (it serves
-// the batch channel's global lookup instead).
-function findWorkspaceConfigFrom(startDir, maxLevels = 8) {
-  let d = path.resolve(startDir)
+// Walk upward from the report's PROJECT directory for the single project
+// config (.harnessams/workspace_config.json, 2026-11-19 — the harnessams.json
+// walkers are retired), at most 8 levels. Corrupt configs are skipped and the
+// walk continues. Only the workspace section matters here (plotly_asset).
+function findProjectConfigFrom(startDir, maxLevels = 8) {
+  let d = path.resolve(String(startDir ?? '.'))
   for (let i = 0; i < maxLevels; i++) {
-    for (const candDir of [d, path.join(d, 'harnessams-workspace')]) {
-      const cand = path.join(candDir, 'harnessams.json')
-      if (isFileLoose(cand)) {
-        try {
-          return { config: readJsonBom(cand), configDir: candDir }
-        } catch { /* corrupt config keeps the walk going */ }
-      }
+    const cand = path.join(d, '.harnessams', 'workspace_config.json')
+    if (isFileLoose(cand)) {
+      try {
+        const raw = readJsonBom(cand)
+        const ws = raw?.workspace && typeof raw.workspace === 'object' ? raw.workspace : {}
+        return { workspace: ws, root: d }
+      } catch { /* corrupt config keeps the walk going */ }
     }
     const parent = path.dirname(d)
     if (parent === d) break
@@ -503,31 +501,34 @@ function isFileLoose(p) {
   try { return fs.statSync(p).isFile() } catch { return false }
 }
 
-// Workspace-level shared Plotly copy. The single copy lives at
-// <workspace_root>/assets/plotly.min.js (workspace root = the directory holding
-// harnessams.json). Seed source search order:
+// Project-level shared Plotly copy. The single copy lives at
+// <project_root>/assets/plotly.min.js (the project root = the directory holding
+// .harnessams/, else the report's project dir). Seed source search order:
 // 1. an explicit plotly path (seed override);
-// 2. this module's ancestor directories, each probed for four candidates:
+// 2. the project config's workspace.plotly_asset (default-filled at file
+//    creation with the plugin package's shipped copy — the ~/.dsh npm-install
+//    location in installed layouts; relative values resolve against the
+//    project root);
+// 3. this module's ancestor directories, each probed for four candidates:
 //    assets/plotly.min.js (package-local assets/), src/assets/plotly.min.js
 //    (the shipped copy inside the dsh-harnessams package),
 //    node_modules/dsh-harnessams/assets/plotly.min.js (an installed sibling
 //    package) and dsh-harnessams/assets/plotly.min.js (an ancestor that is a
-//    node_modules directory) — the Python script walked from its own scripts/
-//    directory; both anchors reach the same shipped copy in dev and installed
-//    layouts;
-// 3. the workspace harnessams.json plotly_asset field (relative values resolve
-//    against the config file's directory).
-// A missing or size-stale workspace copy is (re-)seeded from the found source,
-// and the report references it with a workspace-relative src (always same-drive,
+//    node_modules directory).
+// A missing or size-stale project copy is (re-)seeded from the found source,
+// and the report references it with a project-relative src (always same-drive,
 // so it opens offline; an out-dir on another drive falls back to a copy beside
 // the report). With no local source at all the CDN is the fallback.
 function resolvePlotlySrc(forceCdn, outDir, project, plotlyArg) {
   if (forceCdn) return PLOTLY_CDN
-  const found = findWorkspaceConfigFrom(project)
-  if (!found) return PLOTLY_CDN
-  const { config, configDir } = found
-  const wsAsset = path.join(configDir, 'assets', 'plotly.min.js')
+  const found = findProjectConfigFrom(project)
+  const root = found?.root ?? path.resolve(String(project ?? '.'))
+  const wsAsset = path.join(root, 'assets', 'plotly.min.js')
   let seed = plotlyArg || null
+  if (!seed) {
+    const field = found?.workspace?.plotly_asset
+    if (field) seed = path.isAbsolute(field) ? field : path.resolve(root, field)
+  }
   if (!seed) {
     let d = path.resolve(import.meta.dirname ?? '.')
     for (let i = 0; i < 5; i++) {
@@ -542,10 +543,6 @@ function resolvePlotlySrc(forceCdn, outDir, project, plotlyArg) {
       if (parent === d) break
       d = parent
     }
-  }
-  if (!seed) {
-    const field = config?.plotly_asset
-    if (field) seed = path.isAbsolute(field) ? field : path.resolve(configDir, field)
   }
   const seedOk = !!seed && isFileLoose(seed)
   if (isFileLoose(wsAsset)) {

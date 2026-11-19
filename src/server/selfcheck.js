@@ -1,6 +1,7 @@
-// Project self-check orchestrator. One button walks the WHOLE
-// pipeline under the project's current settings (project_settings.json, see
-// settings.js) — the point is not the simulation itself but verifying machine,
+// Project self-check orchestrator. One button (or one harnessams_selfcheck
+// tool call) walks the WHOLE pipeline under the project's current settings
+// (workspace_config.json settings section, see settings.js) — the point is not
+// the simulation itself but verifying machine,
 // connection, environment, permissions, tools and compute end to end:
 //
 //   simulator=spectre  full simulation path: spectre_assemble -> run_sweep ->
@@ -39,8 +40,9 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { runPython } from '../py.js'
 import { callTool, execRemote, uploadFile, downloadFile, shq } from '../remote.js'
-import { readJob, readWorkspaceConfig, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
+import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
 import { readSettings } from './settings.js'
+import { syncAgentsMd } from './agentsmd.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
 import { fetchMachines } from './machines.js'
 
@@ -60,11 +62,34 @@ const POLL_BUDGET_MS = 10 * 60_000
 const FETCH_INCLUDES = ['point_meta.json', 'sweep_progress.json', 'errlog.txt', 'psf/*_psf.csv']
 
 // In-memory run registry (id -> run). Bounded; the authoritative record is the
-// per-run selfcheck_run.json under <workspace>/selfcheck/<id>/, so a restart
-// still serves GET /api/selfcheck from disk.
+// per-run selfcheck_run.json under <project>/.harnessams/selfcheck/<id>/, so a
+// restart still serves action=status from disk. Run ARTIFACTS (netlists, psf
+// trees, remote staging) are cleaned per the 2026-11-19 ruling: a clean
+// successful run's evidence is deleted at finalize; a diagnosed/failed run
+// keeps its evidence for the diagnosis sessions, and the NEXT run's start
+// cleans historical evidence — selfcheck_run.json always survives.
 const store = new Map()
 const MAX_RUNS = 8
 const runningBySession = new Map() // sessionId -> runId while running
+const RUN_RECORD = 'selfcheck_run.json'
+
+// Remove everything inside one run dir except the run record (and its .tmp).
+async function cleanRunArtifacts(runDir) {
+  let entries = []
+  try { entries = await fsp.readdir(runDir) } catch { return }
+  await Promise.all(entries
+    .filter((n) => n !== RUN_RECORD && n !== RUN_RECORD + '.tmp')
+    .map((n) => fsp.rm(path.join(runDir, n), { recursive: true, force: true }).catch(() => {})))
+}
+
+// Clean every historical run's artifacts under the project (called at run
+// start, before the new run dir exists — so it never touches the live run).
+async function cleanHistoricalArtifacts(projectPath) {
+  const dir = path.join(projectPath, '.harnessams', 'selfcheck')
+  let names = []
+  try { names = (await fsp.readdir(dir)).filter((n) => n.startsWith('rc_')) } catch { return }
+  await Promise.all(names.map((n) => cleanRunArtifacts(path.join(dir, n))))
+}
 
 // ---------------------------------------------------------------------------
 // Run state helpers
@@ -78,6 +103,7 @@ function runView(run) {
     startedAt: run.startedAt,
     finishedAt: run.finishedAt ?? null,
     runDir: run.runDir,
+    projectPath: run.projectPath,
     scope: run.scope,
     steps: run.steps.map((s) => ({ ...s })),
     summary: run.summary,
@@ -212,7 +238,7 @@ async function diagnoseSteps(run, steps, trigger) {
     scope: run.scope,
     runDir: run.runDir,
     machine: machine ?? null,
-    remotePath: machine?.workspace ?? null,
+    remotePath: run._priv.settings.remote_root ?? null,
     projectTitle: project?.title,
     failed,
     lang,
@@ -229,12 +255,12 @@ async function diagnoseSteps(run, steps, trigger) {
 // Entry: validate + register the run, then orchestrate in the background
 // ---------------------------------------------------------------------------
 
-export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req }) {
+export async function startSelfcheck(ctx, { sessionId, project, lang }) {
   let settings
   try {
     ({ settings } = await readSettings(project.path))
   } catch (e) {
-    return { error: `project_settings.json unreadable: ${e?.message ?? e}`, code: 400 }
+    return { error: `workspace_config.json unreadable: ${e?.message ?? e}`, code: 400 }
   }
 
   let machine = null
@@ -245,12 +271,13 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
     if (!list.ok) return { error: `dsh-ssh hosts unavailable: ${list.reason}`, code: 503 }
     machine = list.machines.find((m) => m.id === settings.machine_id || m.name === settings.machine_id) || null
     if (!machine) return { error: `no such dsh-ssh host: ${settings.machine_id}`, code: 404 }
-    if (!machine.workspace) {
-      return { error: `no remote root configured for ${machine.id} — set remote_machines["${machine.id}"] in harnessams.json`, code: 409 }
+    if (!settings.remote_root) {
+      return { error: 'run_mode=remote requires remote_root — set it in the Overview settings table '
+        + '(or pass settings to the harnessams_selfcheck tool) and confirm', code: 409 }
     }
     alias = machine.id
     try {
-      remoteBase = resolveRemoteDir(machine.workspace, settings.remote_dir)
+      remoteBase = resolveRemoteDir(settings.remote_root, settings.remote_dir)
     } catch (e) {
       return { error: String(e?.message ?? e), code: 400 }
     }
@@ -264,8 +291,11 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
     .find((x) => x?.path === project.path)?.id ?? null
 
   const runId = 'rc_' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14) + '_' + randomUUID().slice(0, 6)
-  const runDir = path.join(ws.config.workspace_root, 'selfcheck', runId)
+  const runDir = path.join(project.path, '.harnessams', 'selfcheck', runId)
   await fsp.mkdir(runDir, { recursive: true })
+  // historical evidence (a failed/diagnosed run kept its artifacts) is cleaned
+  // now, ahead of the new run — bounded disk: at most the live run's artifacts
+  await cleanHistoricalArtifacts(project.path).catch(() => {})
 
   const run = {
     id: runId,
@@ -273,6 +303,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
     startedAt: new Date().toISOString(),
     finishedAt: null,
     runDir,
+    projectPath: project.path,
     scope: {
       mode: settings.run_mode,
       simulator: settings.simulator,
@@ -285,7 +316,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
     summary: null,
     diagnoses: [],
     _priv: {
-      ctx, sessionId, settings, project, lang, ws, machine, alias, remoteBase,
+      ctx, sessionId, settings, project, lang, machine, alias, remoteBase,
       localWorkspaceId, deadline: Date.now() + TOTAL_BUDGET_MS, current: null,
       diagnosed: new Set(),
     },
@@ -302,21 +333,21 @@ export async function startSelfcheck(ctx, { sessionId, project, lang, ws, req })
   return { runId }
 }
 
-// A run is only reachable by its id (POST returns the runId; the client polls
-// GET /api/selfcheck?id=...). There is deliberately no global "latest" surface:
-// that would bleed verdicts across projects — the Overview of project B would
-// happily display (and live-poll) project A's run.
-export function getSelfcheck(id, ws) {
+// A run is only reachable by its id (action=run returns the run_id; the client
+// polls action=status) AND its owning project — the in-memory hit is fenced on
+// projectPath exactly like the disk fallback, so a live run of project A never
+// answers project B's poll. There is deliberately no global "latest" surface.
+export function getSelfcheck(id, projectPath) {
   if (!id) return null
   const mem = store.get(id)
-  if (mem) return runView(mem)
-  return runView(readRunFromDisk(id, ws))
+  if (mem && path.resolve(mem.projectPath) === path.resolve(String(projectPath ?? ''))) return runView(mem)
+  return runView(readRunFromDisk(id, projectPath))
 }
 
-function readRunFromDisk(id, ws) {
-  if (!ws || !/^[\w-]+$/.test(id)) return null
+function readRunFromDisk(id, projectPath) {
+  if (!projectPath || !/^[\w-]+$/.test(id)) return null
   try {
-    return JSON.parse(fs.readFileSync(path.join(ws.config.workspace_root, 'selfcheck', id, 'selfcheck_run.json'), 'utf8'))
+    return JSON.parse(fs.readFileSync(path.join(projectPath, '.harnessams', 'selfcheck', id, RUN_RECORD), 'utf8'))
   } catch { return null }
 }
 
@@ -653,6 +684,7 @@ async function remoteSpectreChain(run) {
         remote_dir: remoteDirFor(run, topo, scheduler),
         worker: 'spectre/spectre_sweep_worker.py',
         machine_id: settings.machine_id,
+        remote_root: settings.remote_root,
         scheduler,
       }, { timeoutMs: scheduler === 'direct' ? 660_000 : 900_000 })
       const job = readJob(staging)
@@ -724,9 +756,8 @@ async function remoteSpectreChain(run) {
 async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
   const { ctx, settings, alias } = run._priv
   const lang = settings.compute_script_remote
-  const wsConfig = readWorkspaceConfig().config
-  const remotePython = wsConfig.remote_python || 'python3'
-  const remoteNode = wsConfig.remote_node || 'node'
+  const remotePython = DEFAULT_REMOTE_PYTHON
+  const remoteNode = DEFAULT_REMOTE_NODE
 
   // R3 / RN2 — remote parse + verify (one command chain per topology)
   const verifyStep = await timedStep(run, {
@@ -821,7 +852,7 @@ async function remoteGoldenChain(run) {
     checkBudget(run)
     let parserSrc
     try {
-      parserSrc = path.join(simScriptsDir(), 'spectre', 'spectre_psf_parse.py')
+      parserSrc = path.join(simScriptsDir(run._priv.project.path), 'spectre', 'spectre_psf_parse.py')
     } catch (e) {
       return { ok: false, result: 'no scripts root', detail: String(e?.message ?? e) }
     }
@@ -912,4 +943,13 @@ function finalize(run) {
     runningBySession.delete(run._priv.sessionId)
   }
   void persistRun(run)
+  // 2026-11-19 rulings: a CLEAN run's artifacts are deleted at finalize (a
+  // diagnosed/failed run keeps its evidence; the next run's start cleans it),
+  // and the AGENTS.md config block re-syncs on every finalize so
+  // last_selfcheck_* never goes stale (UI = workspace_config.json = AGENTS.md).
+  if (run.summary.ok && run.diagnoses.length === 0) {
+    void cleanRunArtifacts(run.runDir).catch(() => {})
+  }
+  void syncAgentsMd(run._priv.ctx, { project: run._priv.project, settings: run._priv.settings })
+    .catch(() => { /* best-effort at finalize; the save button can always re-sync */ })
 }

@@ -36,7 +36,11 @@ export async function localEnvFacts() {
   return { node, python }
 }
 
-export async function runLocalChecks(ws) {
+// `rootPath` anchors the disk-capacity and writability rows — the project root
+// (the family workspace_root config is retired; the Overview passes the
+// session's project path).
+export async function runLocalChecks(rootPath) {
+  const root = typeof rootPath === 'string' && rootPath ? rootPath : process.cwd()
   const results = []
   const t = async (name, fn) => {
     const t0 = Date.now()
@@ -52,7 +56,7 @@ export async function runLocalChecks(ws) {
     return { result: 'Python ' + p.version, detail: p.path || '(executable path not resolved)' }
   })
   await t('Disk capacity (workspace)', async () => {
-    const st = await fsp.statfs(ws?.config?.workspace_root ?? process.cwd())
+    const st = await fsp.statfs(root)
     const total = Number(st.blocks) * Number(st.bsize)
     const free = Number(st.bavail) * Number(st.bsize)
     if (!total) throw new Error('statfs returned 0')
@@ -61,7 +65,7 @@ export async function runLocalChecks(ws) {
              warn: free / total < 0.1 ? 'free space < 10%' : undefined }
   })
   await t('Workspace writable', async () => {
-    const probe = path.join(ws?.config?.workspace_root ?? process.cwd(), '.write_probe')
+    const probe = path.join(root, '.write_probe')
     await fsp.writeFile(probe, 'ok')
     await fsp.rm(probe)
     return { result: 'writable' }

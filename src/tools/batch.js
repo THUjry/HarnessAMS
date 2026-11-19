@@ -8,10 +8,10 @@ import path from 'node:path'
 import { readJsonIfExists, resolveDir } from '../py.js'
 import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
 import {
-  DEFAULT_INCLUDES, buildDirectCommand, buildSubmitCommand, collectRunFiles, countFetched,
-  defaultRemotePython, defaultRemoteScriptsDir, extractArchive, fetchCommand,
+  DEFAULT_INCLUDES, DEFAULT_REMOTE_PYTHON, buildDirectCommand, buildSubmitCommand, collectRunFiles, countFetched,
+  defaultRemoteScriptsDir, extractArchive, fetchCommand,
   listCommand, parseJobId, parsePollOutput, parseRemoteList, pluginScripts,
-  pollCommand, postSubmitCommand, readJob, readWorkspaceConfig, remoteJoin,
+  pollCommand, postSubmitCommand, readJob, remoteJoin,
   resolveRemoteDir, sanitizeRel, simScriptsDir, templateUploadPlan, writeJob,
 } from '../batch.js'
 
@@ -41,12 +41,14 @@ export function batchTools(ctx) {
         + 'Writes .batch_job.json in the run directory for batch_poll/batch_fetch.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
-        remote_dir: { type: 'string', required: true, description: 'Remote batch directory: absolute, or relative to the machine\'s remote root (remote_machines in harnessams.json)' },
+        remote_dir: { type: 'string', required: true, description: 'Remote batch directory: absolute, or relative to remote_root' },
+        remote_root: { type: 'string', required: true, description: 'Absolute remote root that fences remote_dir — the project\'s workspace_config.json settings.remote_root (shown in the AGENTS.md config table)' },
         worker: { type: 'string', required: true, description: 'Worker script relative to the scripts root (e.g. spectre/spectre_sweep_worker.py) or an absolute remote path' },
         worker_args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed to the worker (e.g. --config sweep_config.json --max-parallel 8)' },
-        machine_id: { type: 'string', required: true, description: 'dsh-ssh host alias (ssh_list / the machine card); its remote root fences remote_dir' },
-        remote_python: { type: 'string', description: 'Remote Python executable (default: workspace remote_python or python3; use the full path on clusters)' },
-        remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remotePath>/.harnessams/scripts or workspace remote_scripts_dir)' },
+        machine_id: { type: 'string', required: true, description: 'dsh-ssh host alias (ssh_list / the machine card)' },
+        remote_python: { type: 'string', description: 'Remote Python executable (default python3; use the full path on clusters)' },
+        remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remote_root>/.harnessams/scripts)' },
+        sim_scripts_dir: { type: 'string', description: 'Local worker-scripts root override (default: the project\'s workspace_config.json workspace.sim_scripts_dir, found by walking up from run_dir)' },
         files: { type: 'array', items: { type: 'string' }, description: 'Run-dir files to upload (default: top-level regular files)' },
         queue: { type: 'string', description: 'LSF queue (default normal)' },
         scheduler: { type: 'string', enum: ['lsf', 'direct'],
@@ -58,11 +60,10 @@ export function batchTools(ctx) {
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
-        const target = await resolveMachine(ctx, args.machine_id)
+        const target = await resolveMachine(ctx, args.machine_id, args.remote_root)
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)
-        const wsConfig = readWorkspaceConfig().config
         const syncScripts = args.sync_scripts !== false
-        const rawScripts = args.remote_scripts_dir || wsConfig.remote_scripts_dir
+        const rawScripts = args.remote_scripts_dir
           || defaultRemoteScriptsDir(target.remoteRoot)
         const scriptsRoot = rawScripts.startsWith('/') ? rawScripts.replace(/\/+$/, '')
           : resolveRemoteDir(target.remoteRoot, rawScripts)
@@ -77,10 +78,11 @@ export function batchTools(ctx) {
           remoteWorker = workerRaw.replace(/\\/g, '/')
         } else {
           workerRel = sanitizeRel(workerRaw)
-          const localWorker = path.join(simScriptsDir(), ...workerRel.split('/'))
+          const localWorker = path.join(simScriptsDir(args.sim_scripts_dir ?? runDir), ...workerRel.split('/'))
           if (!fs.existsSync(localWorker)) {
-            throw new Error(`worker script not found under the workspace sim_scripts_dir: ${workerRel} `
-              + '(set sim_scripts_dir in harnessams.json to the SmartAnaSim scripts directory)')
+            throw new Error(`worker script not found under the project sim_scripts_dir: ${workerRel} `
+              + '(set workspace.sim_scripts_dir in the project\'s .harnessams/workspace_config.json '
+              + 'to the SmartAnaSim scripts directory, or pass sim_scripts_dir)')
           }
           remoteWorker = remoteJoin(scriptsRoot, workerRel)
         }
@@ -98,7 +100,7 @@ export function batchTools(ctx) {
           collectRunFiles(runDir, args.files), sweepConfig)
 
         if (syncScripts) {
-          for (const script of pluginScripts()) {
+          for (const script of pluginScripts(simScriptsDir(args.sim_scripts_dir ?? runDir))) {
             const remote = remoteJoin(scriptsRoot, script.rel)
             const up = await uploadFile(ctx, target.alias, script.local, remote)
             if (!up.ok) throw new Error(`upload failed for ${script.rel}: ${up.text}`)
@@ -111,7 +113,7 @@ export function batchTools(ctx) {
           if (!up.ok) throw new Error(`upload failed for ${name}: ${up.text}`)
         }
 
-        const remotePython = args.remote_python || wsConfig.remote_python || defaultRemotePython()
+        const remotePython = args.remote_python || DEFAULT_REMOTE_PYTHON
         const scheduler = args.scheduler === 'direct' ? 'direct' : 'lsf'
         const queue = args.queue || 'normal'
         const jobName = args.job_name || `hams-${path.basename(runDir)}`
@@ -131,6 +133,7 @@ export function batchTools(ctx) {
           const job = {
             machine_id: args.machine_id || target.machine?.id || null,
             machine_name: target.machine?.name || null,
+            remote_root: target.remoteRoot,
             remote_dir: remoteDir,
             scripts_dir: scriptsRoot,
             worker: remoteWorker,
@@ -191,6 +194,7 @@ export function batchTools(ctx) {
         const job = {
           machine_id: args.machine_id || target.machine?.id || null,
           machine_name: target.machine?.name || null,
+          remote_root: target.remoteRoot,
           remote_dir: remoteDir,
           scripts_dir: scriptsRoot,
           worker: remoteWorker,
@@ -224,6 +228,7 @@ export function batchTools(ctx) {
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory holding .batch_job.json' },
         machine_id: { type: 'string', description: 'Override the dsh-ssh host alias from the job file' },
+        remote_root: { type: 'string', description: 'Override the fencing remote root (default: the job file\'s remote_root)' },
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the LSF job id' },
         scheduler: { type: 'string', enum: ['lsf', 'direct'], description: 'lsf (default) checks bjobs; direct relies on the batch progress files' },
@@ -232,7 +237,7 @@ export function batchTools(ctx) {
         const runDir = resolveDir(args.run_dir)
         const job = readJob(runDir)
         const machineId = args.machine_id || job?.machine_id || undefined
-        const target = await resolveMachine(ctx, machineId)
+        const target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const jobId = args.job_id || job?.job_id
         if (!jobId) throw new Error('no job id: pass job_id or run batch_submit first')
@@ -264,6 +269,7 @@ export function batchTools(ctx) {
           description: 'Files to fetch: names (point_meta.json) or paths (*/netlist.scs.raw/sp.sp); '
             + 'default point_meta.json, sweep_progress.json, errlog.txt, bsub.out, bsub.err' },
         machine_id: { type: 'string', description: 'Override the dsh-ssh host alias from the job file' },
+        remote_root: { type: 'string', description: 'Override the fencing remote root (default: the job file\'s remote_root)' },
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the LSF job id (also names the local archive)' },
       },
@@ -271,7 +277,7 @@ export function batchTools(ctx) {
         const runDir = resolveDir(args.run_dir)
         const job = readJob(runDir)
         const machineId = args.machine_id || job?.machine_id || undefined
-        const target = await resolveMachine(ctx, machineId)
+        const target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const jobId = args.job_id || job?.job_id || 'manual'
         const includes = Array.isArray(args.includes) && args.includes.length

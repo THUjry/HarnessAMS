@@ -19,9 +19,9 @@
 //   - ssh_upload → value { ok, transferredBytes?, files?, error? } (single
 //     file per call; parent directories are auto-created remotely);
 //   - ssh_download → value { ok, bytes?, error? } (single file only);
-//   - the remote root per alias is NOT dsh-ssh data: it comes from the
-//     workspace harnessams.json `remote_machines` map (alias → absolute remote
-//     path), merged into the machine records by listMachines.
+//   - the remote root per alias is NOT dsh-ssh data: it is a per-project
+//     setting (workspace_config.json settings.remote_root, 2026-11-19 D-009)
+//     passed explicitly by every consumer — no family-level map, no merge.
 //
 // Hardening owned by this funnel (selection-doc §6/§7 mitigations):
 //   - every exec is wrapped in `timeout -s KILL <N>s sh -c …` (no `--`:
@@ -37,7 +37,6 @@
 //     error shapes get a "suspected MaxSessions" annotation (visible-and-
 //     attributable ruling, 2026-11-13: no waiting, no semaphore).
 import crypto from 'node:crypto'
-import { findWorkspaceConfig } from './server/workspace.js'
 
 // Extract the text payload of a ToolExecutionResult: value may be the raw
 // string or a {text} object; content is a ContentBlock[] of {type:'text'}.
@@ -103,30 +102,9 @@ export async function callTool(ctx, name, args, { timeoutMs = 40_000 } = {}) {
   }
 }
 
-// The remote root per alias: harnessams.json `remote_machines` (alias →
-// absolute remote path). Hand-edited like the rest of that file; read-only
-// here. Returns a Map (empty when unconfigured — machines then surface as
-// "no remote root" instead of failing the whole listing). The
-// HARNESSAMS_REMOTE_MACHINES env override (inline JSON map, same shape) exists
-// for tests/hermetic layouts, mirroring HARNESSAMS_SIM_SCRIPTS_DIR.
-export function readRemoteMachines() {
-  let map = null
-  if (process.env.HARNESSAMS_REMOTE_MACHINES) {
-    try { map = JSON.parse(process.env.HARNESSAMS_REMOTE_MACHINES) } catch { map = null }
-  } else {
-    map = findWorkspaceConfig()?.config?.remote_machines
-  }
-  if (!map || typeof map !== 'object' || Array.isArray(map)) return new Map()
-  const out = new Map()
-  for (const [alias, root] of Object.entries(map)) {
-    if (typeof root === 'string' && root.trim()) out.set(alias, root.trim().replace(/\\/g, '/'))
-  }
-  return out
-}
-
-// ssh_list → machine records. Identity is the alias (id === name === alias);
-// `workspace` carries the configured remote root (undefined = not configured
-// in harnessams.json, `configured` flags it for the UI).
+// ssh_list → machine records (pure dsh-ssh registry projection). Identity is
+// the alias (id === name === alias); the remote root is NOT part of the record
+// anymore — each consumer passes the project's settings.remote_root explicitly.
 export async function listMachines(ctx, timeoutMs = 10_000) {
   const def = ctx?.tools?.get?.('ssh_list')
   if (!def) return { ok: false, machines: [], reason: 'ssh_list is not registered (@linxin666/dsh-ssh not installed?)' }
@@ -136,7 +114,6 @@ export async function listMachines(ctx, timeoutMs = 10_000) {
   if (!hosts.length) {
     return { ok: false, machines: [], reason: 'no hosts configured in dsh-ssh (add aliases in its panel or ~/.dsh/dsh-ssh.json)' }
   }
-  const roots = readRemoteMachines()
   const machines = hosts.map((h) => {
     const alias = String(h?.alias ?? '')
     return {
@@ -148,8 +125,6 @@ export async function listMachines(ctx, timeoutMs = 10_000) {
       username: String(h?.user ?? ''),
       auth: String(h?.auth ?? ''),
       keyReady: !!h?.keyReady,
-      workspace: roots.get(alias),
-      configured: roots.has(alias),
     }
   })
   return { ok: true, machines }
@@ -229,12 +204,19 @@ export async function downloadFile(ctx, machine, remotePath, localPath) {
   }
 }
 
-// Resolve an alias (machine_id) to { machine, alias, remoteRoot }: the machine
-// must exist in the dsh-ssh host registry AND carry a configured remote root
-// (harnessams.json remote_machines) — that root fences every remote_dir.
-export async function resolveMachine(ctx, machineId) {
+// Resolve an alias (machine_id) + the project's remote root to
+// { machine, alias, remoteRoot }: the machine must exist in the dsh-ssh host
+// registry and the root must be an absolute remote path — it fences every
+// remote_dir (resolveRemoteDir in batch.js). Callers pass the project's
+// settings.remote_root (or a per-call remote_root argument).
+export async function resolveMachine(ctx, machineId, remoteRoot) {
   if (!machineId) {
     throw new Error('machine_id (a dsh-ssh alias) is required — see the machine card or ssh_list')
+  }
+  const root = typeof remoteRoot === 'string' ? remoteRoot.trim().replace(/\\/g, '/') : ''
+  if (!root || !root.startsWith('/')) {
+    throw new Error(`remote_root is required for host ${machineId} (an absolute remote path — `
+      + 'the project\'s workspace_config.json settings.remote_root, shown in the AGENTS.md config table)')
   }
   const list = await listMachines(ctx)
   if (!list.ok) throw new Error(`dsh-ssh hosts unavailable: ${list.reason}`)
@@ -242,9 +224,5 @@ export async function resolveMachine(ctx, machineId) {
   if (!machine) {
     throw new Error(`no such dsh-ssh host: ${machineId} (known: ${list.machines.map((m) => m.id).join(', ')})`)
   }
-  if (!machine.workspace) {
-    throw new Error(`no remote root configured for host ${machine.id} — `
-      + `set remote_machines["${machine.id}"] in the workspace harnessams.json`)
-  }
-  return { machine, alias: machine.id, remoteRoot: machine.workspace }
+  return { machine, alias: machine.id, remoteRoot: root }
 }
