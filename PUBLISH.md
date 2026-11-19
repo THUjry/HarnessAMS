@@ -40,6 +40,11 @@ Checklist (per package, run from the package directory):
 4. Post-publish verification
    - `dsh plugin --profile web add <package>`, restart the profile (`dsh --profile web`),
      confirm the console routes / the 6 tools register (`--dump-config` shows the rows).
+     A clean first add auto-activates the bundle (CLI reconcile appends every new
+     dependency that declares `dsh.bundle.patch` to `dsh.profile.bundles`); if an
+     earlier add attempt failed mid-install, the dependency is no longer "new" and
+     `dsh.profile.bundles` must be patched by hand (the @linxin666/dsh-ssh case — its
+     ssh2 native build is always blocked once by pnpm 12 approve-builds).
    - Verifying the remote routes additionally requires @linxin666/dsh-ssh exact-pinned in
      the profile: `dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.18`.
 5. Suite last
