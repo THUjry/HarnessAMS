@@ -54,7 +54,6 @@ window.__ModuleLoader__.load({
         'common.loading': '加载中…',
         'common.save': '保存',
         'common.cancel': '取消',
-        'common.none': '（无）',
         'common.sectionFailed': '此区块加载失败：',
         'common.expand': '展开',
         'common.collapse': '收起',
@@ -74,7 +73,7 @@ window.__ModuleLoader__.load({
         'guide.s3t': '工作区位置',
         'guide.s3': '配置＝各工作区自己的 .harnessams/workspace_config.json 单文件（运行设置含远端根路径、脚本目录、plotly、回收站）。远程 — 路径即远端真实路径（dsh-ssh 按别名直达，无本地镜像）。',
         'guide.s4t': '仿真插件套件',
-        'guide.s4': 'SmartAnaSim 单包安装即注册全部 11 个工具：spectre（装配 / 扫掠 / 解析，本地）、sNp（Touchstone·psfascii 读取与器件提取）、batch（通用 LSF 提交 / 轮询 / 取回）、共享（分析 / 进度 / 回收站）。工具默认全部注册，无需逐个开启；使用引导仅由 HarnessAMS 提供。',
+        'guide.s4': '套件合计 13 个工具：SmartAnaSim 6（spectre 装配/扫掠/解析＋sNp 读取/提取，sNp 两件经 snp_guide 按需激活）＋HarnessAMS 7（batch 提交/轮询/取回＋分析/进度/回收站＋harnessams_selfcheck 自检）。除 sNp 外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
         'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」HTML 报告查看器（sim_analysis 生成报告即自动登记进本会话，也可浏览添加已有报告；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
@@ -131,7 +130,7 @@ window.__ModuleLoader__.load({
         'dash.pickFile': '选择 HTML 文件（点击即添加）',
         'dash.emptyDir': '（此目录没有子目录或 HTML 文件）',
         'dash.manualLabel': '或输入报告的绝对路径',
-        'dash.manualPlaceholder': 'D:\\path\\to\\report.html',
+        'dash.manualPlaceholder': '/path/to/report.html',
         'dash.add': '添加',
         'tasks.headerOpen': '打开 HarnessAMS 侧栏（项目总览与会话面板）',
         'tasks.guideDesc': '项目总览、会话面板、检查与使用引导',
@@ -260,7 +259,6 @@ window.__ModuleLoader__.load({
         'card.label.points': '解析 {n} 个点',
         'card.label.warnings': '警告',
         'card.label.details': '详情',
-        'card.agg.title': '项目批次',
         'card.agg.line': '已完成 {done}/{batches} 批 · 仿真 {comp}/{total} · 待完成 {pending}',
         'card.agg.unplanned': '（另有 {n} 批未计划）',
         'card.agg.round': '批次',
@@ -269,7 +267,6 @@ window.__ModuleLoader__.load({
         'common.loading': 'Loading…',
         'common.save': 'Save',
         'common.cancel': 'Cancel',
-        'common.none': '(none)',
         'common.sectionFailed': 'This section failed: ',
         'common.expand': 'Show more',
         'common.collapse': 'Show less',
@@ -289,7 +286,7 @@ window.__ModuleLoader__.load({
         'guide.s3t': 'Workspace location',
         'guide.s3': 'Config = each workspace\'s own single file .harnessams/workspace_config.json (run settings incl. the remote root, script dir, plotly, trash). Remote — paths are the real remote paths (dsh-ssh goes by alias, no local mirror).',
         'guide.s4t': 'Simulation plugin suites',
-        'guide.s4': 'SmartAnaSim registers all 11 tools on install: spectre (assemble / sweep / parse, local), sNp (Touchstone · psfascii read + device extraction), batch (generic LSF submit / poll / fetch), shared (analysis / progress / trash). Tools are all registered by default — guidance is provided by HarnessAMS only.',
+        'guide.s4': 'The suite registers 13 tools in total: SmartAnaSim 6 (spectre assemble/sweep/parse + sNp read/extract — the two sNp tools activate on demand via snp_guide) and HarnessAMS 7 (batch submit/poll/fetch + analysis/progress/trash + the harnessams_selfcheck self-check). All except sNp are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
         'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, an HTML report viewer (sim_analysis registers generated reports into the calling session automatically; existing reports can be browsed in; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
@@ -479,7 +476,6 @@ window.__ModuleLoader__.load({
         'card.label.points': 'Parsed {n} points',
         'card.label.warnings': 'Warnings',
         'card.label.details': 'Details',
-        'card.agg.title': 'Project batches',
         'card.agg.line': '{done}/{batches} batches done · {comp}/{total} sims · {pending} pending',
         'card.agg.unplanned': '(+{n} unplanned batches)',
         'card.agg.round': 'Batch',
@@ -710,7 +706,9 @@ window.__ModuleLoader__.load({
       return b.toFixed(1) + ' ' + u[i]
     }
 
-    function esc(s) { return String(s ?? '') }
+    // identity stringify for React children only — NOT an HTML escaper; never
+    // feed its output into innerHTML
+    function txt(s) { return String(s ?? '') }
 
     // ---------- tier 1: global console page ----------
 
@@ -820,14 +818,18 @@ window.__ModuleLoader__.load({
         if (!progUrl && !aggUrl) return
         let alive = true
         let last = ''
-        const fetchOne = () => Promise.all([
-          progUrl ? fetchJson(progUrl).catch(() => null) : Promise.resolve(null),
-          aggUrl ? fetchJson(aggUrl).catch(() => null) : Promise.resolve(null),
-        ]).then(([p, a]) => {
-          if (!alive || (!p && !a)) return
-          const s = JSON.stringify([p, a])
-          if (s !== last) { last = s; setData({ prog: p, agg: a }) }
-        })
+        let seq = 0 // out-of-order guard: a slow older response must not clobber a newer one
+        const fetchOne = () => {
+          const my = ++seq
+          return Promise.all([
+            progUrl ? fetchJson(progUrl).catch(() => null) : Promise.resolve(null),
+            aggUrl ? fetchJson(aggUrl).catch(() => null) : Promise.resolve(null),
+          ]).then(([p, a]) => {
+            if (!alive || my !== seq || (!p && !a)) return
+            const s = JSON.stringify([p, a])
+            if (s !== last) { last = s; setData({ prog: p, agg: a }) }
+          })
+        }
         if (!active) { fetchOne(); return () => { alive = false } }
         const timer = setInterval(() => { if (!document.hidden) fetchOne() }, 3000)
         const onVis = () => { if (!document.hidden) fetchOne() }
@@ -888,7 +890,7 @@ window.__ModuleLoader__.load({
     }
     function cardResultOf(props) {
       const b = props.block
-      const text = (b.content ?? []).filter((c) => c && c.type === 'text').map((c) => c.text).join('\n')
+      const text = (Array.isArray(b.content) ? b.content : []).filter((c) => c && c.type === 'text').map((c) => c.text).join('\n')
       let data = null
       try { const v = JSON.parse(text); if (v && typeof v === 'object') data = v } catch { /* raw only */ }
       return { text, data }
@@ -928,9 +930,9 @@ window.__ModuleLoader__.load({
         h('thead', null, h('tr', null,
           ['card.agg.round', 'chk.bc.status', 'chk.bc.progress'].map((k) => h('th', { key: k }, tr(k))))),
         h('tbody', null, (agg.batches || []).map((b) => h('tr', { key: b.round, title: b.dir || '' },
-          h('td', null, esc(b.round)),
+          h('td', null, txt(b.round)),
           h('td', { className: batchStatusColor(b.status) }, cardStatusText(b.status)),
-          h('td', null, esc(b.total != null ? (Number(b.completed) || 0) + '/' + b.total : '—'))))))
+          h('td', null, txt(b.total != null ? (Number(b.completed) || 0) + '/' + b.total : '—'))))))
     }
 
     function simBody(toolName, args, result, live, phase) {
@@ -956,6 +958,7 @@ window.__ModuleLoader__.load({
         return els
       }
       if (toolName === 'batch_poll' || toolName === 'sim_progress') {
+        if (d.ok === false && d.error) els.push(h('div', { key: 'perr', className: 'hams-bad' }, txt(String(d.error).slice(0, 400))))
         if (d.total) els.push(h(CardBar, { key: 'bar', p: { total: d.total, completed: d.completed, status: d.state || d.status } }))
         els.push(h(CardKv, { key: 'kv', items: [
           { k: tr('card.label.succeeded'), v: d.succeeded },
@@ -1019,7 +1022,7 @@ window.__ModuleLoader__.load({
           ] }))
         }
         const doneLine = String(d.output || '').split('\n').map((l) => l.trim()).filter((l) => l.indexOf('[sweep] done:') === 0).pop()
-        if (doneLine) els.push(h('div', { key: 'done', className: 'hams-dim' }, esc(doneLine)))
+        if (doneLine) els.push(h('div', { key: 'done', className: 'hams-dim' }, txt(doneLine)))
         els.push(h(CardKv, { key: 'dir', items: [{ k: tr('card.label.runDir'), v: d.run_dir }] }))
         return els
       }
@@ -1062,7 +1065,7 @@ window.__ModuleLoader__.load({
         h('pre', {
           ref,
           className: 'hams-pre hams-clamp' + (open ? ' hams-clamp-open' : '') + (className ? ' ' + className : ''),
-        }, esc(text)),
+        }, txt(text)),
         overflows && h('button', { className: 'hams-clamp-btn', onClick: () => setOpen(!open) },
           tr(open ? 'common.collapse' : 'common.expand')))
     }
@@ -1087,8 +1090,8 @@ window.__ModuleLoader__.load({
       if (!on) {
         return h('div', { className: 'hams-tc' },
           h('div', { className: 'hams-tc-head' },
-            h('span', { className: 'hams-tc-title' }, esc(toolName)),
-            h('span', { className: 'hams-faint' }, esc(phase))),
+            h('span', { className: 'hams-tc-title' }, txt(toolName)),
+            h('span', { className: 'hams-faint' }, txt(phase))),
           phase === 'start' && args ? h(ClampText, { text: JSON.stringify(args, null, 2) }) : null,
           result ? h(ClampText, { text: (result.text || '').slice(0, 4000) }) : null)
       }
@@ -1101,8 +1104,8 @@ window.__ModuleLoader__.load({
         status = interrupted ? 'unknown' : 'failed'
         body = h('div', { className: interrupted ? 'hams-warn' : 'hams-bad' },
           interrupted ? tr('card.interrupted') : tr('card.error'),
-          err.name ? ' — ' + esc(String(err.name)) : null,
-          err.reason ? ' · ' + esc(String(err.reason).slice(0, 300)) : null)
+          err.name ? ' — ' + txt(String(err.name)) : null,
+          err.reason ? ' · ' + txt(String(err.reason).slice(0, 300)) : null)
       } else if (phase === 'preparing') {
         body = h('div', { className: 'hams-dim' }, tr('card.preparing'))
         status = null
@@ -1113,7 +1116,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'hams-tc-head' },
           h('span', { className: 'hams-tc-title' }, tr('card.title.' + toolName)),
           h(CardBadge, { s: status }),
-          agg ? h('span', { className: 'hams-tc-agg' }, esc(aggLine(agg))) : null,
+          agg ? h('span', { className: 'hams-tc-agg' }, txt(aggLine(agg))) : null,
           h('button', { className: 'hams-btn hams-btn-sm', style: { marginLeft: 'auto' }, onClick: d.toggle }, tr('card.label.details'))),
         body,
         d.expanded ? h('div', { className: 'hams-tc-details' },
@@ -1156,11 +1159,11 @@ window.__ModuleLoader__.load({
             : h('span', { className: 'hams-badge hams-badge-bad', title: machines.reason ?? '' }, tr('hosts.missing'))),
         ),
         machines?.installed && (machines.machines?.length ?? 0) > 0 && h('table', { className: 'hams-table' },
-          h('thead', null, h('tr', null, [tr('hosts.colAlias'), tr('hosts.colHost'), tr('hosts.colAuth')].map((c) => h('th', null, c)))),
+          h('thead', null, h('tr', null, [tr('hosts.colAlias'), tr('hosts.colHost'), tr('hosts.colAuth')].map((c) => h('th', { key: c }, c)))),
           h('tbody', null, machines.machines.map((m) => h('tr', { key: m.id },
-            h('td', null, esc(m.name || m.host)),
-            h('td', null, esc((m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22))),
-            h('td', null, esc(m.auth ?? '') + (m.auth === 'key' && !m.keyReady ? ' ⚠' : '')))))),
+            h('td', null, txt(m.name || m.host)),
+            h('td', null, txt((m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22))),
+            h('td', null, txt(m.auth ?? '') + (m.auth === 'key' && !m.keyReady ? ' ⚠' : '')))))),
         machines?.installed && (machines.machines?.length ?? 0) === 0 && h('div', { className: 'hams-dim' }, tr('hosts.empty')),
         h('div', { className: 'hams-dim' }, tr('hosts.hint')),
       )
@@ -1186,19 +1189,19 @@ window.__ModuleLoader__.load({
         ),
         assets?.packages?.length > 0 && h('table', { className: 'hams-table' },
           h('thead', null, h('tr', null,
-            [tr('assets.colPkg'), tr('assets.colLicense'), tr('assets.colPkgCopy'), tr('assets.colRoute'), tr('assets.colWsCopies')].map((c) => h('th', null, c)))),
+            [tr('assets.colPkg'), tr('assets.colLicense'), tr('assets.colPkgCopy'), tr('assets.colRoute'), tr('assets.colWsCopies')].map((c) => h('th', { key: c }, c)))),
           h('tbody', null, assets.packages.map((p) => h('tr', { key: p.file },
-            h('td', null, esc(p.file), h('div', { className: 'hams-dim' }, p.label)),
+            h('td', null, txt(p.file), h('div', { className: 'hams-dim' }, p.label)),
             h('td', null, p.license),
             h('td', null,
               p.pkg
-                ? [esc(p.pkg.path), h('div', { className: 'hams-dim' }, fmtBytes(p.pkg.bytes))]
+                ? [txt(p.pkg.path), h('div', { className: 'hams-dim' }, fmtBytes(p.pkg.bytes))]
                 : h('span', { className: 'hams-warn' }, tr('assets.plotlyMissing'))),
             h('td', null, h('a', { className: 'hams-link', href: p.url, target: '_blank' }, tr('assets.openAsset'))),
             h('td', null,
               !p.copies?.length
                 ? h('span', { className: 'hams-dim' }, tr('assets.noCopies'))
-                : p.copies.map((c) => h('div', { key: c.path, title: c.path }, esc(c.path), ' — ', fmtBytes(c.bytes))))))),
+                : p.copies.map((c) => h('div', { key: c.path, title: c.path }, txt(c.path), ' — ', fmtBytes(c.bytes))))))),
         ),
       )
     }
@@ -1339,10 +1342,10 @@ window.__ModuleLoader__.load({
         h('table', { className: 'hams-table' },
           h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus')].map((c) => h('th', { key: c }, c)))),
           h('tbody', null, (run.results ?? []).map((x, i) => h('tr', { key: i, className: x.ok ? '' : 'hams-rowbad' },
-            h('td', null, esc(x.item)),
+            h('td', null, txt(x.item)),
             h('td', null,
-              esc(x.result || x.detail || '-'),
-              x.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + esc(x.warn)) : null,
+              txt(x.result || x.detail || '-'),
+              x.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + txt(x.warn)) : null,
               x.ok && x.detail ? h(ClampText, { text: x.detail }) : null),
             h('td', null, x.ms + ' ms'),
             h('td', { className: x.ok ? 'hams-good' : 'hams-bad' }, x.ok ? '✅' : '✗'))))))
@@ -1379,7 +1382,7 @@ window.__ModuleLoader__.load({
                 disabled: !listing?.parent, onClick: () => setCwd(listing.parent) }, '↑'),
               h('span', { className: 'hams-dim',
                 style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                esc(listing ? listing.dir : (cwd ?? rootDir ?? '…'))))),
+                txt(listing ? listing.dir : (cwd ?? rootDir ?? '…'))))),
           h('div', { className: 'hams-field' },
             h('label', null, tr('pset.browsePickDir')),
             h('div', { className: 'hams-list' },
@@ -1388,7 +1391,7 @@ window.__ModuleLoader__.load({
                 (listing.dirs ?? []).map((d) => h('div', { key: 'd:' + d, className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
                   h('button', { className: 'hams-listitem', style: { flex: 1, textAlign: 'left', minWidth: 0 },
                     onClick: () => setCwd(listing.dir + '/' + d) },
-                    h('span', { className: 'hams-name' }, '📁 ' + esc(d))),
+                    h('span', { className: 'hams-name' }, '📁 ' + txt(d))),
                   h('button', { className: 'hams-btn hams-btn-sm', title: tr('pset.pickThisDir'),
                     onClick: () => onPick(listing.dir + '/' + d) }, tr('pset.pickDir')))),
                 listing.truncated && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('chk.truncated')),
@@ -1452,9 +1455,9 @@ window.__ModuleLoader__.load({
             onChange: (e) => onChange('machine_id', e.target.value || null) },
             h('option', { value: '' }, tr('pset.noMachine')),
             (known ? [] : draft.machine_id
-              ? [h('option', { key: 'kept', value: draft.machine_id }, esc(draft.machine_id) + ' ?')] : []),
+              ? [h('option', { key: 'kept', value: draft.machine_id }, txt(draft.machine_id) + ' ?')] : []),
             machines.map((m) => h('option', { key: m.id, value: m.id },
-              esc(m.name || m.host) + (m.host && m.host !== m.name ? ' · ' + esc(m.host) : ''))))
+              txt(m.name || m.host) + (m.host && m.host !== m.name ? ' · ' + txt(m.host) : ''))))
         }
         if (c.kind === 'text') {
           return h('input', { className: 'hams-input', type: 'text', spellCheck: false,
@@ -1476,7 +1479,7 @@ window.__ModuleLoader__.load({
         if (!agg) return h('td', { key: c.id, className: 'hams-faint' }, '—')
         const cls = agg.state === 'ok' ? 'hams-good' : agg.state === 'warn' ? 'hams-warn' : agg.state === 'skip' ? 'hams-faint' : 'hams-bad'
         const icon = agg.state === 'ok' ? '✅' : agg.state === 'warn' ? '⚠' : agg.state === 'skip' ? '⏭' : '✗'
-        return h('td', { key: c.id, className: cls, title: agg.title || agg.text }, icon + ' ' + esc(agg.text))
+        return h('td', { key: c.id, className: cls, title: agg.title || agg.text }, icon + ' ' + txt(agg.text))
       }
       return h('table', { className: 'hams-table' },
         h('thead', null, h('tr', null, [tr('pset.colName'), tr('pset.colValue'), tr('chk.colStatus')]
@@ -1508,10 +1511,10 @@ window.__ModuleLoader__.load({
         const icon = s.ok === true ? '✅' : s.ok === false ? '✗' : '⏭'
         const cls = s.ok === true ? 'hams-good' : s.ok === false ? 'hams-bad' : 'hams-faint'
         rows.push(h('tr', { key: rows.length, className: s.ok === false ? 'hams-rowbad' : '' },
-          h('td', { title: s.skipReason ?? '' }, esc(s.item),
-            s.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + esc(s.warn)) : null),
+          h('td', { title: s.skipReason ?? '' }, txt(s.item),
+            s.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + txt(s.warn)) : null),
           h('td', { title: s.detail || '' },
-            esc(s.result || (s.skipReason ? tr('selfchk.skipped') + ' — ' + s.skipReason : '-')),
+            txt(s.result || (s.skipReason ? tr('selfchk.skipped') + ' — ' + s.skipReason : '-')),
             s.ok !== false && s.detail ? h(ClampText, { text: s.detail }) : null),
           h('td', null, s.ms != null ? s.ms + ' ms' : ''),
           h('td', { className: cls }, icon)))
@@ -1682,7 +1685,7 @@ window.__ModuleLoader__.load({
 
       return h('div', { style: { marginTop: '10px' } },
         h('div', { className: 'hams-dim' }, h('b', null, tr('pset.title')), ' · ', tr('selfchk.title')),
-        settingsError && h('div', { className: 'hams-err' }, esc(settingsError)),
+        settingsError && h('div', { className: 'hams-err' }, txt(settingsError)),
         !draft && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
         draft && h('div', null,
           // working directory: always visible — "local" read-only, or the bound
@@ -1693,13 +1696,13 @@ window.__ModuleLoader__.load({
             remote
               ? h('span', { className: 'hams-dim', title: dirPreview,
                   style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                esc(draft.remote_dir || '—'))
+                txt(draft.remote_dir || '—'))
               : h('span', { className: 'hams-dim' }, 'local · ' + tr('pset.dirLocalHint')),
             remote && h('button', { className: 'hams-btn hams-btn-sm', style: { flexShrink: 0 },
               disabled: !machine || !root, title: root ? tr('pset.browseTitle') : tr('pset.rootMissing'),
               onClick: () => setBrowseOpen(true) }, tr('pset.browse'))),
           remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
-            '→ ', esc(dirPreview), ' · ', tr('pset.dirRemoteRel')),
+            '→ ', txt(dirPreview), ' · ', tr('pset.dirRemoteRel')),
           h(SettingsTable, { draft, machines, run, onChange: updateSetting, dirty }),
           // confirm row: staged edits land in workspace_config.json (and AGENTS.md
           // re-syncs) only here — red "unsaved" cells mark the pending state
@@ -1721,10 +1724,10 @@ window.__ModuleLoader__.load({
               onClick: () => { setCheckAllPending(true); void startRun() } },
               running && checkAllPending ? tr('agents.checkAllRunning') : tr('agents.checkAll')),
             h('span', { className: 'hams-dim' }, tr('selfchk.desc'))),
-          startError && h('div', { className: 'hams-err' }, esc(startError)),
+          startError && h('div', { className: 'hams-err' }, txt(startError)),
           saveState?.status === 'done' && h('div', { className: 'hams-dim' }, tr('agents.saved', { path: saveState.path ?? '' })),
-          saveState?.status === 'failed' && h('div', { className: 'hams-err' }, esc(tr('agents.saveFailed', { msg: saveState.error ?? '' }))),
-          envRun?.status === 'failed' && h('div', { className: 'hams-err' }, esc(envRun.error)),
+          saveState?.status === 'failed' && h('div', { className: 'hams-err' }, txt(tr('agents.saveFailed', { msg: saveState.error ?? '' }))),
+          envRun?.status === 'failed' && h('div', { className: 'hams-err' }, txt(envRun.error)),
           envRun?.status === 'done' && h(LocalEnvResults, { run: envRun }),
           browseOpen && remote && machine && root && h(RemoteDirBrowse, {
             sessionId, machineId: machine.id, rootDir: root,
@@ -1801,9 +1804,9 @@ window.__ModuleLoader__.load({
       // overview its vertical scrollbar however tall the content grows.
       return h('div', { style: { flex: 'none', fontSize: 'var(--dsh-content-font-size, 14px)' } },
         project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
-        project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
+        project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, txt(reason ?? '')),
         project && h('div', { className: 'hams-dim' },
-          tr('tasks.projectLabel'), h('b', null, esc(project.title || project.path)), h('br'), null, esc(project.path)),
+          tr('tasks.projectLabel'), h('b', null, txt(project.title || project.path)), h('br'), null, txt(project.path)),
         project && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath }),
       )
     }
@@ -2010,7 +2013,7 @@ window.__ModuleLoader__.load({
         h('div', { className: 'hams-body' },
           error && h('div', { className: 'hams-err' }, error),
           project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
-          project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, esc(reason ?? '')),
+          project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, txt(reason ?? '')),
           project && config.display === 'overview' && h(ProjectOverviewView, { sessionId }),
           // the session branch GROWS instead of clipping (flex 1 0 auto): short
           // content still fills the pane (dashboard iframe), long content
@@ -2103,6 +2106,14 @@ window.__ModuleLoader__.load({
       }, [current?.id, sessionId])
 
       const addReport = (absPath, name) => {
+        // same-path dedupe (the server merges by resolved path on its next
+        // write; adding twice would leave the client id dangling and the
+        // selection would snap back to the first report)
+        const dup = (config?.reports ?? []).find((r) => r && r.path === absPath)
+        if (dup) {
+          updateConfig((c) => ({ ...c, dashboard_selected: dup.id }))
+          return
+        }
         // Client-generated id (same shape the server assigns) so adding +
         // selecting the new report is one persist round-trip.
         const id = 'r-' + Math.random().toString(36).slice(2, 10)
@@ -2129,7 +2140,7 @@ window.__ModuleLoader__.load({
               onChange: (e) => updateConfig((c) => ({ ...c, dashboard_selected: e.target.value })),
             },
             reports.length
-              ? reports.map((r) => h('option', { key: r.id, value: r.id }, esc(r.name)))
+              ? reports.map((r) => h('option', { key: r.id, value: r.id }, txt(r.name)))
               : h('option', { value: '' }, tr('dash.noReports'))),
           h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.addTitle'), onClick: () => setDialogOpen(true) }, '＋'),
           h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻'),
@@ -2181,7 +2192,7 @@ window.__ModuleLoader__.load({
                 disabled: !listing?.parent, onClick: () => setCwd(listing.parent) }, '↑'),
               h('span', { className: 'hams-dim',
                 style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                esc(listing ? listing.path : '…')))),
+                txt(listing ? listing.path : '…')))),
           h('div', { className: 'hams-field' },
             h('label', null, tr('dash.pickFile')),
             h('div', { className: 'hams-list' },
@@ -2189,10 +2200,10 @@ window.__ModuleLoader__.load({
               listing && !error && h('div', null,
                 listing.dirs.map((d) => h('button', { key: 'd:' + d, className: 'hams-listitem',
                   onClick: () => setCwd(listing.path + '/' + d) },
-                  h('span', { className: 'hams-name' }, '📁 ' + esc(d)))),
+                  h('span', { className: 'hams-name' }, '📁 ' + txt(d)))),
                 listing.htmls.map((f) => h('button', { key: 'f:' + f.name, className: 'hams-listitem',
                   onClick: () => onAdd(listing.path + '/' + f.name, f.name) },
-                  h('span', { className: 'hams-name' }, '📄 ' + esc(f.name)),
+                  h('span', { className: 'hams-name' }, '📄 ' + txt(f.name)),
                   h('span', { className: 'hams-dim' }, fmtBytes(f.bytes)))),
                 !listing.dirs.length && !listing.htmls.length && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('dash.emptyDir'))))),
           h('div', { className: 'hams-field' },
@@ -2327,8 +2338,8 @@ window.__ModuleLoader__.load({
         h('b', null, tr('check.title')),
         h('div', { className: 'hams-dim' }, tr('check.desc')),
         params && h('div', { className: 'hams-dim' }, tr(hasOwn ? 'check.sourceOwn' : 'check.sourceFallback')),
-        error && h('div', { className: 'hams-err' }, esc(error)),
-        saveError && h('div', { className: 'hams-err' }, esc(saveError)),
+        error && h('div', { className: 'hams-err' }, txt(error)),
+        saveError && h('div', { className: 'hams-err' }, txt(saveError)),
         !params && !error && h('div', { className: 'hams-dim' }, tr('common.loading')),
         params && draft && h('table', { className: 'hams-table' },
           h('thead', null, h('tr', null, [tr('check.colParam'), tr('check.colValue'), tr('check.colNote')]

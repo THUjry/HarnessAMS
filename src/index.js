@@ -312,10 +312,12 @@ async function handle(req, res, ctx) {
     const rel = segs.slice(2).join('/')
     const hit = await resolveReportFile(ctx.workspaceRegistry, sessionId, reportId, rel)
     if (hit.error) { json(hit.code ?? 404, { error: hit.error }); return }
-    const st = await fsp.stat(hit.abs).catch(() => null)
-    if (!st || !st.isFile()) { json(404, { error: 'not found' }); return }
-    res.writeHead(200, { 'Content-Type': mimeFor(hit.abs), 'Content-Length': st.size })
-    res.end(await fsp.readFile(hit.abs))
+    // read first, then size the response from the buffer: a stat-then-read race
+    // against an in-place rewrite would send a wrong Content-Length
+    const buf = await fsp.readFile(hit.abs).catch(() => null)
+    if (!buf) { json(404, { error: 'not found' }); return }
+    res.writeHead(200, { 'Content-Type': mimeFor(hit.abs), 'Content-Length': buf.length })
+    res.end(buf)
     return
   }
   json(404, { error: `unknown route: ${route} (the console lives in the DSH client UI — see the "HarnessAMS" sidebar entry; the self-check/config funnel is POST /api/tool)` })

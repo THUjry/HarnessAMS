@@ -38,13 +38,21 @@ SI_SUFFIX = [
 
 
 def si_value(text):
-    """Parse a Spectre-style number: bare float or f/p/n/u/m/k/meg/g/t suffix
-    (case-insensitive; 'meg' must win over 'm')."""
+    """Parse a Spectre-style number: bare float or f/p/n/u/m/k/meg/g/t suffix.
+    Case is ignored except the ambiguous single letters: 'M' = mega (aligned
+    with common_units' frequency table, where 10M reads 1e7 Hz) and 'm' =
+    milli; 'meg' in any case is mega. The old case-insensitive 'm' = milli
+    reading of '10M' (0.01) disagreed with common_units by 1e9x."""
     s = str(text).strip()
     try:
         return float(s)
     except ValueError:
         pass
+    if s.endswith("M"):
+        try:
+            return float(s[:-1]) * 1e6
+        except ValueError:
+            pass
     low = s.lower()
     for suffix, factor in SI_SUFFIX:
         if low.endswith(suffix):

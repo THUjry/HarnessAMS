@@ -19,7 +19,6 @@
 // layouts). The tree uploads as a unit with its relative layout so any worker
 // and its shared modules resolve remotely.
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
@@ -326,15 +325,8 @@ export function readJob(runDir) {
 }
 
 export function writeJob(runDir, job) {
-  fs.writeFileSync(jobFile(runDir), JSON.stringify(job, null, 2) + '\n', 'utf8')
-}
-
-export function manifestSummary() {
-  return pluginScripts().map((s) => s.rel)
-}
-
-export function platformNote() {
-  return os.platform() === 'win32'
-    ? 'archive extraction uses the Windows tar (bsdtar); a missing/incompatible tar falls back to per-file downloads'
-    : 'archive extraction uses tar'
+  const finalPath = jobFile(runDir)
+  const tmp = finalPath + '.tmp'
+  fs.writeFileSync(tmp, JSON.stringify(job, null, 2) + '\n', 'utf-8')
+  fs.renameSync(tmp, finalPath)
 }

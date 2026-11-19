@@ -277,7 +277,10 @@ function makeHarness({ scenario = {} }) {
       if (spectre[name]) {
         try {
           const result = await spectre[name](args)
-          return reply({ isError: false, value: { text: JSON.stringify(result) } })
+          // content[] is the live dsh-tools result shape; the batch branch below
+          // keeps the value:{text} form so resultText's both branches are
+          // exercised within this suite
+          return reply({ isError: false, content: [{ type: 'text', text: JSON.stringify(result) }] })
         } catch (e) {
           return reply({ isError: true, value: { text: String(e?.message ?? e) } })
         }

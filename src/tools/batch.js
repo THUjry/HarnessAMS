@@ -241,6 +241,7 @@ export function batchTools(ctx) {
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const jobId = args.job_id || job?.job_id
         if (!jobId) throw new Error('no job id: pass job_id or run batch_submit first')
+        if (!/^[\w.-]+$/.test(jobId)) throw new Error(`invalid job_id ${JSON.stringify(jobId)} (word/dot/dash only — it is joined into local paths)`)
         let scheduler = args.scheduler || job?.scheduler || 'lsf'
         if (scheduler === 'none') scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
         const r = await execRemote(ctx, target.alias,
@@ -280,6 +281,7 @@ export function batchTools(ctx) {
         const target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const jobId = args.job_id || job?.job_id || 'manual'
+        if (!/^[\w.-]+$/.test(jobId)) throw new Error(`invalid job_id ${JSON.stringify(jobId)} (word/dot/dash only — it names the local archive)`)
         const includes = Array.isArray(args.includes) && args.includes.length
           ? args.includes.map(String) : DEFAULT_INCLUDES
 

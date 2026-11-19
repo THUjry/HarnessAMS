@@ -292,10 +292,18 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
 
   const runId = 'rc_' + new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14) + '_' + randomUUID().slice(0, 6)
   const runDir = path.join(project.path, '.harnessams', 'selfcheck', runId)
-  await fsp.mkdir(runDir, { recursive: true })
-  // historical evidence (a failed/diagnosed run kept its artifacts) is cleaned
-  // now, ahead of the new run — bounded disk: at most the live run's artifacts
-  await cleanHistoricalArtifacts(project.path).catch(() => {})
+  // claim the session slot before the first await: two concurrent submissions
+  // must not both pass the 409 check while mkdir is still in flight
+  runningBySession.set(sessionId, runId)
+  try {
+    await fsp.mkdir(runDir, { recursive: true })
+    // historical evidence (a failed/diagnosed run kept its artifacts) is cleaned
+    // now, ahead of the new run — bounded disk: at most the live run's artifacts
+    await cleanHistoricalArtifacts(project.path).catch(() => {})
+  } catch (e) {
+    runningBySession.delete(sessionId)
+    return { error: `cannot prepare the self-check run dir: ${e?.message ?? e}`, code: 500 }
+  }
 
   const run = {
     id: runId,
@@ -527,6 +535,17 @@ async function orchestrate(run) {
       cur.result = 'error'
       cur.detail = String(e?.message ?? e).slice(0, 2000)
       if (!cur.ms) cur.ms = 1
+      void persistRun(run)
+    } else if (!cur) {
+      // thrown between steps (e.g. checkBudget after a step finished): record
+      // it instead of losing it, so a budget-exhausted truncation can never
+      // finalize with summary.ok=true
+      const step = addStep(run, {
+        section: mode === 'remote' ? 'remote' : 'local',
+        item: 'orchestration', ok: false, result: 'error',
+        detail: String(e?.message ?? e).slice(0, 2000),
+      })
+      step.ms = 1
       void persistRun(run)
     }
   } finally {
