@@ -52,7 +52,6 @@ export const SESSION_ID_RE = /^[\w-]{1,128}$/
 function normalizeReports(raw) {
   if (raw === undefined || raw === null) return { reports: [] }
   if (!Array.isArray(raw)) return { error: 'session reports must be an array' }
-  if (raw.length > MAX_REPORTS) return { error: `too many reports on a session (max ${MAX_REPORTS})` }
   const out = []
   const seenPath = new Set()
   for (const r of raw) {
@@ -71,6 +70,8 @@ function normalizeReports(raw) {
     const added_at = typeof r.added_at === 'string' && r.added_at ? r.added_at : new Date().toISOString()
     out.push({ id, name, path: p, added_at })
   }
+  // count after the path dedupe, matching the writer in tools/sim_analysis.js
+  if (out.length > MAX_REPORTS) return { error: `too many reports on a session (max ${MAX_REPORTS})` }
   return { reports: out }
 }
 
