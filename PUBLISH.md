@@ -18,13 +18,13 @@ Checklist (per package, run from the package directory):
 2. Package content check (must-contain AND must-not-contain)
    - `dsh-harnessams` (run in `src/`) must contain exactly: `index.js`, `client.js` (the
      browser half — combo-loaded classic script, single file), `server/` (host-half
-     modules), `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js` (the 6 model
+     modules), `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js` (the 7 model
      tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/
-     `safe_trash`), `icon.png` (the plugin-manager display icon), `cordis.patch.yml`,
-     `assets/` (`plotly.min.js` about 4.6 MB + the vendored
-     xterm bundle — `xterm.js`, `xterm.css`, `xterm-addon-fit.js`, `xterm-addon-search.js`
-     — + `THIRD_PARTY_NOTICES.md`; the Plotly and xterm attributions travel with the
-     assets), `scripts/selfcheck/` (2 files:
+     `safe_trash` + `harnessams_selfcheck`), `icon.png` (the plugin-manager display icon),
+     `cordis.patch.yml`,
+     `assets/` (`plotly.min.js` about 4.6 MB + `THIRD_PARTY_NOTICES.md`; the Plotly
+     attribution travels with the assets — the vendored xterm bundle was removed
+     2026-11-14 and the notices file carries its removal note), `scripts/selfcheck/` (2 files:
      `selfcheck_verify.py` + `selfcheck_verify.mjs` — the self-check compute twins),
      `selfcheck/` (the RC self-check assets: `script/analysis/gen_selfcheck_rc.py` +
      `golden/` — 36 files, about 386 KB, the analytic 3×3 psfascii golden dataset),
@@ -41,7 +41,7 @@ Checklist (per package, run from the package directory):
    - `npm publish` from the package directory.
 4. Post-publish verification
    - `dsh plugin --profile web add <package>`, restart the profile (`dsh --profile web`),
-     confirm the console routes / the 6 tools register (`--dump-config` shows the rows).
+     confirm the console routes / the 7 tools register (`--dump-config` shows the rows).
      A clean first add auto-activates the bundle (CLI reconcile appends every new
      dependency that declares `dsh.bundle.patch` to `dsh.profile.bundles`); if an
      earlier add attempt failed mid-install, the dependency is no longer "new" and
