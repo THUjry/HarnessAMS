@@ -1,0 +1,49 @@
+* cascade.scs — 4-bit ATT cascade example: ST1 + T2 + T4 + Pi8
+* sky130 switches + IDEAL R/C, ngspice S-parameter analysis.
+* Control word b3b2b1b0 with SW1=ST1 = bit0 (LSB, fastest-varying) ...
+* SW4=Pi8 = bit3 (MSB) — point index = the integer value of the control
+* word, matching the cross-product enumeration order.
+* SWB = 1.8 - SW (complementary gate drive for the T/Pi cells; ST1 has none).
+.lib "<path-to>/sky130.lib.spice" tt
+.temp 27
+.options reltol=2e-4 abstol=1e-12 vntol=1e-6
+
+.include "cell_st1.scs"
+.include "cell_t2.scs"
+.include "cell_t4.scs"
+.include "cell_pi8.scs"
+
+.param sw1=0 sw2=0 sw3=0 sw4=0
+
+* signal chain: IN - ST1 - T2 - T4 - Pi8 - OUT
+X1 in  i1  sw1       att_st1
+X2 i1  i2  sw2 vswb2 att_t2
+X3 i2  i3  sw3 vswb3 att_t4
+X4 i3  out sw4 vswb4 att_pi8
+
+* two-port S-parameter excitation (ngspice portnum/z0: the port IS the 50-ohm termination)
+V1 in 0 dc 0 ac 1 portnum 1 z0 50
+V2 out 0 dc 0 ac 0 portnum 2 z0 50
+VSW1 sw1 0 {sw1}
+VSW2 sw2 0 {sw2}
+VSW3 sw3 0 {sw3}
+VSW4 sw4 0 {sw4}
+VSWB2 vswb2 0 {1.8-sw2}
+VSWB3 vswb3 0 {1.8-sw3}
+VSWB4 vswb4 0 {1.8-sw4}
+
+.sp dec 50 1MEG 40G
+
+.control
+set noaskquit
+run
+let s11re = re(s_1_1)
+let s11im = im(s_1_1)
+let s21re = re(s_2_1)
+let s21im = im(s_2_1)
+let s22re = re(s_2_2)
+let s22im = im(s_2_2)
+wrdata out.csv s11re s11im s21re s21im s22re s22im
+quit
+.endc
+.end

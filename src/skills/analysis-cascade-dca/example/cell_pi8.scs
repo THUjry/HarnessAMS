@@ -1,0 +1,20 @@
+* cell_pi8.scs — symmetric Pi-type 8 dB ATT cell, sky130 switches + IDEAL R/C
+* Single series arm R0 bypassed by M1 (gate=SWB, ON in the reference state);
+* two symmetric shunt arms, each (Rp||Cp) in series with M2/M3 to GND
+* (gates=SW, ON in the attenuation state). Cp parallels Rp, NOT the switch.
+* Sizing (Pi formulas, Aperture-B; verified against Spectre on the
+* transcribed models): A'=8.828 dB (IL_ref=0.828 dB), Rs=60.03 ohm,
+*   Rsh/side=106.72 = Rp 89.64 + Ron2 17.07. M1: w=61.7 nf=31 (Ron ~ 12 ohm);
+*   M2/M3: w=43.3 nf=22 (Ron ~ 17.1 ohm). Cp scan optimum 40 fF/side.
+.subckt att_pi8 in out sw swb
+R0  in out 60.03
+Rp1 in n2  89.64
+Cp1 in n2  40e-15
+Rp2 out n3 89.64
+Cp2 out n3 40e-15
+XM1 out gb in 0 sky130_fd_pr__nfet_01v8_lvt l=0.15 w=61.7 nf=31
+XM2 n2  gs 0  0 sky130_fd_pr__nfet_01v8_lvt l=0.15 w=43.3 nf=22
+XM3 n3  gs 0  0 sky130_fd_pr__nfet_01v8_lvt l=0.15 w=43.3 nf=22
+Rg1 gb swb 10k
+Rg2 gs sw 10k
+.ends

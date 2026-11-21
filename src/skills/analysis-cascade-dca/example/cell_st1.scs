@@ -1,0 +1,13 @@
+* cell_st1.scs — SimpleT (shunt) 1 dB ATT cell, sky130 switch + IDEAL R/C
+* IN-OUT shorted inside the cell; the single shunt arm (Rp||Cp, then M0 to
+* GND) loads the thru only in the attenuation state (SW=1.8). No SWB.
+* Sizing (shunt-arm calc, Ron direct input): R_shunt = 50/(2/10^(-1/20)-2)
+*   = 204.89 ohm; Ron2 = 32.8 ohm (0.16 x R_shunt), Rp = 172.11 ohm.
+*   M0: w=22.6 nf=11 (Ron ~ 32.8 ohm, ~2 um per finger). Cp scan optimum 20 fF.
+.subckt att_st1 in out sw
+Vshort in out dc 0
+R0 in n0 172.11
+Cp in n0 20e-15
+XM0 n0 g 0 0 sky130_fd_pr__nfet_01v8_lvt l=0.15 w=22.6 nf=11
+Rg g sw 10k
+.ends

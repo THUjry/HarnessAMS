@@ -23,10 +23,13 @@ Checklist (per package, run from the package directory):
      `batch_poll`/`batch_fetch` + `gen-sweep-report`/`sim_progress`/`safe_trash` +
      `harnessams_selfcheck`; skills.js registers the bundled skills; report_render
      holds the shared chart-spec/HTML templates, figs_export the headless PNG
-     pipeline with its jsdom/@napi-rs/canvas/@resvg/resvg-js runtime deps), `skills/` (the two bundled skills: `smart-spectre/SKILL.md` +
-     `dca-design/` — SKILL.md, `templates/` ×3 sky130 ATT netlists, `scripts/` ×3 calc
-     scripts, `data/sky130/` ×4 JSON data pack; all ASCII/English, scrubbed), `icon.png`
-     (the plugin-manager display icon),
+     pipeline with its jsdom/@napi-rs/canvas/@resvg/resvg-js runtime deps), `skills/` (the
+     three bundled skills: `smart-spectre/SKILL.md`; `dca-cell-design/` — SKILL.md,
+     `scripts/` ×3 calc scripts, `sky130_examples/` (template ×3 sky130 ATT netlists +
+     `sky130_fd_pr__nfet_01v8_lvt.scs` + `nfet_switch.json`); `analysis-cascade-dca/` —
+     SKILL.md, `scripts/gen_cascade_report.py`, `example/` (4 cell netlists + cascade
+     netlist + real-simulation results JSON + report HTML); all ASCII/English, scrubbed),
+     `icon.png` (the plugin-manager display icon),
      `cordis.patch.yml`,
      `assets/` (`plotly.min.js` about 4.6 MB + `THIRD_PARTY_NOTICES.md`; the Plotly
      attribution travels with the assets — the vendored xterm bundle was removed
@@ -37,7 +40,10 @@ Checklist (per package, run from the package directory):
      plus `package.json` (npm always includes it).
    - Must NOT contain: `scripts/common/` (the `_dont_use_*` retired reference copies —
      the `files` whitelist excludes the directory), any vendored simulator binaries or
-     PDK model files, `docs/`, `tests/`,
+     PDK model files (exception: the bundled sky130 example model
+     `skills/dca-cell-design/sky130_examples/sky130_fd_pr__nfet_01v8_lvt.scs` —
+     MIT-licensed, from the open sky130-spectre-models transcription repo, part of the
+     self-contained example set), `docs/`, `tests/`,
      `install_suite/`, `.gitattributes`, or the repo-root README/AGENTS/CHANGELOG
      (running from `src/` keeps them out).
    - `dsh-harnessams-suite` (run in `install_suite/`) must contain exactly `icon.png`

@@ -1,0 +1,16 @@
+* cell_t4.scs — symmetric T-type 4 dB ATT cell, sky130 switches + IDEAL R/C
+* Same topology as cell_t2 (values only).
+* Sizing (T formulas, Ron1 direct input 8 ohm): A'=4.513 dB (IL_ref=0.513 dB),
+*   Rs=12.70 ohm/arm, R3=92.03 = Rp 77.31 + Ron2 14.73.
+*   M1: w=92.5 nf=46 (Ron ~ 8 ohm); M2: w=50.2 nf=25 (Ron ~ 14.7 ohm).
+*   Cp scan optimum 80 fF.
+.subckt att_t4 in out sw swb
+Rs1 in mid 12.70
+Rs2 mid out 12.70
+Rp  mid n2 77.31
+Cp  mid n2 80e-15
+XM1 out gb in 0 sky130_fd_pr__nfet_01v8_lvt l=0.15 w=92.5 nf=46
+XM2 n2  gs 0  0 sky130_fd_pr__nfet_01v8_lvt l=0.15 w=50.2 nf=25
+Rg1 gb swb 10k
+Rg2 gs sw 10k
+.ends
