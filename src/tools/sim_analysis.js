@@ -288,6 +288,11 @@ h1 { font-size: 32px; font-weight: 600; color: #0b0b0b; margin: 0 0 4px 0; }
 .tbl tr.selected td { background: #dce8ff; font-weight: 600; }
 .tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
 .swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 6px; }
+.legend-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 10px; font-size: 13px; margin-bottom: 20px; }
+.legend-item { padding: 4px 8px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; min-width: 0; }
+.legend-item:hover { background: #f0f5ff; }
+.legend-item.selected { background: #dce8ff; font-weight: 600; }
+.legend-item .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tbl tr.bad td:first-child .swatch { outline: 2px solid #c0392b; }
 </style>
 </head>
@@ -301,8 +306,9 @@ h1 { font-size: 32px; font-weight: 600; color: #0b0b0b; margin: 0 0 4px 0; }
   <span id="round-info"></span>
 </div>
 <div id="dashboard-area" style="display:none">
-  <p class="hint">Click curve / table row → cross-highlight | Click blank area or info bar to deselect</p>
-  <div id="info-bar">Click a curve or table row to view details</div>
+  <p class="hint">Click legend entry / table row (or a curve) → cross-highlight | Click blank area or info bar to deselect</p>
+  <div id="info-bar">Click a legend entry or table row to cross-highlight a parameter combination</div>
+  <div id="legend-grid" class="legend-grid"></div>
   <div class="cards" id="summary-cards"></div>
   <div id="chart-area"></div>
   <div class="table-box"><h2>All Parameter Combinations</h2>
@@ -383,10 +389,35 @@ function buildReport(RD) {
   document.getElementById("round-info").textContent =
     "Status: " + RD.n_success + " success / " + RD.n_failed + " failed";
   sortCol = null; sortAsc = true; sel = null;
-  document.getElementById("info-bar").textContent = "Click a curve or table row to view details";
+  document.getElementById("info-bar").textContent = "Click a legend entry or table row to cross-highlight a parameter combination";
+  try { buildLegend(); } catch (e) { console.warn("legend", e); }
   try { buildSummary(RD); } catch (e) { console.warn("summary", e); }   // hard rule: per-section isolation
   try { buildCharts(RD); } catch (e) { console.warn("charts", e); }
   try { buildTable(RD); } catch (e) { console.warn("table", e); }
+}
+
+// Per-combination legend grid (cascade-report pattern): pure-DOM click
+// highlighting that works regardless of plotly_click support — the primary
+// cross-highlight path; curve clicks ride el.on('plotly_click') best-effort.
+function buildLegend() {
+  const grid = document.getElementById("legend-grid");
+  grid.innerHTML = "";
+  grid.style.display = N >= 2 ? "" : "none";
+  PTS.forEach(function (p, i) {
+    const it = document.createElement("div");
+    it.className = "legend-item";
+    it.dataset.index = String(p.index);
+    it.title = p.label;
+    const sw = document.createElement("span");
+    sw.className = "swatch";
+    sw.style.background = hsl(i);
+    const tx = document.createElement("span");
+    tx.className = "lbl";
+    tx.textContent = p.label;
+    it.appendChild(sw);
+    it.appendChild(tx);
+    grid.appendChild(it);
+  });
 }
 
 function buildSummary(RD) {
@@ -585,9 +616,23 @@ function highlight(idx) {                    // cross-highlight: table row + cur
   sel = idx;
   const p = PTS.find(function (q) { return String(q.index) === String(idx); });
   const bar = document.getElementById("info-bar");
+  document.querySelectorAll("#legend-grid .legend-item").forEach(function (it) {
+    it.classList.toggle("selected", it.dataset.index === String(idx));
+  });
   if (p) {
     let txt = "<b>" + esc(p.label) + "</b>";
     const ms = p.metrics ? Object.keys(p.metrics).map(function (k) { return esc(k) + " = " + fmtVal(p.metrics[k]); }) : [];
+    if (CURVE && CURVE.points) {
+      const cp = CURVE.points.find(function (q) { return String(q.index) === String(idx); });
+      if (cp && cp.x && cp.x.length) {
+        const m = Math.floor(cp.x.length / 2);
+        CURVE.signals.forEach(function (sk) {
+          const v = cp.y && cp.y[sk.name] ? cp.y[sk.name][m] : null;
+          ms.push(esc(sk.name) + (sk.dB ? " (dB)" : "") + " = " + fmtVal(v));
+        });
+        ms.push(esc(CURVE.x_signal) + " = " + fmtVal(cp.x[m]));
+      }
+    }
     if (ms.length) txt += " → " + ms.join(" | ");
     bar.innerHTML = txt;
   }
@@ -607,7 +652,8 @@ function highlight(idx) {                    // cross-highlight: table row + cur
 
 function resetAll() {
   sel = null;
-  document.getElementById("info-bar").textContent = "Click a curve or table row to view details";
+  document.getElementById("info-bar").textContent = "Click a legend entry or table row to cross-highlight a parameter combination";
+  document.querySelectorAll("#legend-grid .selected").forEach(function (it) { it.classList.remove("selected"); });
   CURVE_DIVS.forEach(function (id) {
     if (document.getElementById(id)) Plotly.restyle(id, { "line.width": 2, opacity: 1 });
   });
@@ -615,6 +661,11 @@ function resetAll() {
 }
 
 document.getElementById("info-bar").onclick = resetAll;
+// native DOM listener ONCE at startup — the container survives batch switches
+document.getElementById("legend-grid").addEventListener("click", function (e) {
+  const it = e.target.closest(".legend-item");
+  if (it) toggle(it.dataset.index);
+});
 
 populateSelect();
 if (MANIFEST.rounds.length) { loadRound(MANIFEST.rounds[0].file); }
