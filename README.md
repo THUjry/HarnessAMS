@@ -107,7 +107,7 @@ The master `plotly.min.js` travels inside the `dsh-harnessams` tarball, so suite
 ### Path A (standard, recommended): per-plugin install
 
 ```powershell
-dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.18    # remote channel — runtime tool-shell consumer, deliberately NOT an npm dependency; pnpm 12 asks to approve the ssh2/cpu-features build scripts (`pnpm approve-builds ssh2 cpu-features --yes`)
+dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.20    # remote channel — runtime tool-shell consumer, deliberately NOT an npm dependency; pnpm 12 asks to approve the ssh2/cpu-features build scripts (`pnpm approve-builds ssh2 cpu-features --yes`; after an in-place upgrade run `pnpm rebuild ssh2` to (re)build the native binding)
 dsh plugin --profile web add dsh-harnessams dsh-harnessams-smart-ana-sim
 dsh --profile web    # restart the profile after installing: bundle membership is a startup boundary
 ```
@@ -115,7 +115,7 @@ dsh --profile web    # restart the profile after installing: bundle membership i
 ### Path B (convenience): aggregate bundle, one command (first-party plugins only)
 
 ```powershell
-dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.18    # remote channel — NOT part of the suite bundle
+dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.20    # remote channel — NOT part of the suite bundle
 dsh plugin --profile web add dsh-harnessams-suite
 dsh --profile web --dump-config    # confirm the layers and rows appear as expected
 ```
@@ -128,15 +128,15 @@ Write a `cordis.yml` inside the plugin repo (`name` pointing to the absolute pat
 dsh --profile web --patch <path-to>\cordis.yml --port 3080 --no-open
 ```
 
-The web profile must already have @linxin666/dsh-ssh exact-pinned for the remote channel — `dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.18` (runtime tool-shell consumer, deliberately NOT an npm dependency). Configure host aliases in dsh-ssh's own panel; each project sets its own remote root (`remote_root`) in `<project>/.harnessams/workspace_config.json` — the project overview settings table's confirm button is the write face.
+The web profile must already have @linxin666/dsh-ssh exact-pinned for the remote channel — `dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.20` (runtime tool-shell consumer, deliberately NOT an npm dependency). Configure host aliases in dsh-ssh's own panel; each project sets its own remote root (`remote_root`) in `<project>/.harnessams/workspace_config.json` — the project overview settings table's confirm button is the write face.
 
 Note: with the npm-installed CLI, `--profile web` already names the profile — do **not** append a positional `web` argument (the launcher rejects it with `too many arguments`); flags after the launcher options (such as `--port` / `--open`) reach the web app. Verified against `@deepseek-ai/dsh@0.2.1-rc.2` installed from npm (2026-10-25); re-verified on 0.2.2-rc.1 (2026-11-10) and 0.2.2-rc.3 (2026-11-14).
 
 ## Environment
 
 - Node.js >= 24.9 (DSH 0.2.2 floor; verified on v24.22.1);
-- DSH: `npm i -g @deepseek-ai/dsh` then `dsh --profile web`; **verified version 0.2.2-rc.3** (2026-11-14; previously 0.2.2-rc.1, 2026-11-10, and 0.2.1-rc.2, 2026-10-25; developer preview — pin the version; before upgrading, check the upstream release notes and rerun the minimal regression; both plugins' `engines.dsh` is exact-pinned to the same version);
-- @linxin666/dsh-ssh: `dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.18` — required at runtime for remote checks/batches (consumed via the DSH tool shell, not a package dependency); **verified version 0.4.18** (2026-11-14; contract re-verified against the installed package's src/tools.ts). Its peerDeps require dsh >= 0.2.2-rc.2 — hence the rc.3 host. Deployment notes: telemetry is ON by default (opt out with localStorage `dsh-web-ui-telemetry-opt-out=1` or DNT); there is no host-key verification (prefer a restricted account + key auth); a lost connection replays a non-idempotent exec up to 3 times — the batch layer guards with marker+flock idempotency (see the root repo's dependency-check doc §2).
+- DSH: `npm i -g @deepseek-ai/dsh` then `dsh --profile web`; **verified version 0.2.2-rc.5** (2026-11-21; previously 0.2.2-rc.3, 2026-11-14, 0.2.2-rc.1, 2026-11-10, and 0.2.1-rc.2, 2026-10-25; developer preview — pin the version; before upgrading, check the upstream release notes and rerun the minimal regression; both plugins' `engines.dsh` is exact-pinned to the same version);
+- @linxin666/dsh-ssh: `dsh plugin --profile web add --save-exact @linxin666/dsh-ssh@0.4.20` — required at runtime for remote checks/batches (consumed via the DSH tool shell, not a package dependency); **verified version 0.4.20** (2026-11-21 upgrade from 0.4.18, 2026-11-14; tarball diff confirms `src/tools.ts` unchanged, so the ssh_* contract anchors carry over verbatim). Its peerDeps require dsh >= 0.2.2-rc.3 (0.4.18 required >= 0.2.2-rc.2). Deployment notes: telemetry is ON by default (opt out with localStorage `dsh-web-ui-telemetry-opt-out=1` or DNT); there is no host-key verification (prefer a restricted account + key auth); a lost connection replays a non-idempotent exec up to 3 times — the batch layer guards with marker+flock idempotency (see the root repo's dependency-check doc §2).
 - Beware: npm hosts an unrelated same-name package `dsh`; remove it first with `npm rm -g dsh` if present;
 - Simulation environment (SmartAnaSim): a local Spectre install is required for the `spectre_*` tools (commercial software, not bundled).
 
