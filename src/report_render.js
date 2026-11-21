@@ -649,7 +649,7 @@ export function genReportFromSpec(projectDir, prepared) {
     .replaceAll('__TITLE__', htmlEscape(title))
     .replaceAll('__PLOTLY__', plotly.src)
     .replaceAll('__NOW__', nowStamp)
-    .replaceAll('__META__', prepared.metaLine ? htmlEscape(prepared.metaLine) : '')
+    .replaceAll('__META__', prepared.metaLine ? ' | ' + htmlEscape(prepared.metaLine) : '')
     .replaceAll('__CONCLUSIONS__', concl
       ? `<div class="conclusions-box"><h2>Conclusions</h2>${concl}</div>`
       : '')
