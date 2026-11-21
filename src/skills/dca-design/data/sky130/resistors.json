@@ -1,0 +1,39 @@
+{
+  "meta": {
+    "process": "sky130 (open PDK)",
+    "source": "OpenPDK sky130_spectre transcription library (models/sky130.scs) + AC impedance verification runs (results/COMPARE_RC.md, 2026-11-19, ngspice-47 vs Spectre 21.1, tt 27C)",
+    "notes": [
+      "rsh_nominal is the model body sheet resistance (sw_..._rs parameter, tt corner).",
+      "rsh_effective includes the head/end resistances of the wrapped subckt - it is geometry-dependent (extracted as R*w/l from the measured dbOhm table below).",
+      "Corner sensitivity (COMPARE_CORNER): res_high_po_rs 325 -> 370 at hh (+13.8%); see sky130spectre.md for the full corner set.",
+      "Resistor instances are transcribed subckt devices with explicit w/l; no m/mp parallel-finger parameter exists in this library."
+    ]
+  },
+  "res_high_po": {
+    "description": "high-resistance unsilicided poly (sky130_fd_pr__res_high_po)",
+    "rsh_nominal_ohm_sq": 325.0,
+    "measured": [
+      {"w_um": 0.69, "l_um": 5.0, "z_10khz_dbohm": 69.19, "r_ohm": 2853.6, "rsh_effective_ohm_sq": 393.8},
+      {"w_um": 1.41, "l_um": 20.0, "z_10khz_dbohm": 73.78, "r_ohm": 4879.5, "rsh_effective_ohm_sq": 344.0}
+    ],
+    "recommended_rsh_effective_ohm_sq": 390.0
+  },
+  "res_xhigh_po": {
+    "description": "very-high-resistance poly (sky130_fd_pr__res_xhigh_po); body resistance is voltage-dependent (sqrt+**2+tanh form)",
+    "rsh_nominal_ohm_sq": 2000.0,
+    "measured": [
+      {"w_um": 0.69, "l_um": 5.0, "z_10khz_dbohm": 83.90, "r_ohm": 15664.0, "rsh_effective_ohm_sq": 2161.6},
+      {"w_um": 1.41, "l_um": 20.0, "z_10khz_dbohm": 89.37, "r_ohm": 29338.0, "rsh_effective_ohm_sq": 2068.3}
+    ],
+    "recommended_rsh_effective_ohm_sq": 2100.0
+  },
+  "res_iso_pw": {
+    "description": "isolated n-well poly resistor (sky130_fd_pr__res_iso_pw)",
+    "rsh_nominal_ohm_sq": null,
+    "measured": [
+      {"w_um": 2.65, "l_um": 5.0, "z_10khz_dbohm": 77.89, "r_ohm": 7842.0, "rsh_effective_ohm_sq": 4156.3},
+      {"w_um": 2.65, "l_um": 20.0, "z_10khz_dbohm": 89.30, "r_ohm": 29102.0, "rsh_effective_ohm_sq": 3856.0}
+    ],
+    "recommended_rsh_effective_ohm_sq": 4000.0
+  }
+}

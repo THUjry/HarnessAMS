@@ -1,0 +1,31 @@
+{
+  "meta": {
+    "description": "Worked sky130 Pi-type 8 dB ATT design - the verification anchor for the calc scripts (direct Rpoly/Ron method, 2026-11-21 rewrite). Method lineage: pi ideal formulas + by-value shunt arm; FOM measured locally on the sky130_spectre transcription library.",
+    "source": "OpenPDK sky130_spectre tb/Pi8dB_ng.sp + results/COMPARE_Pi8dB.md (2026-11-19; ngspice-47 vs Cadence Spectre 21.1, tt 27C, 1 MHz..15 GHz, 209 points x2 states)",
+    "verification": {
+      "ds21_mean_db": -7.9953,
+      "ngspice_ds21_mean_db": -8.0004,
+      "ilref_dc_db": -0.8238,
+      "max_pointwise_ds21_ref_db": 0.0567,
+      "max_pointwise_ds21_att_db": 0.0095
+    }
+  },
+  "design": {
+    "attn_nominal_db": 8.0,
+    "a_prime_db": 8.828,
+    "il_ref_db": 0.828,
+    "rs_series_ohm": 60.03,
+    "rsh_per_side_ohm": 106.72,
+    "rp_per_side_ohm": 89.64,
+    "ron2_ohm": 17.07,
+    "ron1_ohm": 12.0,
+    "cp_ff_per_side": 40.0,
+    "cp_sweep_result": "optimum 40 fF/side, pkpk 0.024 dB (candidates 1/10/20/30/40/60/80 fF)"
+  },
+  "devices": {
+    "M1_series_bypass": {"device": "sky130_fd_pr__nfet_01v8_lvt", "l_um": 0.15, "w_um": 61.7, "nf": 31, "ron_ohm": 12.0},
+    "M2_M3_shunt": {"device": "sky130_fd_pr__nfet_01v8_lvt", "l_um": 0.15, "w_um": 43.3, "nf": 22, "ron_ohm": 17.1, "count": 2},
+    "R0_series": {"note": "ideal resistor 60.03 ohm in the verification tb; realize with res_high_po (see resistors.json)"},
+    "Rp_shunt": {"note": "ideal resistor 89.64 ohm/side in the verification tb; realize with res_high_po (see resistors.json)"}
+  }
+}

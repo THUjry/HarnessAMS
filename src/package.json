@@ -22,6 +22,8 @@
     "batch.js",
     "remote.js",
     "trash.js",
+    "skills.js",
+    "skills/",
     "icon.png",
     "cordis.patch.yml",
     "selfcheck/",

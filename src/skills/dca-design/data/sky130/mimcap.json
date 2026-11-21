@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "process": "sky130 (open PDK)",
+    "source": "OpenPDK sky130_spectre AC impedance verification (results/COMPARE_RC.md, 2026-11-19, tt 27C)",
+    "notes": [
+      "cap_mim_m3_1 and cap_mim_m3_2 measured 5x5 and 10x10 um testbenches all at z_10khz = 169.54 dBOhm -> C = 1/(2*pi*1e4*10^(169.54/20)) = 53.0 fF. The identical values across geometries indicate the testbench parametrization collapsed to one C - treat cap_per_area as an order-of-magnitude estimate and verify the wanted geometry with a dedicated run before final Cp sizing.",
+      "MOM-style fingered caps (crtmom equivalents) are not part of the transcribed set; Cp realized as a square MIM (w=l=sqrt(C/cap_per_area)) or an ideal capacitor for first-pass verification."
+    ]
+  },
+  "cap_mim_m3_1": {
+    "cap_per_area_ff_um2": 2.1,
+    "measured": [
+      {"w_um": 5.0, "l_um": 5.0, "z_10khz_dbohm": 169.54, "c_ff": 53.0},
+      {"w_um": 10.0, "l_um": 10.0, "z_10khz_dbohm": 169.54, "c_ff": 53.0}
+    ]
+  },
+  "cap_mim_m3_2": {
+    "cap_per_area_ff_um2": 2.1,
+    "measured": [
+      {"w_um": 5.0, "l_um": 5.0, "z_10khz_dbohm": 169.54, "c_ff": 53.0},
+      {"w_um": 10.0, "l_um": 10.0, "z_10khz_dbohm": 169.54, "c_ff": 53.0}
+    ]
+  }
+}

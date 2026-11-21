@@ -43,14 +43,16 @@ import { batchTools } from './tools/batch.js'
 import { analysisTools } from './tools/sim_analysis.js'
 import { selfcheckTools, runSelfcheckAction } from './tools/selfcheck.js'
 import { safeTrashTool } from './trash.js'
+import { registerSkills } from './skills.js'
 
 export const name = 'dsh-harnessams'
-// workspaceRegistry/tools/systemPrompt are required on the web composition
-// (all ship with dsh-base); the handlers still guard against undefined so
-// degraded embeds fail soft, not loud. systemPrompt is declared for the
-// waiting-policy section (cordis blocks ctx access to undeclared services —
-// optional chaining cannot save that, live-caught 2026-11-21).
-export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt']
+// workspaceRegistry/tools/systemPrompt/skills are required on the web
+// composition (all ship with dsh-base); the handlers still guard against
+// undefined so degraded embeds fail soft, not loud. systemPrompt is declared
+// for the waiting-policy section and skills for the bundled-skill catalog
+// (cordis blocks ctx access to undeclared services — optional chaining
+// cannot save that, live-caught 2026-11-21).
+export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills']
 
 // Remote waiting policy injected into the system prompt while this plugin is
 // enabled (2026-11-21, the "no dumb sleep" wave): bounded sleeps, progress-
@@ -97,6 +99,16 @@ export function apply(ctx) {
       text: REMOTE_WAIT_POLICY,
     })
   }, 'harnessams system prompt section')
+  ctx.effect(() => {
+    // Bundled skills (src/skills/<name>/SKILL.md -> ctx.skills catalog):
+    // fail-open — see skills.js. The catalog carries name + description
+    // only; bodies load on demand through the `skill` tool.
+    const names = registerSkills(ctx)
+    if (names.length) {
+      if (ctx.logger?.info) ctx.logger.info('[harnessams] registered %d skills: %s', names.length, names.join(', '))
+      else console.log('[harnessams] registered', names.length, 'skills:', names.join(', '))
+    }
+  }, 'harnessams skills')
 }
 
 async function readBodyJson(req, limit = 1 << 20) {

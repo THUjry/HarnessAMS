@@ -18,9 +18,13 @@ Checklist (per package, run from the package directory):
 2. Package content check (must-contain AND must-not-contain)
    - `dsh-harnessams` (run in `src/`) must contain exactly: `index.js`, `client.js` (the
      browser half — combo-loaded classic script, single file), `server/` (host-half
-     modules), `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js` (the 7 model
-     tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/`sim_progress`/
-     `safe_trash` + `harnessams_selfcheck`), `icon.png` (the plugin-manager display icon),
+     modules), `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js`/`skills.js`
+     (the 7 model tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/
+     `sim_progress`/`safe_trash` + `harnessams_selfcheck`; skills.js registers the
+     bundled skills), `skills/` (the two bundled skills: `smart-spectre/SKILL.md` +
+     `dca-design/` — SKILL.md, `templates/` ×3 sky130 ATT netlists, `scripts/` ×3 calc
+     scripts, `data/sky130/` ×4 JSON data pack; all ASCII/English, scrubbed), `icon.png`
+     (the plugin-manager display icon),
      `cordis.patch.yml`,
      `assets/` (`plotly.min.js` about 4.6 MB + `THIRD_PARTY_NOTICES.md`; the Plotly
      attribution travels with the assets — the vendored xterm bundle was removed

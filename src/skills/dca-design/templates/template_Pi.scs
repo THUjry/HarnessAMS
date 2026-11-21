@@ -1,0 +1,37 @@
+// template_Pi.scs — Pi-type ATT cell, sky130 switches + IDEAL R/C (2026-11-21)
+// Default values = the verified 8 dB design (dca-design data/sky130/pi8db_reference.json;
+// reproduced by calc_pi.py 8). Fill-in map from calc_pi.py output:
+//   R0  <- Rs (series arm)          Rp1/Rp2 <- Rp (per-side shunt poly value)
+//   M1  <- bypass switch (ron1)     M2/M3   <- shunt switches (ron), x2
+//   cpf <- Cp first estimate, refined by the Cp scan (sweep_config parameter)
+// Switch geometry is baked into the flattened model card name
+// (nlowvt_model__w<W>p<N>f<N> for sky130_fd_pr__nfet_01v8_lvt): for a new w/nf
+// pick the nearest existing card from the transcribed library or extend its
+// generator, and update l/w/nf/nrd/nrs together.
+// R/C are IDEAL elements by decision: analytic flatness predictions are
+// advisory — ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
+simulatorOptions options temp=@@temperature@@ reltol=2e-4
+include "models/sky130_fd_pr__nfet_01v8_lvt.scs" // <- adjust to the project's transcribed-library path
+
+parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
+
+subckt att_pi (in out sw swb)
+  R0  (in out) resistor r=60.03
+  Rp1 (in n2)  resistor r=89.64
+  Cp1 (in n2)  capacitor c=(cpf*1e-15)
+  Rp2 (out n3) resistor r=89.64
+  Cp2 (out n3) capacitor c=(cpf*1e-15)
+  M1 (out gb in 0) nlowvt_model__w61p7nf31 l=0.15u w=61.7u nf=31 nrd=(0.14/61.7) nrs=(0.14/61.7) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
+  M2 (n2 gs 0 0)   nlowvt_model__w43p3nf22 l=0.15u w=43.3u nf=22 nrd=(0.14/43.3) nrs=(0.14/43.3) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
+  M3 (n3 gs 0 0)   nlowvt_model__w43p3nf22 l=0.15u w=43.3u nf=22 nrd=(0.14/43.3) nrs=(0.14/43.3) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
+  Rg1 (gb swb) resistor r=10k
+  Rg2 (gs sw)  resistor r=10k
+ends att_pi
+
+V1 (in 0)  port num=1 z0=50
+V2 (out 0) port num=2 z0=50
+X1 (in out sw vswb) att_pi
+VSW  (sw 0)   vsource dc=(1.8*SW)
+VSWB (vswb 0) vsource dc=(1.8*(1-SW))
+
+sp1 sp start=1e9 stop=40e9 step=100e6
