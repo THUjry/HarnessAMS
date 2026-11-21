@@ -283,10 +283,10 @@ async function handle(req, res, ctx) {
   if (route === '/api/progress') {
     // Session tool cards (tool.call.toolview): live single-run progress while a
     // local sweep blocks its tool call. Read-only and workspace-fenced (D-3):
-    // the card passes its cwd (the slot's session identity — the toolview owner
-    // has no sessionId) plus the run dir from the tool arguments it already
-    // shows; progressFence resolves the cwd to a registered workspace and keeps
-    // the run dir inside it.
+    // the card passes its sessionId (added to the toolview owner via the slot
+    // register-inject hook) plus the run dir from the tool arguments it already
+    // shows; progressFence resolves the session to its registered workspace and
+    // keeps the run dir inside it.
     const fence = progressFence(ctx.workspaceRegistry, url.searchParams)
     if (fence.error) { json(fence.code, { error: fence.error }); return }
     if (!fence.runDir) { json(400, { error: 'runDir is required' }); return }

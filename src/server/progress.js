@@ -4,16 +4,16 @@
 // Pure file reads — the sweep worker rewrites sweep_progress.json every ~30 s
 // and drops one NN/point_meta.json per finished point; nothing here starts or
 // stops a simulation. Paths are fenced (progressFence below, review D-3
-// 2026-11-21): the card passes its session cwd — the toolview slot owner has
-// no sessionId (verified in the rc.5 host client), so cwd is the session
-// identity — which must resolve to a registered workspace, and every
-// caller-supplied path must stay inside that workspace.
+// 2026-11-21): the card passes its sessionId (added to the toolview owner via
+// the slot register-inject hook), which must resolve to a registered
+// workspace, and every caller-supplied path must stay inside it.
 //
 // Paths may be remote-shaped POSIX strings (a mirror path only syncs progress
 // files after batch_fetch); anything not present on this host answers
 // { local: false } and the client silently omits the progress/aggregate block.
 import fs from 'node:fs'
 import path from 'node:path'
+import { sessionProject } from './project.js'
 
 const MAX_BATCHES = 64
 
@@ -151,33 +151,25 @@ export function progressSummaryPayload({ runDir, projectDir }) {
 }
 
 // Workspace fence for the two progress endpoints (review D-3, 2026-11-21).
-// Anchor: the toolview slot owner carries the session cwd (not a sessionId —
-// host client verified: owner = {callId, toolName, ...call, openFile, cwd,
-// home, ...}), and the DSH workspace registry lists every legitimate project
-// root. cwd must map to one of them; runDir/projectDir must then stay inside
-// that root. Remote-shaped POSIX strings fail containment on a Windows host by
-// construction (path.resolve parks them under the current drive, not the
+// Anchor: the sessionId. The toolview slot owner carries no sessionId (rc.5
+// host client: owner = {callId, toolName, ...call, openFile, cwd, home, ...}),
+// so the cards register with `inject: (sessionId) => ({ sessionId })` — the
+// official ask_user_question precedent — and pass it here; sessionProject maps
+// it through the DSH workspace registry, the same mapping every other
+// session-scoped route uses, and runDir/projectDir must stay inside that
+// project root. Remote-shaped POSIX strings fail containment on a Windows host
+// by construction (path.resolve parks them under the current drive, not the
 // workspace) — remote batches poll the local fetched paths after batch_fetch.
 export function progressFence(registry, params) {
-  const cwd = String(params.get('cwd') ?? '').trim()
-  if (!cwd) return { code: 400, error: 'cwd is required (the session working directory)' }
-  const ws = workspaceForCwd(registry, cwd)
-  if (!ws) return { code: 400, error: 'cwd is not a registered workspace' }
+  const sessionId = String(params.get('sessionId') ?? '').trim()
+  const { project, reason } = sessionProject(registry, sessionId)
+  if (!project) return { code: 400, error: reason }
   const runDir = String(params.get('runDir') ?? '').trim()
   const projectDir = String(params.get('projectDir') ?? '').trim()
   if (!runDir && !projectDir) return { code: 400, error: 'runDir or projectDir is required' }
-  if (runDir && !insideRoot(ws.path, runDir)) return { code: 403, error: 'runDir escapes the workspace' }
-  if (projectDir && !insideRoot(ws.path, projectDir)) return { code: 403, error: 'projectDir escapes the workspace' }
+  if (runDir && !insideRoot(project.path, runDir)) return { code: 403, error: 'runDir escapes the session workspace' }
+  if (projectDir && !insideRoot(project.path, projectDir)) return { code: 403, error: 'projectDir escapes the session workspace' }
   return { runDir: runDir || null, projectDir: projectDir || null }
-}
-
-// cwd → workspace: the session cwd is the workspace root (or inside it).
-function workspaceForCwd(registry, cwd) {
-  const list = registry && typeof registry.list === 'function' ? registry.list() : []
-  for (const ws of list) {
-    if (typeof ws?.path === 'string' && ws.path && insideRoot(ws.path, cwd)) return ws
-  }
-  return null
 }
 
 // Lexical containment (no realpath — the candidates may not exist yet); the

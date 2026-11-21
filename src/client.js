@@ -808,18 +808,18 @@ window.__ModuleLoader__.load({
     // (cross-batch aggregate). While the tool call is in flight (active) poll every
     // 3 s with the visibility pause/resume discipline shared by the sidebar polls;
     // settled cards fetch once on mount (one fetch per scroll-back remount is fine).
-    function useSimProgress({ runDir, projectDir, cwd, active }) {
+    function useSimProgress({ runDir, projectDir, sessionId, active }) {
       const [data, setData] = useState({ prog: null, agg: null })
       useEffect(() => {
-        // API already ends with /api — the endpoints hang right off it. cwd is
-        // the workspace-fence key (server: cwd must resolve to a registered
-        // workspace and the paths must stay inside it, review D-3); without it
-        // the endpoints answer 400, so skip the fetch outright.
-        if (!cwd) return
+        // API already ends with /api — the endpoints hang right off it. sessionId
+        // is the workspace-fence key (server: sessionProject mapping + path
+        // containment, review D-3), provided to the card by the slot register
+        // inject hook; without it the endpoints answer 400, so skip the fetch.
+        if (!sessionId) return
         const enc = encodeURIComponent
-        const progUrl = runDir ? API + '/progress?runDir=' + enc(runDir) + '&cwd=' + enc(cwd) : null
-        const aggUrl = projectDir ? API + '/progress-summary?projectDir=' + enc(projectDir) + '&cwd=' + enc(cwd)
-          : runDir ? API + '/progress-summary?runDir=' + enc(runDir) + '&cwd=' + enc(cwd) : null
+        const progUrl = runDir ? API + '/progress?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
+        const aggUrl = projectDir ? API + '/progress-summary?projectDir=' + enc(projectDir) + '&sessionId=' + enc(sessionId)
+          : runDir ? API + '/progress-summary?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
         if (!progUrl && !aggUrl) return
         let alive = true
         let last = ''
@@ -845,7 +845,7 @@ window.__ModuleLoader__.load({
           clearInterval(timer)
           document.removeEventListener('visibilitychange', onVis)
         }
-      }, [runDir, projectDir, cwd, active])
+      }, [runDir, projectDir, sessionId, active])
       return data
     }
 
@@ -1091,7 +1091,7 @@ window.__ModuleLoader__.load({
       const args = cardArgsOf(props)
       const result = phase === 'result' && props.block ? cardResultOf(props) : null
       const roots = cardRoots(toolName, args, result ? result.data : null)
-      const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir, cwd: props.cwd, active: phase === 'start' })
+      const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir, sessionId: props.sessionId, active: phase === 'start' })
       if (!on) {
         return h('div', { className: 'hams-tc' },
           h('div', { className: 'hams-tc-head' },
@@ -2527,7 +2527,13 @@ window.__ModuleLoader__.load({
       // entry test against the registered tool-name set.
       slots.inject('tool.call.toolview', function* () {
         for (const key of SIM_CARD_TOOLS) {
-          yield slots.register({ name: 'tool.call.toolview', key }, SimToolCard)
+          yield slots.register({ name: 'tool.call.toolview', key,
+            // The toolview owner carries no sessionId (rc.5 host client: owner =
+            // {callId, toolName, ...call, openFile, cwd, home, ...}); the
+            // register-inject hook is the sanctioned way to add it (official
+            // precedent: ask_user_question). The progress endpoints fence on it
+            // (review D-3).
+            inject: (sessionId) => ({ sessionId }) }, SimToolCard)
         }
       })
     }

@@ -149,9 +149,9 @@ test('progress: GET endpoints fence by cwd→workspace then answer payloads', as
 
     const call = await makeHandler([{ id: 'w1', path: proj, sessionIds: ['s1'], title: 'p' }])
     const q = (v) => encodeURIComponent(v)
-    const cwdq = '&cwd=' + q(proj)
+    const sidq = '&sessionId=s1'
 
-    const one = await call('/api/progress?runDir=' + q(top1) + cwdq)
+    const one = await call('/api/progress?runDir=' + q(top1) + sidq)
     assert.equal(one.code, 200)
     assert.equal(one.body.ok, true)
     assert.equal(one.body.source, 'progress')
@@ -160,38 +160,38 @@ test('progress: GET endpoints fence by cwd→workspace then answer payloads', as
     assert.equal(one.body.simulator, 'spectre')
 
     // inside the workspace but not present → local:false (client omits the block)
-    const missing = await call('/api/progress?runDir=' + q(path.join(proj, 'no', 'such')) + cwdq)
+    const missing = await call('/api/progress?runDir=' + q(path.join(proj, 'no', 'such')) + sidq)
     assert.equal(missing.code, 200)
     assert.equal(missing.body.ok, true)
     assert.equal(missing.body.local, false)
 
-    const aggByRun = await call('/api/progress-summary?runDir=' + q(top2) + cwdq)
+    const aggByRun = await call('/api/progress-summary?runDir=' + q(top2) + sidq)
     assert.equal(aggByRun.code, 200)
     assert.equal(aggByRun.body.local, true)
     assert.equal(aggByRun.body.project_dir, path.resolve(proj).replace(/\\/g, '/')) // derived root is slash-normalized
     assert.equal(aggByRun.body.totals.batches, 2)
     assert.equal(aggByRun.body.totals.sims_pending, 9) // Round1 8-3 + Round2 4
 
-    const aggByProject = await call('/api/progress-summary?projectDir=' + q(proj) + cwdq)
+    const aggByProject = await call('/api/progress-summary?projectDir=' + q(proj) + sidq)
     assert.equal(aggByProject.code, 200)
     assert.equal(aggByProject.body.totals.batches, 2)
 
-    // fence (review D-3): missing cwd → 400
+    // fence (review D-3): missing sessionId → 400
     assert.equal((await call('/api/progress?runDir=' + q(top1))).code, 400)
-    // fence: cwd outside every registered workspace → 400
-    assert.equal((await call('/api/progress?runDir=' + q(top1) + '&cwd=' + q(stray))).code, 400)
-    // fence: registered cwd but the requested path escapes the workspace → 403
-    assert.equal((await call('/api/progress?runDir=' + q(stray) + cwdq)).code, 403)
-    assert.equal((await call('/api/progress-summary?projectDir=' + q(stray) + cwdq)).code, 403)
+    // fence: session not accounted in any workspace → 400
+    assert.equal((await call('/api/progress?runDir=' + q(top1) + '&sessionId=nope')).code, 400)
+    // fence: accounted session but the requested path escapes its workspace → 403
+    assert.equal((await call('/api/progress?runDir=' + q(stray) + sidq)).code, 403)
+    assert.equal((await call('/api/progress-summary?projectDir=' + q(stray) + sidq)).code, 403)
 
     // POSIX remote-shaped path: outside the workspace root by construction →
     // the fence 403s before the payload ladder (remote batches poll post-fetch
     // local paths, so remote-shaped strings no longer reach local:false)
-    const remoteish = await call('/api/progress-summary?runDir=' + q('/home/u/proj/sweep/Round1/top') + cwdq)
+    const remoteish = await call('/api/progress-summary?runDir=' + q('/home/u/proj/sweep/Round1/top') + sidq)
     assert.equal(remoteish.code, 403)
 
-    assert.equal((await call('/api/progress?cwd=' + q(proj))).code, 400)
-    assert.equal((await call('/api/progress-summary?cwd=' + q(proj))).code, 400)
+    assert.equal((await call('/api/progress?sessionId=s1')).code, 400)
+    assert.equal((await call('/api/progress-summary?sessionId=s1')).code, 400)
   } finally {
     await rm(proj, { recursive: true, force: true })
     await rm(stray, { recursive: true, force: true })
