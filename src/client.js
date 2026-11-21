@@ -12,7 +12,7 @@
 //   tier 3: right-sidebar tab — the first-level strip is exactly two entries,
 //           the project overview (project-scoped so same-project session switches
 //           never refresh it) and THIS session's own panel with its Dashboard
-//           (local HTML reports: browse-to-add / dropdown / reload; sim_analysis
+//           (local HTML reports: browse-to-add / dropdown / reload; gen-sweep-report
 //           registers into the calling session) and Checks sub-views. A first-
 //           seen FORKED session (log-marker verdict from the server) starts from
 //           a copy of the previously active session's config — deliberately
@@ -75,7 +75,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': '套件合计 13 个工具：SmartAnaSim 6（spectre 装配/扫掠/解析＋sNp 读取/提取，sNp 两件经 snp_guide 按需激活）＋HarnessAMS 7（batch 提交/轮询/取回＋分析/进度/回收站＋harnessams_selfcheck 自检）。除 sNp 外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」HTML 报告查看器（sim_analysis 生成报告即自动登记进本会话，也可浏览添加已有报告；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」HTML 报告查看器（gen-sweep-report 生成报告即自动登记进本会话，也可浏览添加已有报告；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
         'hosts.ok': 'dsh-ssh：{n} 台主机',
         'hosts.missing': 'dsh-ssh 不可用',
@@ -218,7 +218,7 @@ window.__ModuleLoader__.load({
         'card.title.batch_poll': '远程批轮询',
         'card.title.batch_fetch': '远程批取回',
         'card.title.sim_progress': '仿真进度',
-        'card.title.sim_analysis': '仿真分析',
+        'card.title.gen-sweep-report': '扫描报告',
         'card.title.spectre_assemble': 'Spectre 装配',
         'card.title.spectre_run_sweep': 'Spectre 扫批',
         'card.title.spectre_parse': 'PSF 解析',
@@ -250,10 +250,10 @@ window.__ModuleLoader__.load({
         'card.label.fetched': '取回 {n} 点 / {m} 个 sp 文件',
         'card.label.mode': '取回方式',
         'card.label.archive': '归档',
-        'card.label.simulator': '仿真器',
         'card.label.results': '结果文件',
+        'card.label.rounds': '{n} 个 batch',
+        'card.label.figs': '{n} 张 PNG',
         'card.label.report': '报告',
-        'card.label.metrics': '{n} 项指标',
         'card.label.registered': '已登记进任务仪表盘',
         'card.label.registerFailed': '仪表盘登记失败',
         'card.label.points': '解析 {n} 个点',
@@ -288,7 +288,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'The suite registers 13 tools in total: SmartAnaSim 6 (spectre assemble/sweep/parse + sNp read/extract — the two sNp tools activate on demand via snp_guide) and HarnessAMS 7 (batch submit/poll/fetch + analysis/progress/trash + the harnessams_selfcheck self-check). All except sNp are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, an HTML report viewer (sim_analysis registers generated reports into the calling session automatically; existing reports can be browsed in; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, an HTML report viewer (gen-sweep-report registers generated reports into the calling session automatically; existing reports can be browsed in; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
         'hosts.ok': 'dsh-ssh: {n} host(s)',
         'hosts.missing': 'dsh-ssh not available',
@@ -435,7 +435,7 @@ window.__ModuleLoader__.load({
         'card.title.batch_poll': 'Remote batch poll',
         'card.title.batch_fetch': 'Remote batch fetch',
         'card.title.sim_progress': 'Simulation progress',
-        'card.title.sim_analysis': 'Simulation analysis',
+        'card.title.gen-sweep-report': 'Sweep report',
         'card.title.spectre_assemble': 'Spectre assemble',
         'card.title.spectre_run_sweep': 'Spectre sweep',
         'card.title.spectre_parse': 'PSF parse',
@@ -467,10 +467,10 @@ window.__ModuleLoader__.load({
         'card.label.fetched': 'Fetched {n} points / {m} sp files',
         'card.label.mode': 'Fetch mode',
         'card.label.archive': 'Archive',
-        'card.label.simulator': 'Simulator',
         'card.label.results': 'Results file',
+        'card.label.rounds': '{n} batch(es)',
+        'card.label.figs': '{n} PNG(s)',
         'card.label.report': 'Report',
-        'card.label.metrics': '{n} metrics',
         'card.label.registered': 'Registered into the task dashboard',
         'card.label.registerFailed': 'Dashboard registration failed',
         'card.label.points': 'Parsed {n} points',
@@ -798,7 +798,7 @@ window.__ModuleLoader__.load({
     // remote batches only after batch_fetch brought the progress files back, the
     // same dual-window semantics as the sim_progress tool).
     const SIM_CARD_TOOLS = ['batch_submit', 'batch_poll', 'batch_fetch', 'sim_progress',
-      'sim_analysis', 'spectre_assemble', 'spectre_run_sweep', 'spectre_parse']
+      'gen-sweep-report', 'spectre_assemble', 'spectre_run_sweep', 'spectre_parse']
 
     // Display toggle (default on): a browser-local preference, NOT project settings —
     // cards render in every session (remote projects included) and remote projects
@@ -1007,12 +1007,12 @@ window.__ModuleLoader__.load({
         ] }))
         return els
       }
-      if (toolName === 'sim_analysis') {
-        const metrics = d.summary && typeof d.summary === 'object' ? Object.keys(d.summary).length : null
+      if (toolName === 'gen-sweep-report') {
+        const rounds = Array.isArray(d.rounds) ? d.rounds.length : null
+        const figs = Array.isArray(d.figs) ? d.figs.length : null
         els.push(h(CardKv, { key: 'kv', items: [
-          { k: tr('card.label.simulator'), v: d.simulator },
-          { k: '', v: metrics ? tr('card.label.metrics', { n: metrics }) : null, cls: 'hams-good' },
-          { k: tr('card.label.results'), v: d.results_file },
+          { k: '', v: rounds ? tr('card.label.rounds', { n: rounds }) : null, cls: 'hams-good' },
+          { k: '', v: figs ? tr('card.label.figs', { n: figs }) : null, cls: 'hams-good' },
           { k: tr('card.label.report'), v: d.report_path },
           d.registered === true ? { k: '', v: tr('card.label.registered'), cls: 'hams-good' }
             : d.registered === false ? { k: '', v: tr('card.label.registerFailed'), cls: 'hams-warn' } : null,
@@ -1308,14 +1308,25 @@ window.__ModuleLoader__.load({
       }
       return null
     }
-    function putSessionConfig(sessionId) {
-      if (!sessionId) return
+    // Merge-PUT the session's entry. Returns a promise resolving true/false
+    // (persisted / gave up) with bounded retries: a FORK session may not be in
+    // the host's workspace registry yet, so its first PUT can 404 transiently —
+    // swallowing that silently used to leave fork-adopted reports unresolvable
+    // by /dash until a manual refresh (D-012 fix). Fire-and-forget callers may
+    // ignore the promise.
+    function putSessionConfig(sessionId, { retries = 4 } = {}) {
+      if (!sessionId) return Promise.resolve(false)
       const st = sessionConfigState.get(sessionId) ?? null
-      fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId), {
+      const body = JSON.stringify({ sessionId, state: st ? cloneSessionConfig(st) : null })
+      const attempt = (left) => fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId, state: st ? cloneSessionConfig(st) : null }),
-      }).catch(() => { /* offline: the in-memory map keeps working */ })
+        body,
+      }).then(() => true).catch(() => {
+        if (left <= 0) return false // offline/gave up: the in-memory map keeps working
+        return new Promise((r) => setTimeout(() => r(attempt(left - 1)), 1000))
+      })
+      return attempt(retries)
     }
 
     // Host right-sidebar layout persistence is per session (localStorage
@@ -1940,11 +1951,21 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         let alive = true
         if (!sessionId) { setConfig(emptySessionConfig()); return }
-        const adoptWith = (fork, sessionsMap) => {
+        const adoptWith = async (fork, sessionsMap) => {
           const first = !sessionConfigState.has(sessionId)
           const source = first ? forkCopySource(sessionsMap, sessionId) : null
-          setConfig(cloneSessionConfig(sessionConfigOf(sessionId, fork, source)))
-          if (first) putSessionConfig(sessionId)
+          const adopted = cloneSessionConfig(sessionConfigOf(sessionId, fork, source))
+          if (first) {
+            // D-012 fork-404 fix: an adopted config that selects a report mounts
+            // the dashboard iframe the moment setConfig lands — the PUT that
+            // persists this session's entry must reach sessions.json BEFORE
+            // that mount, or /dash/<sid>/<rid> answers the not-found error
+            // until a manual refresh. A failed persist still adopts
+            // (fail-open; that degraded state is exactly the old behavior).
+            await putSessionConfig(sessionId)
+          }
+          if (!alive) return
+          setConfig(adopted)
           lastActiveSessionId.id = sessionId
         }
         if (sessionConfigState.has(sessionId)) { adoptWith(false); return () => { alive = false } }
@@ -2007,7 +2028,7 @@ window.__ModuleLoader__.load({
       }, [sessionId])
 
       // The Dashboard sub-view stays live while visible (auto-refresh):
-      // sim_analysis(report=true) appends to the calling session's entry behind
+      // gen-sweep-report appends to the calling session's entry behind
       // the sidebar's back, so poll the store every 10 s while the sub-view is
       // open and the tab visible; persist-in-flight ticks are skipped so a
       // just-applied optimistic update is never flashed over by a stale entry,
@@ -2042,7 +2063,7 @@ window.__ModuleLoader__.load({
 
       // persistConfig(mutator) re-bases the change on the LATEST server entry
       // before the single-session PUT: the store has a second writer
-      // (sim_analysis's report registration writes this session's entry behind
+      // (gen-sweep-report's registration writes this session's entry behind
       // the sidebar's back), so sending the mount-time snapshot would clobber
       // injected reports — the rebase shrinks the clobber window to
       // milliseconds. Returns the server-confirmed entry, or null on failure
@@ -2144,7 +2165,7 @@ window.__ModuleLoader__.load({
     // Auto-refresh: the sub-view polls the store (parent
     // effect) and this component polls the current report's /api/report-stat —
     // a regenerated document (mtime/size change) reloads through the nonce,
-    // so an externally re-run sim_analysis shows up without a manual ↻.
+    // so an externally re-run gen-sweep-report shows up without a manual ↻.
     function SessionDashboard({ sessionId, config, updateConfig }) {
       const [nonce, setNonce] = useState(0)
       const [dialogOpen, setDialogOpen] = useState(false)

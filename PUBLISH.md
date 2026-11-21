@@ -18,10 +18,12 @@ Checklist (per package, run from the package directory):
 2. Package content check (must-contain AND must-not-contain)
    - `dsh-harnessams` (run in `src/`) must contain exactly: `index.js`, `client.js` (the
      browser half — combo-loaded classic script, single file), `server/` (host-half
-     modules), `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js`/`skills.js`
-     (the 7 model tools: `batch_submit`/`batch_poll`/`batch_fetch` + `sim_analysis`/
-     `sim_progress`/`safe_trash` + `harnessams_selfcheck`; skills.js registers the
-     bundled skills), `skills/` (the two bundled skills: `smart-spectre/SKILL.md` +
+     modules), `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js`/`skills.js`/
+     `report_render.js`/`figs_export.js` (the 7 model tools: `batch_submit`/
+     `batch_poll`/`batch_fetch` + `gen-sweep-report`/`sim_progress`/`safe_trash` +
+     `harnessams_selfcheck`; skills.js registers the bundled skills; report_render
+     holds the shared chart-spec/HTML templates, figs_export the headless PNG
+     pipeline with its jsdom/@napi-rs/canvas/@resvg/resvg-js runtime deps), `skills/` (the two bundled skills: `smart-spectre/SKILL.md` +
      `dca-design/` — SKILL.md, `templates/` ×3 sky130 ATT netlists, `scripts/` ×3 calc
      scripts, `data/sky130/` ×4 JSON data pack; all ASCII/English, scrubbed), `icon.png`
      (the plugin-manager display icon),

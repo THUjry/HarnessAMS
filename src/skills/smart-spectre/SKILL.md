@@ -3,10 +3,11 @@ name: smart-spectre
 description: >
   Parallel Spectre parameter sweep workflow for the HarnessAMS suite: local
   run_sweep, remote batch_submit/batch_poll/batch_fetch over dsh-ssh (LSF or
-  direct), psfascii parsing (spectre_parse, including S-parameter sp.sp) and
-  the sim_analysis collect/report dashboard. Trigger on any question about
-  batch simulation, sweep workers, PSF parsing, template*.scs rules, run
-  directory naming, or the sweep workflow.
+  direct), psfascii parsing (spectre_parse, including S-parameter sp.sp),
+  remote-first analysis (pull back only compact results) and the
+  gen-sweep-report spec-driven report. Trigger on any question about batch
+  simulation, sweep workers, PSF parsing, template*.scs rules, run directory
+  naming, or the sweep workflow.
 ---
 
 # smart-spectre — Spectre Sweep Workflow (HarnessAMS suite)
@@ -15,7 +16,12 @@ The simulation infrastructure is the plugin tool surface itself — no bundled
 scripts. SmartAnaSim ships the sweep worker (`spectre/spectre_sweep_worker.py`,
 uploaded automatically by `batch_submit` through the project's
 `workspace.sim_scripts_dir`) and the parsers; HarnessAMS ships the remote
-batch channel (`batch_*`) and the analysis/report tools (`sim_analysis`).
+batch channel (`batch_*`) and the report/progress tools
+(`gen-sweep-report` / `sim_progress`). The D-012 file layout (2026-11-21): raw
+simulation data lives under `RawResults/` (remote `<remote_root>/RawResults/Sim*`
+is the batch_submit default; a raw local fetch lands in `<project>/RawResults/`),
+processed compact results in `<project>/SimResults/`, report figures in `<project>/Figs/`,
+and the HTML report at the project root.
 
 ## Template Rules
 
@@ -75,23 +81,39 @@ index continues with `batch<M>+1` on the same day, a new day starts a new
    `point_meta.json`, `sweep_progress.json`, errlog, bsub logs). For
    S-parameter runs add `"*/netlist.scs.raw/sp.sp"` to `includes` so the raw
    curves come back too.
-5. **Parse** — `spectre_parse {work_dir: <run_dir>}` writes per-point JSON
-   curves (`psf/NN_psf.json`, Re/Im pairs) plus a `psf_index.json`; S-parameter
-   `sp.sp` sections are flattened to `freq` + `s11..sNN` complex curves (a
-   standalone `.sp` file can be passed as `raw_dir` directly). For S-parameter
-   matrix CSV dumps and passive-device parameter extraction call `snp_guide`
-   first, then `snp_read` / `snp_extract`.
-6. **Report** — `sim_analysis {run_dir, report: true}` aggregates
-   `NN/point_meta.json` into `results.json` (per-point params + scalar
-   metrics, min/max/mean summary) and renders the interactive HTML report
-   (summary cards, metric charts, per-parameter-combination sweep curves,
-   per-point table) at `<project>/Analysis/<project>_report.html`, registered
-   into the calling session's dashboard. The batch dropdown switches between
-   `Sim*_<date>_batch*` / `Round*` run directories.
+5. **Analyze — REMOTE by default** — run the parsing/metrics ON the cluster
+   and pull back only compact results (the AsymATT put/exec/get triple):
+   `ssh_upload` the analyzers (the SmartAnaSim scripts `spectre/spectre_psf_parse.py`
+   + `snp/snp_common.py` under the project's `sim_scripts_dir`, both pure
+   stdlib — upload them side by side; or your own self-contained script),
+   `ssh_exec` it over the remote batch dir (full python3 path on clusters),
+   then `ssh_download` the compact JSON (per-point params/metrics + the curve
+   arrays you actually plot, complex already converted to dB where wanted)
+   into `<project>/SimResults/`. Raw psf/sp stays remote. Fetch raw data only
+   to debug (`batch_fetch` into `<project>/RawResults/<Sim*>`, deletable
+   afterwards); `spectre_parse` runs locally in that case
+   (`psf/NN_psf.json` Re/Im pairs + `psf_index.json`; `sp.sp` flattens to
+   `freq` + `s11..sNN` complex curves). For S-parameter matrix CSV dumps and
+   passive-device parameter extraction call `snp_guide` first, then
+   `snp_read` / `snp_extract`.
+6. **Report** — `gen-sweep-report {spec: <path>}` is a pure renderer: YOU
+   process the data (metrics from step 5, curve dB conversion, multi-batch
+   aggregation) and write a small spec JSON into `<project>/SimResults/`
+   (`{project_dir?, title?, conclusions?, out?, rounds: [{id, title?, points,
+   curves?, note?}]}`; `points`/`curves` inline or `{"$file": …}` refs —
+   write big curve arrays to files). Each point is
+   `{index?, label?, params, metrics, status?}`; `curves` is
+   `{x_signal, signals: [{name, dB?}], points: [{index, label, x, y}]}`.
+   The tool renders the interactive report (conclusions card, summary cards,
+   metric charts, one curve per parameter combination, sortable per-point
+   table, cross-highlight) at `<project>/<name>_report.html`, exports one PNG
+   per chart into `<project>/Figs/`, and registers the report into the calling
+   session's dashboard. The batch dropdown switches between the spec's rounds.
 
 Local runs (Spectre on this host): `spectre_run_sweep {run_dir}` replaces
-steps 2–4; steps 5–6 are identical. Remote files outside the batch channel
-ride explicit `ssh_upload` / `ssh_download` calls.
+steps 2–4; steps 5–6 are identical (analyze locally, then the same spec
+flow). Remote files outside the batch channel ride explicit `ssh_upload` /
+`ssh_download` calls.
 
 ## LSF / cluster gotchas
 
@@ -164,9 +186,9 @@ For an *n*-cell cascade, run all `2^n` states as one cross-product sweep with
   first cell**. Point `16` ↔ `10000` (only the last cell in attenuation),
   point `0` ↔ `00000` (all reference), point `31` ↔ `11111` (all
   attenuation).
-- No post-rename needed: `spectre_parse` + `sim_analysis` key every curve by
-  point index and params — the control word is recovered from the point index
-  binary representation.
+- No post-rename needed: the parsed curves and the report spec key every
+  curve by point index and params — the control word is recovered from the
+  point index binary representation.
 
 ## 4. PSS / IP1dB variant (`template_thorough.scs`)
 

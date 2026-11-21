@@ -13,7 +13,7 @@ description: >
 
 One skill covering the whole flow: unit-cell design (three architectures),
 cluster verification sweeps (smart-spectre workflow), cascade assembly and
-analysis, and the design report (`sim_analysis`).
+analysis, and the design report (`gen-sweep-report`).
 
 **Design method (2026-11-21):** the arm total resistance comes from the ideal
 network formulas, then the **switch Ron is a direct input** (suggested
@@ -223,9 +223,10 @@ Pi8dB Cp optimum — flatness numbers from the calculators are advisory.
 2. **5×5 local sweep for sub-circuit verification.** Sizing quantization is
    unavoidable — verify a 5×5 local sweep around the calculated point
    (e.g. W × nf, ±2 discrete steps each) in the SAME batch.
-3. **Always generate the report.** After every batch: `spectre_parse` then
-   `sim_analysis {run_dir, report: true}` — the batch dropdown accumulates
-   every `Sim*_<date>_batch*` run of the project.
+3. **Always generate the report.** After every batch: parse (remote by
+   default — see smart-spectre step 5), then build the spec and call
+   `gen-sweep-report {spec}` — one round per `Sim*_<date>_batch*` run of the
+   project joins the batch dropdown.
 4. **Switch geometry moves as one unit.** The flattened model card name,
    `l/w/nf` and `nrd/nrs` change together (see Templates).
 5. **Cp local scan (last parameter).** See the Cp section above.
@@ -256,7 +257,8 @@ Pi8dB Cp optimum — flatness numbers from the calculators are advisory.
 5. Poll: `batch_poll {run_dir}` (completion by the point_meta count).
 6. Fetch: `batch_fetch {run_dir, includes: [..., "*/netlist.scs.raw/sp.sp"]}`.
 7. Parse: `spectre_parse {work_dir: <run_dir>}` (freq + s11..sNN curves).
-8. Report: `sim_analysis {run_dir, report: true}`.
+8. Report: analyze (remote-first), write the spec into `SimResults/`, then
+   `gen-sweep-report {spec}`.
 9. **Cp scan batch** (Rule 5) — pick the phase optimum, re-run 7–8.
 10. **Final temperature sweep (mandatory).** All parameters fixed, sweep
     `temperature: [0,20,40,60,80,100]` × `SW: [0,1]` = 12 points; the final
@@ -286,9 +288,9 @@ control-word ordering so **point index = binary control word**), sweep all
 - **Conventions**: zero/reference state = all bits 0 — all deltas relative
   to it. Expected attenuation of a state = Σ `target_att_db` of set bits.
   Metrics over 1–30 GHz; plots to 40 GHz.
-- **Analysis**: `spectre_parse` + `sim_analysis report` over the cascade run
-  directory — one curve per control word; the batch dropdown compares
-  rounds. Cross-checks: single-bit steps @1 GHz ≈ the cells' nominal dB; the
+- **Analysis**: parse the cascade run directory (remote-first), then
+  `gen-sweep-report` from your spec — one curve per control word; the batch
+  dropdown compares rounds. Cross-checks: single-bit steps @1 GHz ≈ the cells' nominal dB; the
   all-ones state ≈ reference IL + Σ bits; every point status ok.
 - Write `cascade_cells.json` next to the results (per cell: `name`,
   `architecture`, `target_att_db`, `control_bit`, `bestPoints_params`) for
@@ -327,7 +329,7 @@ band-dependent metrics over the DC~30 GHz characterization band.
 - **smart-spectre** — sweep workflow, template rules, cascade assembly, PSS
   pitfalls.
 - Plugin tools: `spectre_assemble` / `spectre_run_sweep` / `spectre_parse`
-  (SmartAnaSim), `batch_*` / `sim_analysis` / `sim_progress` (HarnessAMS),
+  (SmartAnaSim), `batch_*` / `gen-sweep-report` / `sim_progress` (HarnessAMS),
   `snp_guide` → `snp_read` / `snp_extract` (SmartAnaSim).
 
 ## References & Copyright

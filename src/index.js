@@ -23,7 +23,7 @@
 // Model tools: harnessams_selfcheck (self-check + config), the generic remote
 // batch channel (batch_submit/batch_poll/batch_fetch; worker scripts come from
 // the project's workspace.sim_scripts_dir) and the simulator-agnostic
-// analysis/ops tools (sim_analysis/sim_progress/safe_trash).
+// analysis/ops tools (gen-sweep-report/sim_progress/safe_trash).
 // The session tool cards read two extra read-only endpoints (/api/progress and
 // /api/progress-summary, server/progress.js) to draw the simulation progress
 // cards inside the conversation — no execution surface, pure file reads.
@@ -40,7 +40,7 @@ import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
 import { registerTools } from './tool.js'
 import { batchTools } from './tools/batch.js'
-import { analysisTools } from './tools/sim_analysis.js'
+import { genReportTools } from './tools/gen_report.js'
 import { selfcheckTools, runSelfcheckAction } from './tools/selfcheck.js'
 import { safeTrashTool } from './trash.js'
 import { registerSkills } from './skills.js'
@@ -65,11 +65,11 @@ export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt'
 export const REMOTE_WAIT_POLICY = 'HarnessAMS remote waiting policy: poll status (batch_poll; harnessams_selfcheck "status" for self-checks) instead of blind-sleeping a guessed duration. Sleep <=30 s per command, re-check after each, repeat until the run finishes (prefer 10 s -> 20 s -> 40 s backoff with ETA from completed/total); while a progress card is displayed, refresh it at least once every 5 s (poll, do not sleep); if the standard chain cannot proceed (repeated failures, stuck run, missing capability), stop and ask the user first; any improvised fallback requires explicit approval and must still use the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download), never raw ssh commands from the shell.'
 
 export function toolDefinitions(ctx = {}) {
-  return [...selfcheckTools(ctx), ...batchTools(ctx), ...analysisTools(ctx), safeTrashTool()]
+  return [...selfcheckTools(ctx), ...batchTools(ctx), ...genReportTools(ctx), safeTrashTool()]
 }
 // Current tool surface: harnessams_selfcheck (self-check + project config),
-// batch_submit/batch_poll/batch_fetch (remote channel), sim_analysis /
-// sim_progress (pure JS analysis), safe_trash.
+// batch_submit/batch_poll/batch_fetch (remote channel), gen-sweep-report /
+// sim_progress (pure JS report + progress window), safe_trash.
 
 export function apply(ctx) {
   ctx.effect(() => {

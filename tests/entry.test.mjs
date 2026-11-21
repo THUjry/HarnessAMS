@@ -30,8 +30,8 @@ test('apply registers the /harnessams prefix route and the model tools', async (
   assert.equal(typeof routes[0].handler, 'function')
   assert.deepEqual(registered.sort(), [
     'batch_fetch', 'batch_poll', 'batch_submit',
-    'harnessams_selfcheck',
-    'safe_trash', 'sim_analysis', 'sim_progress',
+    'gen-sweep-report', 'harnessams_selfcheck',
+    'safe_trash', 'sim_progress',
   ])
 })
 
@@ -89,8 +89,13 @@ test('packaging contract: client half declared and whitelisted', async () => {
     assert.ok(pkg.peerDependencies?.[dep], `peer dependency missing for client inject: ${dep}`)
     assert.ok(pkg.devDependencies?.[dep], `dev dependency missing for client inject: ${dep}`)
   }
-  for (const f of ['index.js', 'client.js', 'server/', 'tools/', 'scripts/', 'selfcheck/', 'cordis.patch.yml', 'assets/']) {
+  for (const f of ['index.js', 'client.js', 'server/', 'tools/', 'scripts/', 'selfcheck/', 'cordis.patch.yml', 'assets/',
+    'report_render.js', 'figs_export.js']) {
     assert.ok(pkg.files.includes(f), `files whitelist must include ${f}`)
+  }
+  // the headless PNG pipeline's runtime deps (all prebuilt, zero install scripts)
+  for (const dep of ['jsdom', '@napi-rs/canvas', '@resvg/resvg-js']) {
+    assert.ok(pkg.dependencies?.[dep], `runtime dependency missing: ${dep}`)
   }
   const st = await stat(new URL('../src/assets/plotly.min.js', import.meta.url))
   assert.ok(st.size > 4_000_000, `src/assets/plotly.min.js too small: ${st.size} bytes`)
@@ -130,7 +135,7 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   const m = /const SIM_CARD_TOOLS = \[([^\]]+)\]/.exec(src)
   assert.ok(m, 'SIM_CARD_TOOLS list must exist')
   const cardTools = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean)
-  assert.deepEqual(cardTools.sort(), ['batch_fetch', 'batch_poll', 'batch_submit', 'sim_analysis',
+  assert.deepEqual(cardTools.sort(), ['batch_fetch', 'batch_poll', 'batch_submit', 'gen-sweep-report',
     'sim_progress', 'spectre_assemble', 'spectre_parse', 'spectre_run_sweep'])
   assert.ok(src.includes('hams-toolview'), 'card display toggle must persist via localStorage')
   assert.ok(src.includes('TOOLVIEW_EVENT'), 'mounted cards must flip without a reload')
@@ -198,12 +203,27 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   assert.ok(src.includes('function cloneSessionConfig'), 'deep copy (fork inherits the whole config)')
   assert.ok(src.includes('adoptWith(!!d?.fork, sessions)'), 'the server fork verdict drives the split')
   assert.ok(src.includes('const lastActiveSessionId = { id: null }'), 'last-active session memory')
-  assert.ok(src.includes('function putSessionConfig(sessionId)'), 'merge-PUT persistence')
+  assert.ok(src.includes('function putSessionConfig(sessionId, { retries = 4 } = {})'), 'merge-PUT persistence (bounded-retry form, D-012)')
   assert.ok(src.includes("API + '/session-config?sessionId='"), 'session-config API wired')
   // default-open: initialized project + untouched host layout tabs
   assert.ok(src.includes('sessionSidebarUntouched(sessionId)'), 'untouched-layout gate')
   assert.ok(src.includes('r.project?.initialized'), 'default-open keys off initialized')
   assert.ok(src.includes('autoOpenedFor'), 'once per page lifetime')
+})
+
+test('client half: fork adopt awaits session persistence before mounting an inherited report (D-012 fix)', async () => {
+  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  // The 2026-11-21 fork bug: adoptWith setConfig'd a config whose dashboard_
+  // selected mounts the /dash iframe while the fork's sessions.json entry was
+  // still in flight (fire-and-forget PUT, swallowed errors) — the iframe 404'd
+  // until a manual refresh. The fix pins BOTH halves: the await-before-setConfig
+  // ordering and a bounded retry on the PUT itself (a fork session not yet in
+  // the workspace registry 404s transiently).
+  assert.ok(src.includes('const adoptWith = async (fork, sessionsMap)'), 'adoptWith must be async')
+  assert.ok(src.includes('await putSessionConfig(sessionId)'), 'first-seen adopt must await persistence before setConfig')
+  assert.ok(src.includes('if (!alive) return'), 'stale adopt after unmount must not setConfig')
+  assert.ok(src.includes('function putSessionConfig(sessionId, { retries = 4 } = {})'), 'bounded retry contract')
+  assert.ok(src.includes('const attempt = (left) => fetchJson(API + \'/session-config?sessionId=\''), 'retry ladder present')
 })
 
 test('client half: zh/en dictionaries keep identical key sets', async () => {

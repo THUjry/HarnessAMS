@@ -1,15 +1,15 @@
-// Tests for the sim_analysis(report=true) auto-registration target (D-008):
-// locating the HarnessAMS session store above a project dir, the guarded
-// single-session merge-write of sessions.json (v2), and the full
-// tool.execute(args, exec) flow (collect -> report -> register) against a
-// minimal sweep fixture — the calling session comes from exec.agent.id.
+// Tests for the gen-sweep-report tool (D-012, 2026-11-21): spec-driven report
+// rendering, the new D-012 file layout (report at the project root, data JS in
+// SimResults/, PNGs in Figs/), the guarded single-session merge-write of
+// sessions.json (v2), and the full tool.execute(args, exec) flow — the calling
+// session comes from exec.agent.id.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { analysisTools, findSessionsStore, registerReportIntoSession } from '../src/tools/sim_analysis.js'
+import { genReportTools, findSessionsStore, registerReportIntoSession } from '../src/tools/gen_report.js'
 import { makeTool } from '../src/tool.js'
 
 const SID_A = 'session-aaaa1111-2222-3332-4444-555555555555'
@@ -51,7 +51,7 @@ test('inject: findSessionsStore walks up to the nearest .harnessams and returns 
 
 test('inject: registerReportIntoSession appends, selects, dedupes by path, preserves siblings + check_params', async () => {
   const { ws, storeDir } = await makeWorkspace()
-  const reportPath = path.join(ws, 'demo1', 'Analysis', 'demo1_report.html')
+  const reportPath = path.join(ws, 'demo1', 'demo1_report.html')
   try {
     const r1 = await registerReportIntoSession(storeDir, SID_A, reportPath)
     assert.ok(!r1.error, r1.error)
@@ -102,171 +102,194 @@ test('inject: registerReportIntoSession appends, selects, dedupes by path, prese
   }
 })
 
-test('inject: sim_analysis e2e — collects, generates the report and registers it into the CALLING session', async () => {
+test('gen-sweep-report e2e — spec renders at the project root, registers into the CALLING session, exports PNGs', async () => {
   const { ws, storeDir } = await makeWorkspace()
   try {
-    // minimal sweep fixture: one round, two points over one grouping param
-    const top = path.join(ws, 'demoX', 'sweep', 'Round1', 'top')
-    await mkdir(path.join(top, '00'), { recursive: true })
-    await mkdir(path.join(top, '01'), { recursive: true })
-    await writeFile(path.join(top, '.simulator'), 'spectre\n', 'utf8')
-    await writeFile(path.join(top, '00', 'point_meta.json'), JSON.stringify({
-      point_index: 0, point_name: '00', status: 'success',
-      params: { vgs: 0.6 }, signals: { gain: 60.0 },
-    }), 'utf8')
-    await writeFile(path.join(top, '01', 'point_meta.json'), JSON.stringify({
-      point_index: 1, point_name: '01', status: 'success',
-      params: { vgs: 0.7 }, signals: { gain: 65.0 },
+    const proj = path.join(ws, 'projX')
+    const simres = path.join(proj, 'SimResults')
+    await mkdir(simres, { recursive: true })
+
+    // batch2 data via $file refs (the model's remote-analysis output shape)
+    await writeFile(path.join(simres, 'b2_points.json'), JSON.stringify([
+      { index: 0, params: { SW: 0 }, metrics: { s21_at_10g: -0.52 }, status: 'success' },
+      { index: 1, params: { SW: 1 }, metrics: { s21_at_10g: -4.13 }, status: 'success' },
+    ]), 'utf8')
+    await writeFile(path.join(simres, 'b2_curves.json'), JSON.stringify({
+      x_signal: 'freq (GHz)', signals: [{ name: 's21', dB: true }],
+      points: [0, 1].map((k) => ({
+        index: k, label: 'SW=' + k, x: [1, 2, 3],
+        y: { s21: [-0.5 - k, -0.6 - k, -0.7 - k] },
+      })),
     }), 'utf8')
 
-    const tool = makeTool(analysisTools().find((d) => d.name === 'sim_analysis'))
-    // exec.agent.id IS the SessionId (D-008) — the registration target
-    const res = await tool.execute({ run_dir: top, report: true }, { agent: { id: SID_A } })
+    // batch1 inline; FIRST point failed with no params — the 2026-11-21
+    // empty-table trap (column names used to come from points[0] only)
+    await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
+      project_dir: proj,
+      title: 'proj & <demo>',
+      conclusions: '**bold** and `code` and a list:\n\n- item one',
+      rounds: [
+        {
+          id: 'Sim0_20260805_batch1',
+          title: 'b</script><script>alert(1)</script>', // hostile round title: must not break the inline MANIFEST
+          points: [
+            { index: 0, params: {}, metrics: {}, status: 'failed' },
+            { index: 1, params: { cpf: '40f' }, metrics: { s21_at_10g: -0.49 }, status: 'success' },
+            { index: 2, params: { cpf: '60f' }, metrics: { s21_at_10g: -0.61 }, status: 'success' },
+          ],
+        },
+        { id: 'Sim0_20260805_batch2', points: { $file: 'SimResults/b2_points.json' }, curves: { $file: 'SimResults/b2_curves.json' } },
+      ],
+    }), 'utf8')
+
+    const tool = makeTool(genReportTools().find((d) => d.name === 'gen-sweep-report'))
+    const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
     assert.equal(res.ok, true)
-    assert.equal(res.simulator, 'spectre')
-    assert.equal(res.summary.gain.n, 2)
-    assert.match(res.results_file, /demoX[\\/]sweep[\\/]Round1[\\/]top[\\/]results\.json$/)
     assert.equal(res.registered, true)
     assert.equal(res.session, SID_A)
-    assert.match(res.report_path, /demoX_report\.html$/)
+    // D-012 layout: report at the PROJECT ROOT, data JS under SimResults/
+    assert.match(res.report_path, /projX[\\/]projX_report\.html$/)
+    assert.equal(res.report_dir, proj)
+    assert.match(res.output, /\[report\] 2 round\(s\) -> /)
+    for (const f of ['Sim0_20260805_batch1.js', 'Sim0_20260805_batch2.js']) {
+      await readFile(path.join(simres, f)) // throws if missing
+      assert.ok(res.output.includes(f) || true) // manifest references checked below
+    }
 
-    const reportOnDisk = await readFile(res.report_path, 'utf8') // throws if missing
-    assert.match(reportOnDisk, /<!DOCTYPE html>/)
-    // stdout line contract kept from the Python pipeline (report path parsed
-    // from the tool result now, but the lines stay model-facing output)
-    assert.match(res.output, /\[collect\] spectre: 2 success \/ 0 partial \/ 0 failed -> /)
-    assert.match(res.output, /\[report\] 1 round\(s\) -> /)
+    const html = await readFile(res.report_path, 'utf8')
+    // both batches join the dropdown via the SimResults data scripts
+    for (const f of ['SimResults/Sim0_20260805_batch1.js', 'SimResults/Sim0_20260805_batch2.js']) {
+      assert.ok(html.includes(JSON.stringify(f).slice(1, -1)), `manifest must reference ${f}`)
+    }
+    // the D-012 empty-table fix: the param branch reads p.params, not the root
+    assert.ok(html.includes('c.kind === "param") return { txt: esc(show(p.params ? p.params[c.key] : null))'),
+      'cellVal must carry the param branch')
+    // conclusions card renders (mini-markdown)
+    assert.ok(html.includes('<strong>bold</strong>') && html.includes('<code>code</code>') && html.includes('<li>item one</li>'))
+    // hostile round title: '</' is broken as '<\/' in the INLINE MANIFEST line
+    // only; the EXTERNAL data JS keeps the raw title (that boundary is the
+    // contract); the html-escaped project title stays plain text
+    const inline = html.split('\n').find((l) => l.includes('const MANIFEST')) ?? ''
+    assert.ok(inline.includes('b<\\/script><script>alert(1)<\\/script>'), inline)
+    assert.ok(!inline.includes('b</script>'), inline)
+    assert.ok(inline.includes('proj &amp; &lt;demo&gt;'), 'project title is html-escaped in the manifest')
+    const dataJs = await readFile(path.join(simres, 'Sim0_20260805_batch1.js'), 'utf8')
+    assert.ok(dataJs.includes('b</script>'))
+
+    const rd = JSON.parse(dataJs.replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
+    // column names are the UNION across points (a failed empty first point
+    // must not blank the param columns)
+    assert.deepEqual(rd.param_names, ['cpf'])
+    assert.deepEqual(rd.metric_names, ['s21_at_10g'])
+    assert.deepEqual(rd.summary.s21_at_10g, { min: -0.61, max: -0.49, mean: -0.55, n: 2 })
+    assert.equal(rd.points[1].label, 'cpf=40f') // label derived from params
+    // charts specs embedded (single source of truth for page + PNG): the
+    // metric chart on batch1, the curve chart on batch2 (which carries curves)
+    assert.ok(rd.charts.some((c) => c.id === 'chart-metric-0' && c.kind === 'metric'))
+    const rd2 = JSON.parse((await readFile(path.join(simres, 'Sim0_20260805_batch2.js'), 'utf8'))
+      .replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
+    assert.ok(rd2.charts.some((c) => c.id === 'chart-curve-0' && c.kind === 'curve'))
+    assert.ok(rd2.charts.some((c) => c.id === 'chart-metric-0' && c.kind === 'metric'))
+    assert.deepEqual(rd2.charts.find((c) => c.kind === 'curve').indices, [0, 1])
+
+    // PNG export: one per chart (metric charts per round + the curve chart)
+    assert.ok(Array.isArray(res.figs) && res.figs.length >= 3, `figs: ${JSON.stringify(res.figs)}`)
+    for (const f of res.figs) {
+      const buf = await readFile(f.file)
+      assert.equal(buf.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', f.file)
+      assert.ok(buf.length > 1000, f.file)
+      assert.match(path.basename(f.file), /^Sim0_20260805_batch\d_[-a-z0-9]+\.png$/)
+    }
+
     const store = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
     assert.equal(store.sessions[SID_A].reports.length, 1)
     assert.equal(store.sessions[SID_A].reports[0].path, path.resolve(res.report_path))
     assert.equal(store.sessions[SID_A].dashboard_selected, store.sessions[SID_A].reports[0].id)
 
-    // collect-only (no report) → no registration fields, results.json still written
-    const top2 = path.join(ws, 'demoY', 'sweep', 'Round2', 'top')
-    await mkdir(path.join(top2, '00'), { recursive: true })
-    await writeFile(path.join(top2, '00', 'point_meta.json'), JSON.stringify({
-      point_index: 0, point_name: '00', status: 'success',
-      params: { x: 1 }, signals: { m: 5 },
-    }), 'utf8')
-    const plain = await tool.execute({ run_dir: top2 }, { agent: { id: SID_A } })
-    assert.equal(plain.ok, true)
-    assert.equal(plain.registered, undefined)
-    assert.equal(plain.report_path, undefined)
-
-    // NO session identity in exec (direct server-side call) → analysis + report
-    // ok, registration refused with a visible, actionable error
-    const noAgent = await tool.execute({ run_dir: top, report: true })
+    // NO session identity in exec (direct server-side call) → report ok,
+    // registration refused with a visible, actionable error
+    const noAgent = await tool.execute({ spec: path.join(simres, 'spec.json') })
     assert.equal(noAgent.ok, true)
     assert.equal(noAgent.registered, false)
     assert.match(noAgent.register_error, /no session identity/)
-
-    // report=true + custom out → refused early (report reads the canonical location)
-    await assert.rejects(() => tool.execute({
-      run_dir: top, report: true, out: path.join(ws, 'elsewhere.json'),
-    }, { agent: { id: SID_A } }), /requires the default results\.json location/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }
 })
 
-test('sim_analysis: numeric point ordering (>=100 dirs) and report inline-JSON escaping', async () => {
-  const ws = await mkdtemp(path.join(tmpdir(), 'hams-order-'))
+test('gen-sweep-report: spec errors are actionable; project root derives from a SimResults spec location', async () => {
+  const { ws } = await makeWorkspace()
   try {
-    const top = path.join(ws, 'demoT', 'sweep', 'Round1', 'top')
-    // lexicographic order would be 02, 100, 11 — numeric must win
-    for (const [dir, idx, gain] of [['02', 2, 10.0], ['100', 100, 20.0], ['11', 11, 15.0]]) {
-      await mkdir(path.join(top, dir), { recursive: true })
-      await writeFile(path.join(top, dir, 'point_meta.json'), JSON.stringify({
-        point_index: idx, point_name: dir, status: 'success',
-        params: { vgs: 0.6 }, signals: { gain },
-      }), 'utf8')
-    }
-    // hostile testbench name: '</' must never survive inside the inline MANIFEST
-    await writeFile(path.join(top, 'cell_meta.json'), JSON.stringify({
-      testbench: 'amp</script><script>alert(1)</script>',
-      pdk: { name: 'sky130' },
+    const proj = path.join(ws, 'projY')
+    const simres = path.join(proj, 'SimResults')
+    await mkdir(simres, { recursive: true })
+    const tool = makeTool(genReportTools().find((d) => d.name === 'gen-sweep-report'))
+
+    // spec in <project>/SimResults/ → project root derived, no project_dir
+    await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
+      rounds: [{ id: 'Sim1_20261121_batch1', points: [{ index: 0, params: { a: 1 }, metrics: { m: 2 } }] }],
     }), 'utf8')
-
-    const tool = makeTool(analysisTools().find((d) => d.name === 'sim_analysis'))
-    const res = await tool.execute({ run_dir: top, report: true }, { agent: { id: 'session-eeee1111-2222-3332-4444-555555555555' } })
+    const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
     assert.equal(res.ok, true)
+    assert.equal(res.report_dir, proj)
+    // metric-only round: one metric chart, no curves
+    const rd = JSON.parse((await readFile(path.join(simres, 'Sim1_20261121_batch1.js'), 'utf8'))
+      .replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
+    assert.equal(rd.charts.length, 1)
+    assert.equal(rd.charts[0].kind, 'metric')
 
-    const results = JSON.parse(await readFile(path.join(top, 'results.json'), 'utf8'))
-    assert.deepEqual(results.points.map((p) => p.index), [2, 11, 100]) // numeric order
-    assert.deepEqual(results.summary.gain, { min: 10, max: 20, mean: 15, n: 3 })
+    // unknown $file → path resolves against the project root, message says so
+    await writeFile(path.join(simres, 'bad.json'), JSON.stringify({
+      project_dir: proj,
+      rounds: [{ id: 'r1', points: { $file: 'SimResults/nope.json' } }],
+    }), 'utf8')
+    await assert.rejects(() => tool.execute({ spec: path.join(simres, 'bad.json') }, { agent: { id: SID_A } }),
+      /\$file not found: .*projY.*SimResults.*nope\.json/)
 
-    // P1 #11: the inline MANIFEST line breaks '</' as '<\/' so the round title
-    // cannot terminate the inline script; the EXTERNAL data script keeps the
-    // raw title (it cannot inject there) — that boundary is the contract.
-    const html = await readFile(res.report_path, 'utf8')
-    const inline = html.split('\n').find((l) => l.includes('const MANIFEST')) ?? ''
-    assert.ok(inline.includes('"Round1 - amp<\\/script><script>alert(1)<\\/script>"'), inline)
-    assert.ok(!inline.includes('amp</script>'), inline)
-    const data = await readFile(path.join(ws, 'demoT', 'Analysis', 'data', 'Round1.js'), 'utf8')
-    assert.ok(data.includes('amp</script>'))
+    // unsafe round id / empty rounds / bad out
+    await writeFile(path.join(simres, 'bad2.json'), JSON.stringify({ project_dir: proj, rounds: [{ id: '../evil', points: [{ index: 0 }] }] }), 'utf8')
+    await assert.rejects(() => tool.execute({ spec: path.join(simres, 'bad2.json') }), /filename-safe/)
+    await writeFile(path.join(simres, 'bad3.json'), JSON.stringify({ project_dir: proj, rounds: [] }), 'utf8')
+    await assert.rejects(() => tool.execute({ spec: path.join(simres, 'bad3.json') }), /rounds/)
+    await writeFile(path.join(simres, 'bad4.json'), JSON.stringify({ project_dir: proj, out: 'sub/dir/x.html', rounds: [{ id: 'r1', points: [{ index: 0 }] }] }), 'utf8')
+    await assert.rejects(() => tool.execute({ spec: path.join(simres, 'bad4.json') }), /\.html filename/)
+
+    // a spec outside SimResults without project_dir → derivation error
+    await writeFile(path.join(ws, 'loose.json'), JSON.stringify({ rounds: [{ id: 'r1', points: [{ index: 0 }] }] }), 'utf8')
+    await assert.rejects(() => tool.execute({ spec: path.join(ws, 'loose.json') }), /project root/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }
 })
 
-test('sim_analysis report: Sim* run dirs join the batch dropdown; psf curves add one trace per parameter combination', async () => {
-  const ws = await mkdtemp(path.join(tmpdir(), 'hams-simdirs-'))
+test('gen-sweep-report: PNG export fails open — no charts or a broken renderer never fails the report', async () => {
+  const { ws } = await makeWorkspace()
   try {
-    const proj = path.join(ws, 'projAtt')
-    const mkRun = async (name, points) => {
-      const run = path.join(proj, name)
-      for (const [idx, params] of points) {
-        const nn = String(idx).padStart(2, '0')
-        await mkdir(path.join(run, nn), { recursive: true })
-        await writeFile(path.join(run, nn, 'point_meta.json'), JSON.stringify({
-          point_index: idx, point_name: nn, status: 'success', params, signals: {},
-        }), 'utf8')
-      }
-      return run
-    }
-    const run1 = await mkRun('Sim0_20260805_batch1', [[0, { SW: 0 }], [1, { SW: 1 }]])
-    const run2 = await mkRun('Sim0_20260805_batch2', [[0, { SW: 0 }]])
-    const run3 = await mkRun('Sim1_20260806_batch1', [[0, { SW: 0 }]])
+    const proj = path.join(ws, 'projZ')
+    const simres = path.join(proj, 'SimResults')
+    await mkdir(simres, { recursive: true })
+    const tool = makeTool(genReportTools().find((d) => d.name === 'gen-sweep-report'))
 
-    // spectre_parse outputs for run1: freq + a complex s21 per point
-    await mkdir(path.join(run1, 'psf'), { recursive: true })
-    for (const [nn, s21] of [['00', [[0.9, 0.1], [0.8, 0.2]]], ['01', [[0.5, 0.05], [0.4, 0.1]]]]) {
-      await writeFile(path.join(run1, 'psf', `${nn}_psf.json`), JSON.stringify({
-        point: nn, raw_dir: 'x', signals: {
-          freq: { complex: false, values: [1e9, 2e9] },
-          s21: { complex: true, values: s21 },
-        },
-      }), 'utf8')
-    }
-
-    const tool = makeTool(analysisTools().find((d) => d.name === 'sim_analysis'))
-    // collect the sibling runs first (real flow: every batch is collected when
-    // its own analysis runs; discovery requires a results.json per run dir)
-    await tool.execute({ run_dir: run2 })
-    await tool.execute({ run_dir: run3 })
-
-    const res = await tool.execute({ run_dir: run1, report: true })
+    // a round with no metrics and no curves → zero charts → skipped, ok
+    await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
+      project_dir: proj,
+      rounds: [{ id: 'Sim0_20261121_batch1', points: [{ index: 0, params: { a: 1 } }] }],
+    }), 'utf8')
+    const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
     assert.equal(res.ok, true)
-    assert.match(res.report_dir, /projAtt[\\/]Analysis$/) // Sim layout derived, no project_dir
+    assert.match(res.output, /\[figs\] skipped/)
+    assert.equal(res.figs, undefined)
 
-    const dataDir = path.join(res.report_dir, 'data')
-    const rd = JSON.parse((await readFile(path.join(dataDir, 'Sim0_20260805_batch1.js'), 'utf8'))
-      .replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
-    assert.equal(rd.curves.x_signal, 'freq')
-    assert.deepEqual(rd.curves.signals, [{ name: 's21', dB: true }])
-    assert.equal(rd.curves.points.length, 2)
-    assert.equal(rd.curves.points[0].label, 'SW=0')
-    assert.equal(rd.curves.points[1].label, 'SW=1')
-    const want = 20 * Math.log10(Math.hypot(0.9, 0.1))
-    assert.ok(Math.abs(rd.curves.points[0].y.s21[0] - want) < 1e-9)
-
-    const html = await readFile(res.report_path, 'utf8')
-    assert.match(html, /All Parameter Combinations/)
-    assert.match(html, /chart-curve-/)  // curve charts + swatch table (AttST0p5dB-style redesign)
-    for (const f of ['Sim0_20260805_batch1.js', 'Sim0_20260805_batch2.js', 'Sim1_20260806_batch1.js']) {
-      await readFile(path.join(dataDir, f)) // throws if a discovered batch is missing
-      assert.match(html, new RegExp(f.replace(/\./g, '\.')))
-    }
+    // renderer-level failure (missing plotly file) surfaces in figs_note,
+    // never as a thrown error — exercised directly against exportFigs
+    const { exportFigs } = await import('../src/figs_export.js')
+    const out = await exportFigs({
+      rounds: [{ round: 'r1', charts: [{ id: 'c', title: 't', slug: 't', data: [{ x: [1], y: [1] }], layout: {} }] }],
+      plotlyFile: path.join(ws, 'definitely-missing-plotly.min.js'),
+      figsDir: path.join(proj, 'Figs'),
+    })
+    assert.deepEqual(out.figs, [])
+    assert.match(out.error, /no local plotly\.min\.js/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

@@ -2,7 +2,7 @@
 // scripts/ in a fresh `python` process (no build step, system Python only).
 // scripts/ here holds only the project self-check (selfcheck/); common/ holds
 // retired reference copies that are never executed. The analysis pipeline is
-// pure JS (tools/sim_analysis.js) and trash is a JS module (trash.js). The
+// pure JS (tools/gen_report.js) and trash is a JS module (trash.js). The
 // simulator workers live in the SmartAnaSim package (see batch.js for the
 // upload root).
 import { execFile } from 'node:child_process'

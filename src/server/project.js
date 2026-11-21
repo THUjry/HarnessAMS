@@ -47,7 +47,7 @@ export const SESSION_ID_RE = /^[\w-]{1,128}$/
 
 // Dashboard reports attached to a session (the sidebar Dashboard sub-view): local
 // HTML files picked anywhere on disk via the add-report browser, or registered by
-// the sim_analysis tool. Paths are normalized to absolute here; duplicates by
+// the report tool. Paths are normalized to absolute here; duplicates by
 // path are dropped within a session.
 function normalizeReports(raw) {
   if (raw === undefined || raw === null) return { reports: [] }
@@ -70,7 +70,7 @@ function normalizeReports(raw) {
     const added_at = typeof r.added_at === 'string' && r.added_at ? r.added_at : new Date().toISOString()
     out.push({ id, name, path: p, added_at })
   }
-  // count after the path dedupe, matching the writer in tools/sim_analysis.js
+  // count after the path dedupe, matching the writer in tools/gen_report.js
   if (out.length > MAX_REPORTS) return { error: `too many reports on a session (max ${MAX_REPORTS})` }
   return { reports: out }
 }
