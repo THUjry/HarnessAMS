@@ -6,7 +6,7 @@
 
 | Plugin | npm package | row id | Responsibility | Stage | Status |
 |---|---|---|---|---|---|
-| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Sidebar UI + orchestration: global console page (machines read-only, digital assets), project = DSH workspace, right-sidebar strip = project overview + session (per-session dashboard + check params; staged project settings/self-check with AGENTS.md config-table sync + dsh-ssh remote-dir picker); the generic remote batch channel (`batch_*`, `remote_root` required, worker tree from the project's `sim_scripts_dir`), the simulator-agnostic analysis tools (`sim_analysis`/`sim_progress`/`safe_trash`) and the `harnessams_selfcheck` tool — 7 tools | stage 1 | implemented (this repo, `src/`) |
+| HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Sidebar UI + orchestration: global console page (machines read-only, digital assets), project = DSH workspace, right-sidebar strip = project overview + session (per-session dashboard + check params; staged project settings/self-check with AGENTS.md config-table sync + dsh-ssh remote-dir picker); the generic remote batch channel (`batch_*`, `remote_root` required, worker tree from the project's `sim_scripts_dir`), the simulator-agnostic analysis tools (`sim_analysis`/`sim_progress`/`safe_trash`), the `harnessams_selfcheck` tool — 7 tools — plus two bundled skills (`smart-spectre`, `dca-design`) registered into the host skill catalog (`src/skills/`, 2026-11-21 D-011) | stage 1 | implemented (this repo, `src/`) |
 | HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation: local Spectre channel (code-driven netlist assembly with hard PDK isolation), PSF parsing, S-parameter reading/extraction — simulator-specific code only | stage 1 | implemented (separate repo) |
 | HarnessAMS-SmartPostLayout | (repo in stage 2) | `harnessams-smart-post-layout` | One-click post-layout simulation | stage 2 | not started |
 | HarnessAMS-aligner | (repo in stage 3) | `harnessams-aligner` | Multi-level alignment | stage 3 | not started |
@@ -61,7 +61,7 @@ A sweep always starts with the same assembly step; only the execution channel di
 
 Needs ONLY the SmartAnaSim plugin (`dsh-harnessams-smart-ana-sim`): the three `spectre_*` tools all live there, so this path runs with the top-level plugin absent. AMS adds `sim_analysis` (HTML report + sidebar injection) and the `batch_*` remote channel — neither is required here. Spectre must be installed on the DSH host; the whole call is bounded by `timeout_sec` (default 1200 s).
 
-spectre_assemble(project_dir=...)   # design_params.json -> template.scs + sweep_config.json (+ format/unit/bias checks)
+spectre_assemble(project_dir=...)   # design_params.json -> template*.scs + sweep_config.json (+ format/unit/bias checks)
 spectre_run_sweep(run_dir=...)      # per-point NN/netlist.scs (@@PARAM@@ substitution) + psfascii raw + point_meta.json
 spectre_parse(work_dir=...)         # raw psfascii -> per-point JSON curves + psf_index.json (optional long CSV)
 
@@ -72,11 +72,11 @@ Results land in the local run directory — analyze immediately, no fetch step.
 Same worker, but executed on the SSH target node's own host as a foreground process. Requires the target machine's dsh-ssh alias (`machine_id`) and the project's `remote_root`.
 
 spectre_assemble(project_dir=...)
-batch_submit(run_dir=..., machine_id=..., remote_root=..., remote_dir=...,
-             worker="spectre/spectre_sweep_worker.py", scheduler="direct")
+batch_submit(run_dir=..., machine_id=..., remote_root=...,   # remote_dir optional: omitted ->
+             worker="spectre/spectre_sweep_worker.py", scheduler="direct")  # next Sim<N>_<date>_batch<M>
 batch_poll(run_dir=...)             # reads progress files (job file carries scheduler=direct), not bjobs
 batch_fetch(run_dir=...)            # tar over dsh-ssh (ssh_download of the single tgz), extracted into the local run_dir
-sim_analysis(run_dir=...) / spectre_parse(work_dir=...)
+sim_analysis(run_dir=..., report=true) / spectre_parse(work_dir=...)
 
 Gotchas: the whole worker must finish inside the 600 s direct deadline (the exec funnel wraps every command in a remote `timeout -s KILL`; long sweeps belong on lsf); artifacts stay on the remote until `batch_fetch` brings them back; a `direct-<timestamp>` job id plus the run's coordinates are recorded in `<run_dir>/.batch_job.json` for poll/fetch.
 
@@ -85,8 +85,8 @@ Gotchas: the whole worker must finish inside the 600 s direct deadline (the exec
 The default scheduler. No wall-clock cap — queue wait and execution are both visible through bjobs, so arbitrarily long sweeps are fine.
 
 spectre_assemble(project_dir=...)
-batch_submit(run_dir=..., machine_id=..., remote_root=..., remote_dir=...,
-             worker="spectre/spectre_sweep_worker.py")   # scheduler="lsf" is the default
+batch_submit(run_dir=..., machine_id=..., remote_root=...,   # remote_dir optional: omitted ->
+             worker="spectre/spectre_sweep_worker.py")   # next Sim<N>_<date>_batch<M>; lsf default
 batch_poll(run_dir=...)             # bjobs state + point_meta count; "No job found" with full meta = completed
 batch_fetch(run_dir=...)            # bsub.out / bsub.err (LSF's own outputs) are in the default includes
 sim_analysis(run_dir=...) / spectre_parse(work_dir=...)
