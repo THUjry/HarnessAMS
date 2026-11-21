@@ -80,8 +80,10 @@ export function shq(s) {
 
 // The one programmatic tool-call funnel (batch contract, see header). Returns
 // { isError, text, value } — never throws; pipeline errors land in .text with
-// their cause unwrapped and channel-open shapes annotated.
-export async function callTool(ctx, name, args, { timeoutMs = 40_000 } = {}) {
+// their cause unwrapped and channel-open shapes annotated. An optional external
+// `signal` (self-check stop) combines with the timeout so an in-flight call
+// aborts without waiting out its budget.
+export async function callTool(ctx, name, args, { timeoutMs = 40_000, signal } = {}) {
   const def = ctx?.tools?.get?.(name)
   if (!def) return { isError: true, text: `${name} is not registered (install/enable @linxin666/dsh-ssh)`, value: null }
   try {
@@ -92,7 +94,9 @@ export async function callTool(ctx, name, args, { timeoutMs = 40_000 } = {}) {
         name,
         arguments: JSON.stringify(args ?? {}),
       }],
-      signal: AbortSignal.timeout(timeoutMs),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
+        : AbortSignal.timeout(timeoutMs),
     })
     const r = batch?.results?.[0]?.result
     if (!r) return { isError: true, text: `${name}: ToolBatchResult carried no result entry`, value: null }

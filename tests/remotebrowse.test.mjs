@@ -56,15 +56,32 @@ test('remotebrowse: lists one level through the exec funnel, defaulting to the g
   assert.equal(inputs[0].timeoutMs, 110_000) // 20s deadline + 90s replay margin
   assertValidShell(inputs[0].command)
   const cmd = String(inputs[0].command).replace(/\\"/g, '"')
-  assert.equal(cmd, 'timeout -s KILL 20s sh -c "ls -1p "/home/op/sim""')
+  assert.equal(cmd, 'timeout -s KILL 20s sh -c "ls -1pL "/home/op/sim" 2>/dev/null || ls -1p "/home/op/sim""')
 
   // explicit dir, trailing slash normalized, parent of a deep path
   const r2 = await remoteBrowse(ctx, 'node1', '/home/op/sim/AutoAnalog/', '/home/op/sim')
   assert.equal(r2.dir, '/home/op/sim/AutoAnalog')
   assert.equal(r2.parent, '/home/op/sim')
 
-  // no root passed → the explicit-root contract error, before any listing
-  await assert.rejects(() => remoteBrowse(ctx, 'node1', null), /remote_root is required for host node1/)
+  // no root saved → the listing bootstraps at the machine's $HOME (the root
+  // picker must work before any root exists — the free-typed input retired)
+  const homeInputs = []
+  const homeCtx = makeCtx((args) => {
+    homeInputs.push(args)
+    return /echo -n/.test(args.command) ? execOk('/home/op') : execOk('proj/\n')
+  })
+  const r3 = await remoteBrowse(homeCtx, 'node1', null, null)
+  assert.equal(r3.dir, '/home/op')
+  assert.deepEqual(r3.dirs, ['proj'])
+  assert.equal(r3.parent, '/home')
+  const homeCmd = String(homeInputs[0].command).replace(/\\"/g, '"')
+  assert.equal(homeCmd, 'timeout -s KILL 20s sh -c "echo -n "\\$HOME""')
+  const lsCmd = String(homeInputs[1].command).replace(/\\"/g, '"')
+  assert.equal(lsCmd, 'timeout -s KILL 20s sh -c "ls -1pL "/home/op" 2>/dev/null || ls -1p "/home/op""')
+
+  // $HOME not resolvable (non-absolute answer) → attributable error
+  const badHome = makeCtx(() => execOk('not-a-path'))
+  await assert.rejects(() => remoteBrowse(badHome, 'node1', null, null), /cannot determine the home directory/)
 })
 
 test('remotebrowse: caps the listing at 200 entries with a truncated flag', async () => {
@@ -107,16 +124,18 @@ test('remotebrowse route: session→workspace mapping, root from settings, error
     assert.equal((await callGet(handler, base + '?sessionId=stranger&machineId=node1')).code, 404)
     assert.equal((await callGet(handler, base + '?sessionId=s1&machineId=node1&dir=relative')).code, 400)
 
-    // a project without remote_root in its settings → 409 (fill the root first)
+    // a project without remote_root in its settings → the listing bootstraps
+    // at the machine's $HOME (browse-only root; no 409 anymore)
     const bare = await mkdtemp(path.join(tmpdir(), 'hams-rb-bare-'))
     try {
       const handler2 = await registerRoutes({
         workspaceRegistry: { list: () => [{ id: 'w2', path: bare, title: 'P2', sessionIds: ['s2'] }] },
-        tools: makeCtx(() => execOk('sub/\n')).tools,
+        tools: makeCtx((args) => (/echo -n/.test(args.command) ? execOk('/home/u') : execOk('sub/\n'))).tools,
       })
       const noRoot = await callGet(handler2, base + '?sessionId=s2&machineId=node1')
-      assert.equal(noRoot.code, 409)
-      assert.match(noRoot.body.error, /remote_root is required/)
+      assert.equal(noRoot.code, 200)
+      assert.equal(noRoot.body.dir, '/home/u')
+      assert.deepEqual(noRoot.body.dirs, ['sub'])
     } finally {
       await rm(bare, { recursive: true, force: true })
     }

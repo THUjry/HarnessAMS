@@ -146,15 +146,18 @@ async function timedStep(run, spec, fn) {
   const t0 = Date.now()
   run._priv.current = step
   try {
-    const out = (await fn()) ?? {}
+    // fn receives its own step so long-running bodies can stream live progress
+    // into the record (the UI polls it every 3 s)
+    const out = (await fn(step)) ?? {}
     step.ok = out.ok
     step.result = out.result ?? ''
     step.detail = out.detail ?? ''
     if (out.warn != null) step.warn = out.warn // otherwise a warn preset on the spec survives
   } catch (e) {
     step.ok = false
-    step.result = 'error'
+    step.result = e instanceof SelfcheckCancelled ? 'cancelled' : 'error'
     step.detail = String(e?.message ?? e).slice(0, 2000)
+    if (e instanceof SelfcheckCancelled) throw e // run-level cancellation propagates
   } finally {
     run._priv.current = null
     step.ms = Date.now() - t0
@@ -167,7 +170,19 @@ function skipStep(run, spec, reason) {
   addStep(run, { ...spec, ok: null, skipReason: reason })
 }
 
+// User stop (action=stop): thrown at every gate; timedStep marks the in-flight
+// step cancelled and rethrows so orchestrate can finalize the whole run as
+// cancelled (evidence kept, no diagnosis sessions, no AGENTS.md re-sync).
+class SelfcheckCancelled extends Error {
+  constructor() { super('self-check stopped by user') }
+}
+
+function checkCancelled(run) {
+  if (run._priv.cancel?.requested) throw new SelfcheckCancelled()
+}
+
 function checkBudget(run) {
+  checkCancelled(run)
   if (Date.now() > run._priv.deadline) throw new Error('self-check global budget exhausted (30 min)')
 }
 
@@ -327,6 +342,10 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
       ctx, sessionId, settings, project, lang, machine, alias, remoteBase,
       localWorkspaceId, deadline: Date.now() + TOTAL_BUDGET_MS, current: null,
       diagnosed: new Set(),
+      // stop face (action=stop): the flag trips every gate; aborting the
+      // controller cancels in-flight tool calls threaded with its signal
+      cancel: { requested: false, controller: new AbortController() },
+      cancelled: false,
     },
   }
   store.set(runId, run)
@@ -357,6 +376,33 @@ function readRunFromDisk(id, projectPath) {
   try {
     return JSON.parse(fs.readFileSync(path.join(projectPath, '.harnessams', 'selfcheck', id, RUN_RECORD), 'utf8'))
   } catch { return null }
+}
+
+// User stop (action=stop / the sidebar's stop button): project-fenced like
+// getSelfcheck; flips the cancel flag, aborts in-flight tool calls, and kills
+// any submitted LSF jobs best-effort (direct runs die on their own remote
+// timeout-KILL wrapper). Idempotent — a finished run answers its status.
+export async function stopSelfcheck(id, projectPath) {
+  if (!id) return { error: 'run_id is required for action=stop', code: 400 }
+  const mem = store.get(id)
+  const run = (mem && path.resolve(mem.projectPath) === path.resolve(String(projectPath ?? ''))) ? mem : null
+  if (!run && !readRunFromDisk(id, projectPath)) return { error: `no such self-check run in this project: ${id}`, code: 404 }
+  if (!run || run.status !== 'running') return { ok: true, status: run?.status ?? 'done' }
+  run._priv.cancel.requested = true
+  run._priv.cancel.controller.abort()
+  void killSubmittedLsfJobs(run).catch(() => { /* best-effort; the gates end the run regardless */ })
+  return { ok: true, status: 'stopping' }
+}
+
+async function killSubmittedLsfJobs(run) {
+  const { ctx, alias } = run._priv
+  if (!alias) return
+  for (const topo of TOPOS) {
+    const job = readJob(path.join(run.runDir, 'remote', topo))
+    if (job?.scheduler === 'lsf' && job.job_id) {
+      await execRemote(ctx, alias, 'bkill ' + shq(String(job.job_id)), { timeoutMs: 15_000 })
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -489,7 +535,7 @@ async function orchestrate(run) {
           project_dir: path.join(run.runDir, 'project'),
           gen_script: 'gen_selfcheck_rc.py',
           out_dir: run.runDir,
-        }, { timeoutMs: 150_000 })
+        }, { timeoutMs: 150_000, signal: run._priv.cancel.controller.signal })
         const have = TOPOS.every((topo) => fs.existsSync(path.join(run.runDir, topo, 'template.scs'))
           && fs.existsSync(path.join(run.runDir, topo, 'sweep_config.json')))
         return {
@@ -529,24 +575,30 @@ async function orchestrate(run) {
     else if (sim === 'spectre') await remoteSpectreChain(run)
     else await remoteGoldenChain(run)
   } catch (e) {
-    const cur = run._priv.current
-    if (cur && cur.ok === null) {
-      cur.ok = false
-      cur.result = 'error'
-      cur.detail = String(e?.message ?? e).slice(0, 2000)
-      if (!cur.ms) cur.ms = 1
-      void persistRun(run)
-    } else if (!cur) {
-      // thrown between steps (e.g. checkBudget after a step finished): record
-      // it instead of losing it, so a budget-exhausted truncation can never
-      // finalize with summary.ok=true
-      const step = addStep(run, {
-        section: mode === 'remote' ? 'remote' : 'local',
-        item: 'orchestration', ok: false, result: 'error',
-        detail: String(e?.message ?? e).slice(0, 2000),
-      })
-      step.ms = 1
-      void persistRun(run)
+    if (e instanceof SelfcheckCancelled) {
+      // user stop: no synthetic error step — the in-flight step (if any) was
+      // already marked "cancelled" by timedStep; finalize stamps the run
+      run._priv.cancelled = true
+    } else {
+      const cur = run._priv.current
+      if (cur && cur.ok === null) {
+        cur.ok = false
+        cur.result = 'error'
+        cur.detail = String(e?.message ?? e).slice(0, 2000)
+        if (!cur.ms) cur.ms = 1
+        void persistRun(run)
+      } else if (!cur) {
+        // thrown between steps (e.g. checkBudget after a step finished): record
+        // it instead of losing it, so a budget-exhausted truncation can never
+        // finalize with summary.ok=true
+        const step = addStep(run, {
+          section: mode === 'remote' ? 'remote' : 'local',
+          item: 'orchestration', ok: false, result: 'error',
+          detail: String(e?.message ?? e).slice(0, 2000),
+        })
+        step.ms = 1
+        void persistRun(run)
+      }
     }
   } finally {
     finalize(run)
@@ -586,7 +638,8 @@ async function localChain(run, sim) {
       checkBudget(run)
       const step = await timedStep(run, { item: `spectre_run_sweep ${topo.toUpperCase()} (9 pts)`, settingColumn: 'simulator' }, async () => {
         const r = await callTool(ctx, 'spectre_run_sweep',
-          { run_dir: path.join(run.runDir, topo), timeout_sec: 600 }, { timeoutMs: 660_000 })
+          { run_dir: path.join(run.runDir, topo), timeout_sec: 600 },
+          { timeoutMs: 660_000, signal: run._priv.cancel.controller.signal })
         const prog = await fsp.readFile(path.join(run.runDir, topo, 'sweep_progress.json'), 'utf8')
           .then((t) => JSON.parse(t)).catch(() => null)
         const total = Number(prog?.total_points) || 0
@@ -626,7 +679,8 @@ async function runParseStep(run, prerequisiteOk, label) {
     let ok = true
     for (const topo of TOPOS) {
       const dir = path.join(run.runDir, topo)
-      const r = await callTool(ctx, 'spectre_parse', { work_dir: dir, format: 'csv' }, { timeoutMs: 620_000 })
+      const r = await callTool(ctx, 'spectre_parse', { work_dir: dir, format: 'csv' },
+        { timeoutMs: 620_000, signal: run._priv.cancel.controller.signal })
       const index = await fsp.readFile(path.join(dir, 'psf', 'psf_index.json'), 'utf8')
         .then((t) => JSON.parse(t)).catch(() => null)
       const points = Array.isArray(index?.points) ? index.points.length : 0
@@ -705,10 +759,21 @@ async function remoteSpectreChain(run) {
         machine_id: settings.machine_id,
         remote_root: settings.remote_root,
         scheduler,
-      }, { timeoutMs: scheduler === 'direct' ? 660_000 : 900_000 })
+      }, { timeoutMs: scheduler === 'direct' ? 660_000 : 900_000, signal: run._priv.cancel.controller.signal })
       const job = readJob(staging)
       if (r.isError || !job) ok = false
-      details.push(`${topo}: ${job ? `${job.scheduler}/${job.job_id} -> ${job.remote_dir}` : (r.text || 'no job file').slice(0, 300)}`)
+      // failure-first: the error text leads; a leftover job record from the
+      // OTHER attempt (primary/fallback share the staging dir) is an annotation,
+      // never the headline (2026-11-21 observability fix)
+      const jobNote = job ? `${job.scheduler}/${job.job_id} -> ${job.remote_dir}` : ''
+      if (r.isError) {
+        details.push(`${topo}: FAILED — ${String(r.text || 'submit error').slice(0, 300)}`
+          + (jobNote ? `\n  (stale job record from a previous attempt: ${jobNote})` : ''))
+      } else if (jobNote) {
+        details.push(`${topo}: ${jobNote}`)
+      } else {
+        details.push(`${topo}: no job file — ${String(r.text || 'no output').slice(0, 300)}`)
+      }
     }
     return { ok, result: ok ? `submitted (${details.length} batches)` : 'submit failed', detail: details.join('\n').slice(0, 1500) }
   })
@@ -716,7 +781,7 @@ async function remoteSpectreChain(run) {
   const pollStep = (scheduler, submitOk) => timedStep(run, {
     section: 'remote', item: 'batch_poll → completed', settingColumn: 'scheduler',
     attempt: scheduler === primary ? 'primary' : 'fallback',
-  }, async () => {
+  }, async (step) => {
     if (!submitOk) return { ok: false, result: 'skipped (submit failed)', detail: '' }
     checkBudget(run)
     const details = []
@@ -727,11 +792,19 @@ async function remoteSpectreChain(run) {
       let state = null
       let last = null
       while (Date.now() < budget) {
+        checkCancelled(run) // user stop lands within one poll interval (5 s)
         const r = await callTool(ctx, 'batch_poll', { run_dir: staging, machine_id: settings.machine_id },
-          { timeoutMs: 60_000 })
+          { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
         last = r
         const parsed = extractStateJson(r.text)
         state = parsed?.state ?? null
+        // live progress: the step row the sidebar polls every 3 s shows the
+        // latest counts instead of sitting silent through the whole wait
+        if (step) {
+          step.result = `polling ${topo}: ${state ?? 'unknown'}`
+            + (parsed?.completed != null ? ` (${parsed.completed}/${parsed?.total ?? '?'})` : '')
+          void persistRun(run)
+        }
         if (state === 'completed' || state === 'failed' || r.isError) break
         if (scheduler === 'direct') break // direct runs finish inside submit
         await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
@@ -751,6 +824,7 @@ async function remoteSpectreChain(run) {
   let good = { scheduler: primary, ok: s1.ok === true && p1.ok === true }
 
   if (!good.ok && primary !== 'direct') {
+    if (run._priv.cancel.requested) throw new SelfcheckCancelled()
     // Immediate diagnosis of the scheduler cluster, then retry direct.
     await diagnoseSteps(run, [s1, p1], 'remote-scheduler')
     const s2 = await submitStep('direct', 'direct', true)
@@ -826,7 +900,7 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
       if (parserFromScriptsDir) {
         const r = await callTool(ctx, 'batch_fetch',
           { run_dir: staging, machine_id: settings.machine_id, includes: FETCH_INCLUDES },
-          { timeoutMs: 300_000 })
+          { timeoutMs: 300_000, signal: run._priv.cancel.controller.signal })
         if (r.isError) {
           ok = false
           parts.push(`${topo}: fetch failed — ${String(r.text).slice(0, 200)}`)
@@ -921,7 +995,13 @@ async function remoteGoldenChain(run) {
 // ---------------------------------------------------------------------------
 
 function finalize(run) {
-  run.status = 'done'
+  // A user-stopped run finalizes as status='cancelled' (not 'done'): partial
+  // evidence is KEPT for inspection, no diagnosis sessions spawn, and the
+  // AGENTS.md block does not re-sync from half-finished measurements. The
+  // status filter in agentsmd.latestSelfcheckRun only reads 'done' runs, so a
+  // cancelled run can never become last_selfcheck_*.
+  const cancelled = !!run._priv.cancelled
+  run.status = cancelled ? 'cancelled' : 'done'
   run.finishedAt = new Date().toISOString()
   const localSteps = run.steps.filter((s) => s.section === 'local' && s.ms != null && s.ok !== null)
   const localOk = localSteps.every((s) => s.ok === true)
@@ -942,10 +1022,11 @@ function finalize(run) {
   run.summary = {
     local: localOk,
     remote,
-    ok: localOk && remote !== 'failed',
+    ok: !cancelled && localOk && remote !== 'failed',
     ...(run._priv.viaFallback ? { fallback: true } : {}),
+    ...(cancelled ? { cancelled: true } : {}),
   }
-  const remaining = run.steps.filter((s) => s.ok === false && !run._priv.diagnosed.has(s))
+  const remaining = cancelled ? [] : run.steps.filter((s) => s.ok === false && !run._priv.diagnosed.has(s))
   if (remaining.length) {
     // fire-and-forget: finalize must never throw on diagnosis trouble (the
     // record carries the error either way)
@@ -962,6 +1043,7 @@ function finalize(run) {
     runningBySession.delete(run._priv.sessionId)
   }
   void persistRun(run)
+  if (cancelled) return
   // 2026-11-19 rulings: a CLEAN run's artifacts are deleted at finalize (a
   // diagnosed/failed run keeps its evidence; the next run's start cleans it),
   // and the AGENTS.md config block re-syncs on every finalize so

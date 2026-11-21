@@ -26,7 +26,7 @@ import { fileURLToPath } from 'node:url'
 import { apply, toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { defaultSettings, readSettings, validateSettings, writeSettings, configPath } from '../src/server/settings.js'
-import { startSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR } from '../src/server/selfcheck.js'
+import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR } from '../src/server/selfcheck.js'
 import { runSelfcheckAction } from '../src/tools/selfcheck.js'
 import { verifyRun, siValue } from '../src/scripts/selfcheck/selfcheck_verify.mjs'
 import { assertValidShell, callRoute, getReq, clientSrc, assertDictKeys } from './helpers.mjs'
@@ -122,6 +122,8 @@ function makeHarness({ scenario = {} }) {
   const downloads = []
   const scCalls = { create: [], prompt: [], rename: [] }
   let hangResolve = null
+  let pollCalls = 0
+  let hangUsed = false
 
   const ctx = {} // filled below (toolDefinitions(ctx) needs ctx first for closures)
   const batchTools = new Map()
@@ -178,7 +180,22 @@ function makeHarness({ scenario = {} }) {
     }
     if (command.includes('__BJOB__')) {
       if (scenario.pollFail) return { success: false, exitCode: 255, timedOut: false, stdout: 'bjobs: rejected\n', stderr: '', durationMs: 3 }
+      pollCalls += 1
+      // scripted incomplete rounds: exercise the pollStep live-progress text
+      if (scenario.pollRounds && pollCalls < scenario.pollRounds) {
+        return { success: true, exitCode: 0, timedOut: false, stdout: '__BJOB__\n4242 RUN node5\n__META__\n3\n__DIRS__\n3\n__PROG__\n'
+          + JSON.stringify({ status: 'running', total_points: 9, succeeded: 3, failed: 0, completed: 3 })
+          + '\n__ERR__\n', stderr: '', durationMs: 3 }
+      }
+      if (scenario.hangPoll && !hangUsed) {
+        hangUsed = true
+        hangStarted = true
+        await new Promise((res) => { hangResolve = res })
+      }
       return { success: true, exitCode: 0, timedOut: false, stdout: pollText(), stderr: '', durationMs: 3 }
+    }
+    if (command.includes('bkill ')) {
+      return { success: true, exitCode: 0, timedOut: false, stdout: 'Job <4242> is being terminated\n', stderr: '', durationMs: 3 }
     }
     if (command.includes('test -f errlog.txt')) {
       return { success: true, exitCode: 0, timedOut: false, stdout: '__STARTED__\n', stderr: '', durationMs: 3 }
@@ -334,6 +351,19 @@ async function waitDone(runId, projectPath, timeoutMs = 60_000) {
   }
 }
 
+async function waitStatus(runId, projectPath, status, timeoutMs = 60_000) {
+  const t0 = Date.now()
+  for (;;) {
+    const run = getSelfcheck(runId, projectPath)
+    if (run?.status === status) return run
+    if (Date.now() - t0 > timeoutMs) {
+      throw new Error(`run did not reach status=${status}; now=${run?.status}; steps: `
+        + JSON.stringify(run?.steps?.map((s) => [s.item, s.ok, s.result])))
+    }
+    await new Promise((r) => setTimeout(r, 30))
+  }
+}
+
 async function waitDiagnoses(runId, projectPath, count, timeoutMs = 15_000) {
   const t0 = Date.now()
   for (;;) {
@@ -356,6 +386,16 @@ async function waitArtifactsGone(runDir, timeoutMs = 5_000) {
   }
 }
 
+let sessionSeq = 0
+
+// Windows rm races the fire-and-forget persist chain — retry a few beats.
+async function rmRetry(target) {
+  for (let i = 0; i < 10; i++) {
+    try { await fsp.rm(target, { recursive: true, force: true }); return } catch { await new Promise((r) => setTimeout(r, 100)) }
+  }
+  await fsp.rm(target, { recursive: true, force: true }).catch(() => {})
+}
+
 async function startFlow({ scenario = {}, settings = {} }) {
   const tmp = await tmpDir()
   const projectPath = path.join(tmp, 'project')
@@ -369,7 +409,7 @@ async function startFlow({ scenario = {}, settings = {} }) {
   process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
 
   const ctx = makeHarness({ scenario })
-  const sessionId = 'sess-1'
+  const sessionId = 'sess-' + (++sessionSeq) // unique: a leaked running run must never 409 the next test
   const merged = { ...defaultSettings(), ...settings }
   await writeSettings(projectPath, merged)
 
@@ -987,20 +1027,26 @@ test('persist serialization: status file stays valid JSON through a run and matc
 test('client static contract: keys bilingual, tool funnel wired, staged table, poll', async () => {
   const src = await clientSrc()
   assertDictKeys(src, [
-    'pset.title', 'pset.dirLabel', 'pset.dirLocalHint', 'pset.dirRemoteRel',
-    'pset.colMode', 'pset.colMachine', 'pset.colRoot', 'pset.colSched',
+    'pset.title', 'pset.rootLabel', 'pset.dirLocalHint', 'pset.dirRemoteRel',
+    'pset.colMode', 'pset.colMachine', 'pset.colSched',
     'pset.colSim', 'pset.colCompLocal', 'pset.colCompRemote', 'pset.mode.local', 'pset.mode.remote',
     'pset.sched.lsf', 'pset.sched.direct', 'pset.sim.spectre', 'pset.sim.none', 'pset.comp.python',
     'pset.comp.js', 'pset.noMachine', 'pset.saveFailed', 'pset.unsaved', 'pset.confirmBtn',
-    'pset.rootHint', 'pset.rootMissing', 'pset.stagedHint',
-    'selfchk.title', 'selfchk.desc', 'selfchk.run', 'selfchk.running', 'selfchk.startFailed',
+    'pset.stagedHint',
+    'selfchk.desc', 'selfchk.run', 'selfchk.running', 'selfchk.startFailed',
+    'selfchk.stop', 'selfchk.stopping', 'selfchk.stopped', 'selfchk.stopFailed',
     'selfchk.scopeLocal', 'selfchk.scopeRemote', 'selfchk.noneYet', 'selfchk.skipped',
     'selfchk.summaryOk', 'selfchk.summaryFallback', 'selfchk.summaryFail', 'selfchk.diagDone', 'selfchk.diagFail',
   ])
-  assert.ok(src.includes("API + '/tool'"), 'all four buttons ride the single /api/tool funnel')
+  // retired keys must be gone from BOTH dictionaries (root typing + old header)
+  for (const gone of ['pset.dirLabel', 'pset.colRoot', 'pset.rootHint', 'pset.rootMissing', 'selfchk.title']) {
+    assert.ok(!src.includes(`'${gone}'`), `retired key ${gone} must not appear`)
+  }
+  assert.ok(src.includes("API + '/tool'"), 'all buttons ride the single /api/tool funnel')
   assert.ok(src.includes('const callToolRoute ='), 'tool funnel helper')
   assert.ok(src.includes("action: 'status', run_id: runId"), 'poll via action=status')
   assert.ok(src.includes("action: 'run'"), 'self-check start via action=run')
+  assert.ok(src.includes("action: 'stop'"), 'stop button via action=stop')
   assert.ok(src.includes("action: 'env'"), 'local env listing via action=env')
   assert.ok(src.includes("action: 'save_agentsmd'"), 'save/confirm via action=save_agentsmd')
   assert.ok(src.includes('function ProjectSelfcheck('))
@@ -1009,13 +1055,123 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
   assert.ok(src.includes('SETTING_COLS'), 'row config drives the transposed three-column table (name / value / verdict)')
   assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath })'), 'mounted in the Overview tab')
   assert.match(src, /,\s*3_000\s*\)/, '3s poll while running')
+  assert.match(src, /,\s*1_000\s*\)/, '1s settings poll follows tool-side config writes')
   assert.ok(src.includes("'local'"), 'local dir display branch')
-  // staged table: red unsaved marker + confirm button while the draft differs
-  assert.ok(src.includes("if (dirty)"), 'dirty branch in the status column')
-  assert.ok(src.includes("tr('pset.unsaved')"), 'red unsaved marker')
-  assert.ok(src.includes("JSON.stringify(draft) !== JSON.stringify(settings)"), 'dirty = draft vs saved')
+  // staged table: PER-ROW out-of-sync marker (only the edited row goes red)
+  assert.ok(src.includes('const rowDirty = !!settings'), 'per-row dirty computation')
+  assert.ok(src.includes("JSON.stringify(draft[c.id] ?? null) !== JSON.stringify(settings[c.id] ?? null)"),
+    'row dirty = that row\'s draft vs saved value')
+  assert.ok(src.includes("JSON.stringify(draft) !== JSON.stringify(settings)"), 'global dirty still gates pendingSettings')
+  // 1:1:2 columns + dropdowns fill their cell
+  assert.ok(src.includes("width: '25%'"), 'colgroup narrow columns')
+  assert.ok(src.includes("width: '50%'"), 'colgroup double-width verdict column')
+  assert.ok(src.includes('.hams-settable .hams-select { width: 100%; }'), 'selects fill the cell')
+  // merged remote-root row: browse-only, no free-typed root input anywhere
+  assert.ok(src.includes("updateSetting('remote_root', dir)"), 'browse pick writes remote_root')
+  assert.ok(!src.includes("placeholder: '/home/"), 'the free-typed root input is retired')
+  // stop button + cancelled summary line
+  assert.ok(src.includes("tr('selfchk.stop')"), 'stop button label')
+  assert.ok(src.includes("run.status === 'cancelled'"), 'cancelled summary line')
+  // in-flight step rows render a distinct marker
+  assert.ok(src.includes('const inFlight = s.ms == null && s.ok === undefined && !s.skipReason'), 'in-flight step marker')
   // remote-switch auto-pick: the machine column only renders in remote mode
   assert.ok(src.includes("value === 'remote' && !next.machine_id && machines.length"),
     'remote switch must auto-pick a machine when none is set')
   assert.ok(src.includes('next.machine_id = machines[0].id'), 'auto-pick assigns machines[0].id')
+})
+
+// ---------------------------------------------------------------------------
+// stop action (2026-11-21): mid-run cancel, bkill, cancelled finalize
+// ---------------------------------------------------------------------------
+
+const REMOTE_LSF = { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
+  remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+  compute_script_local: 'python', compute_script_remote: 'python' }
+
+test('selfcheck stop: cancelled finalize, bkill both LSF jobs, evidence kept, no AGENTS.md sync', async () => {
+  const flow = await startFlow({ scenario: { hangPoll: true }, settings: REMOTE_LSF })
+  try {
+    assert.ok(flow.start.runId, 'run started')
+    await flow.ctx.__waitHang() // parked inside batch_poll's ssh_exec (topo 1)
+    const agentsBefore = fs.readFileSync(path.join(flow.projectPath, 'AGENTS.md'), 'utf8')
+    assert.deepEqual(await stopSelfcheck(flow.start.runId, flow.projectPath), { ok: true, status: 'stopping' })
+    // both submitted LSF jobs get a best-effort bkill through the exec funnel
+    await new Promise((r) => setTimeout(r, 60))
+    const bkills = flow.ctx.__execLog.filter((c) => c.name === 'ssh_exec' && c.arguments.command.includes('bkill '))
+    assert.equal(bkills.length, 2, 'one bkill per topology')
+    assert.match(bkills[0].arguments.command, /bkill \\"4242\\"/)
+    flow.ctx.__resolveHang() // release the parked poll; the next gate cancels
+    const run = await waitStatus(flow.start.runId, flow.projectPath, 'cancelled')
+    assert.equal(run.summary.cancelled, true)
+    assert.equal(run.summary.ok, false)
+    assert.deepEqual(run.diagnoses, [], 'no diagnosis sessions on a user stop')
+    for (const topo of ['lpf', 'hpf']) {
+      assert.ok(fs.existsSync(path.join(run.runDir, 'remote', topo, '.batch_job.json')),
+        `${topo} staging evidence kept (cancelled runs are not cleaned)`)
+    }
+    assert.equal(fs.readFileSync(path.join(flow.projectPath, 'AGENTS.md'), 'utf8'), agentsBefore,
+      'a cancelled run must not re-sync AGENTS.md from half-finished measurements')
+    // idempotent + error shapes
+    assert.deepEqual(await stopSelfcheck(flow.start.runId, flow.projectPath), { ok: true, status: 'cancelled' })
+    assert.equal((await stopSelfcheck('rc_nope', flow.projectPath)).code, 404)
+    assert.equal((await stopSelfcheck(null, flow.projectPath)).code, 400)
+  } finally {
+    flow.ctx.__resolveHang() // never leave a parked poll: it would leak runningBySession
+    flow.restoreAll()
+    await rmRetry(flow.tmp)
+  }
+})
+
+test('selfcheck fallback observability: a failed submit leads with its error text, stale job record annotated', async () => {
+  const flow = await startFlow({ scenario: { pollFail: true, directRunFail: true }, settings: REMOTE_LSF })
+  try {
+    const run = await waitDone(flow.start.runId, flow.projectPath)
+    assert.equal(run.summary.remote, 'failed')
+    const fb = run.steps.find((s) => s.attempt === 'fallback' && s.item.includes('batch_submit'))
+    assert.ok(fb, 'fallback submit step exists')
+    assert.equal(fb.ok, false)
+    assert.match(fb.detail, /FAILED — direct run failed/, 'the failure text is the headline')
+    assert.match(fb.detail, /stale job record from a previous attempt/,
+      'a leftover job record demotes to an annotation (2026-11-21 observability fix)')
+  } finally {
+    flow.restoreAll()
+    await rmRetry(flow.tmp)
+  }
+})
+
+test('selfcheck poll live progress: the polling step row carries the latest counts mid-wait', async () => {
+  const flow = await startFlow({ scenario: { pollRounds: 3, hangPoll: true }, settings: REMOTE_LSF })
+  try {
+    assert.ok(flow.start.runId, 'run started')
+    await flow.ctx.__waitHang() // two incomplete rounds done, third poll parked
+    const mid = getSelfcheck(flow.start.runId, flow.projectPath)
+    const polling = mid.steps.filter((s) => s.item.includes('batch_poll'))
+    assert.ok(polling.length, 'a polling step exists mid-run')
+    const row = polling[polling.length - 1]
+    assert.equal(row.ms, null, 'still in flight (no elapsed stamp)')
+    assert.match(row.result, /polling lpf: running \(3\/9\)/, 'live counts on the step row')
+    flow.ctx.__resolveHang()
+    const run = await waitDone(flow.start.runId, flow.projectPath)
+    assert.equal(run.summary.ok, true)
+    const done = run.steps.find((s) => s.item.includes('batch_poll') && s.attempt !== 'fallback')
+    assert.equal(done.ok, true)
+    assert.match(done.result, /completed 9\/9/)
+  } finally {
+    flow.ctx.__resolveHang()
+    flow.restoreAll()
+    await rmRetry(flow.tmp)
+  }
+})
+
+test('selfcheck tool surface: action enum carries stop and the runner dispatches it', async () => {
+  const ctx = makeHarness({ scenario: {} })
+  const def = toolDefinitions(ctx).find((d) => d.name === 'harnessams_selfcheck')
+  assert.ok(def, 'selfcheck tool registered')
+  assert.deepEqual(def.parameters.action.enum, ['run', 'status', 'stop', 'env', 'save_agentsmd'])
+  assert.match(def.description, /"stop" cancels a running self-check/)
+  // action=stop without a run_id → 400; unknown action lists the stop branch
+  const noId = await runSelfcheckAction(ctx, { sessionId: 's', project: { id: 'w', path: 'D:/proj/x', title: 'X' }, action: 'stop' })
+  assert.equal(noId.code, 400)
+  const bogus = await runSelfcheckAction(ctx, { sessionId: 's', project: { id: 'w', path: 'D:/proj/x', title: 'X' }, action: 'bogus' })
+  assert.match(bogus.error, /run \| status \| stop \| env \| save_agentsmd/)
 })

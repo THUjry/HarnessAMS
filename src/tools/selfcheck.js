@@ -11,7 +11,7 @@ import { sessionProject } from '../server/project.js'
 import { readSettings, validateSettings, writeSettings } from '../server/settings.js'
 import { localEnvFacts, runLocalChecks } from '../server/checks.js'
 import { syncAgentsMd } from '../server/agentsmd.js'
-import { startSelfcheck, getSelfcheck } from '../server/selfcheck.js'
+import { startSelfcheck, getSelfcheck, stopSelfcheck } from '../server/selfcheck.js'
 
 // Shared action runner: the tool def (agent-facing, resolves session/project
 // itself) and the /api/tool route (button-facing, project already resolved from
@@ -37,6 +37,11 @@ export async function runSelfcheckAction(ctx, { sessionId, project, action, sett
     if (!run) return { error: `no such self-check run in this project: ${runId}`, code: 404 }
     return { ok: true, run }
   }
+  if (action === 'stop') {
+    // user stop: cancels the gates + in-flight calls, bkills submitted LSF jobs
+    // best-effort; the run finalizes as status='cancelled' with evidence kept
+    return stopSelfcheck(runId, project.path)
+  }
   if (action === 'env') {
     // read-only listing: local node/python facts + workspace probe rows; these
     // values enter AGENTS.md only via save_agentsmd
@@ -54,7 +59,7 @@ export async function runSelfcheckAction(ctx, { sessionId, project, action, sett
     if (r.error) return { error: r.error, code: 500 }
     return { ok: true, path: r.path, created: r.created }
   }
-  return { error: `unknown action: ${action} (run | status | env | save_agentsmd)`, code: 400 }
+  return { error: `unknown action: ${action} (run | status | stop | env | save_agentsmd)`, code: 400 }
 }
 
 // Resolve the project for a direct agent call: an explicit `project` argument
@@ -87,15 +92,16 @@ export function selfcheckTools(ctx) {
     description: 'Project self-check and configuration for the CURRENT DSH workspace. '
       + 'Actions: "run" starts the end-to-end project self-check under the current settings '
       + '(returns run_id; poll with "status"); "status" fetches one run (steps/summary); '
-      + '"env" lists the local environment facts (read-only); "save_agentsmd" rewrites the '
-      + 'AGENTS.md project-config block from measured values. Passing "settings" (full object) '
-      + 'writes .harnessams/workspace_config.json settings section BEFORE the action runs — '
-      + 'that is the single config write face (run_mode/machine_id/remote_root/remote_dir/'
-      + 'scheduler/simulator/compute_script_local/compute_script_remote; remote mode requires '
-      + 'machine_id and an absolute remote_root).',
+      + '"stop" cancels a running self-check (bkills its LSF jobs best-effort, finalizes as '
+      + 'cancelled with evidence kept); "env" lists the local environment facts (read-only); '
+      + '"save_agentsmd" rewrites the AGENTS.md project-config block from measured values. '
+      + 'Passing "settings" (full object) writes .harnessams/workspace_config.json settings '
+      + 'section BEFORE the action runs — that is the single config write face '
+      + '(run_mode/machine_id/remote_root/remote_dir/scheduler/simulator/compute_script_local/'
+      + 'compute_script_remote; remote mode requires machine_id and an absolute remote_root).',
     parameters: {
-      action: { type: 'string', required: true, enum: ['run', 'status', 'env', 'save_agentsmd'],
-        description: 'run=start a self-check (background, returns run_id) | status=fetch one run | env=local environment listing | save_agentsmd=sync the AGENTS.md config table' },
+      action: { type: 'string', required: true, enum: ['run', 'status', 'stop', 'env', 'save_agentsmd'],
+        description: 'run=start a self-check (background, returns run_id) | status=fetch one run | stop=cancel a running self-check | env=local environment listing | save_agentsmd=sync the AGENTS.md config table' },
       settings: { type: 'object',
         description: 'Optional full settings object, validated and written to the project config before the action executes (agent-controlled configuration)' },
       run_id: { type: 'string', description: 'Run id for action=status (the run_id returned by action=run)' },

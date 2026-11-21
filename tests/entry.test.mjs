@@ -11,7 +11,7 @@ import { makeTool } from '../src/tool.js'
 
 test('plugin metadata', () => {
   assert.equal(name, 'dsh-harnessams')
-  assert.deepEqual(inject, ['webServer', 'workspaceRegistry', 'tools'])
+  assert.deepEqual(inject, ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt'])
   assert.equal(typeof apply, 'function')
 })
 
@@ -33,6 +33,34 @@ test('apply registers the /harnessams prefix route and the model tools', async (
     'harnessams_selfcheck',
     'safe_trash', 'sim_analysis', 'sim_progress',
   ])
+})
+
+test('apply injects the remote waiting policy as a system prompt section (fail-open)', async () => {
+  // with the systemPrompt service: exactly one section, namespaced, placed in
+  // the free 5000–9000 order band; the text pins the policy's four hard rules
+  const sections = []
+  const ctx = {
+    effect: (fn) => fn(),
+    webServer: { register: () => {} },
+    tools: { register: () => {} },
+    systemPrompt: { section: (s) => { sections.push(s); return () => {} } },
+  }
+  await apply(ctx)
+  assert.equal(sections.length, 1)
+  assert.equal(sections[0].name, 'harnessams:remote-wait-policy')
+  assert.equal(sections[0].order, 5500)
+  assert.match(sections[0].text, /Sleep <=30 s per command/)
+  assert.match(sections[0].text, /at least once every 5 s/)
+  assert.match(sections[0].text, /stop and ask the user first/)
+  assert.match(sections[0].text, /dsh-ssh tools \(ssh_exec\/ssh_upload\/ssh_download\)/)
+  assert.match(sections[0].text, /never raw ssh commands from the shell/)
+  // fail-open: without the service, apply still mounts routes/tools quietly
+  const bare = {
+    effect: (fn) => fn(),
+    webServer: { register: () => {} },
+    tools: { register: () => {} },
+  }
+  await apply(bare) // must not throw
 })
 
 test('every tool compiles to an object-rooted JSON Schema with typed properties', () => {

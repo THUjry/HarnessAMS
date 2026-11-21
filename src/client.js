@@ -33,7 +33,7 @@ window.__ModuleLoader__.load({
 
     const React = require('react')
     const h = React.createElement
-    const { useState, useEffect, useMemo, useRef } = React
+    const { useState, useEffect, useMemo, useRef, useCallback } = React
 
     const name = 'dsh-harnessams'
     const PANEL_ID = 'dsh-harnessams'
@@ -161,11 +161,11 @@ window.__ModuleLoader__.load({
         'check.saveFailed': '保存失败：{msg}',
         'check.badPair': '“{p}”须为正数且下限 < 上限',
         'pset.title': '项目设置',
-        'pset.dirLabel': '工作目录',
+        'pset.rootLabel': '远程根路径',
         'pset.dirLocalHint': '本地模式：自检产物写入本地 .harnessams/selfcheck/ 目录',
         'pset.dirRemoteRel': '相对路径按远端根路径解析',
         'pset.browse': '浏览',
-        'pset.browseTitle': '浏览远程工作目录',
+        'pset.browseTitle': '浏览远程根路径',
         'pset.browsePickDir': '目录（点名称进入，或点「选择」使用该目录）',
         'pset.pickDir': '选择',
         'pset.pickThisDir': '使用该目录',
@@ -174,10 +174,7 @@ window.__ModuleLoader__.load({
         'pset.colValue': '当前值',
         'pset.colMode': '工作模式',
         'pset.colMachine': '远程机器',
-        'pset.colRoot': '远端根路径',
-        'pset.rootHint': '绝对远端路径（以 / 开头），围栏工作目录',
-        'pset.rootMissing': '先在设置表填好「远端根路径」再浏览',
-        'pset.unsaved': '未保存',
+        'pset.unsaved': '不一致',
         'pset.confirmBtn': '确认',
         'pset.confirming': '写入中…',
         'pset.stagedHint': '表格有未确认修改（状态列红色）；「确认」写入 workspace_config.json 并同步 AGENTS.md',
@@ -195,10 +192,13 @@ window.__ModuleLoader__.load({
         'pset.comp.js': 'js（node）',
         'pset.noMachine': '（选择机器）',
         'pset.saveFailed': '保存失败：{msg}',
-        'selfchk.title': '项目自检',
         'selfchk.desc': '按当前设置全链路验证机器、连接、环境、权限与计算（RC 理想元件 3×3；仿真器 none 用随包 golden 数据免仿真；核验为逐点误差 ≤1%）',
         'selfchk.run': '一键自检',
         'selfchk.running': '自检运行中…',
+        'selfchk.stop': '停止自检',
+        'selfchk.stopping': '停止中…',
+        'selfchk.stopped': '已停止',
+        'selfchk.stopFailed': '停止失败：{msg}',
         'selfchk.startFailed': '启动失败：{msg}',
         'selfchk.scopeLocal': '本地链路',
         'selfchk.scopeRemote': '远程链路（{machine}）',
@@ -374,11 +374,11 @@ window.__ModuleLoader__.load({
         'check.saveFailed': 'Failed to save: {msg}',
         'check.badPair': '"{p}" must be positive numbers with min < max',
         'pset.title': 'Project settings',
-        'pset.dirLabel': 'Working directory',
+        'pset.rootLabel': 'Remote root',
         'pset.dirLocalHint': 'local mode: self-check artifacts go under the local .harnessams/selfcheck/ directory',
         'pset.dirRemoteRel': 'relative paths resolve under the remote root',
         'pset.browse': 'Browse',
-        'pset.browseTitle': 'Browse remote working directory',
+        'pset.browseTitle': 'Browse the remote root',
         'pset.browsePickDir': 'Directories (click a name to enter, or "Select" to use it)',
         'pset.pickDir': 'Select',
         'pset.pickThisDir': 'Use this directory',
@@ -387,10 +387,7 @@ window.__ModuleLoader__.load({
         'pset.colValue': 'Value',
         'pset.colMode': 'Mode',
         'pset.colMachine': 'Machine',
-        'pset.colRoot': 'Remote root',
-        'pset.rootHint': 'absolute remote path (starts with /); fences the working directory',
-        'pset.rootMissing': 'fill in the "Remote root" row before browsing',
-        'pset.unsaved': 'unsaved',
+        'pset.unsaved': 'out of sync',
         'pset.confirmBtn': 'Confirm',
         'pset.confirming': 'Writing…',
         'pset.stagedHint': 'The table has unconfirmed edits (red status cells); "Confirm" writes workspace_config.json and syncs AGENTS.md',
@@ -408,10 +405,13 @@ window.__ModuleLoader__.load({
         'pset.comp.js': 'js (node)',
         'pset.noMachine': '(pick a machine)',
         'pset.saveFailed': 'save failed: {msg}',
-        'selfchk.title': 'Project self-check',
         'selfchk.desc': 'Walks the full pipeline under the current settings to verify machine, connection, environment, permissions and compute (ideal RC 3×3; simulator "none" replays bundled golden data without simulation; pointwise tolerance 1%).',
         'selfchk.run': 'Run self-check',
         'selfchk.running': 'Self-check running…',
+        'selfchk.stop': 'Stop self-check',
+        'selfchk.stopping': 'Stopping…',
+        'selfchk.stopped': 'stopped',
+        'selfchk.stopFailed': 'failed to stop: {msg}',
         'selfchk.startFailed': 'failed to start: {msg}',
         'selfchk.scopeLocal': 'Local pipeline',
         'selfchk.scopeRemote': 'Remote pipeline ({machine})',
@@ -592,10 +592,20 @@ window.__ModuleLoader__.load({
    columns inside the container and cells wrap via overflow-wrap */
 .hams-table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); margin: 8px 0; }
 .hams-table .hams-select { max-width: 100%; }
+/* settings table (1:1:2 columns via <colgroup>; the verdict column is the
+   double one): dropdowns fill their cell so every select matches the machine
+   row's width instead of shrinking to its own content */
+.hams-settable .hams-select { width: 100%; }
 .hams-table th, .hams-table td { border: 1px solid color-mix(in srgb, currentColor 15%, transparent); padding: 3px 8px; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
 .hams-table th { opacity: .7; font-weight: 500; }
 .hams-rowbad td { background: color-mix(in srgb, #e05252 12%, transparent); }
-.hams-good { color: #3fb950; } .hams-bad { color: #e05252; font-weight: 600; } .hams-warn { color: #d29922; } .hams-faint { opacity: .6; }
+/* state colors: light-dark() pairs — the GitHub dark-theme greens/ambers were
+   near-invisible on a light card (2.5:1, live-measured 2026-11-21); the light
+   halves are the matching dark-on-white shades (>=4.5:1) */
+.hams-good { color: light-dark(#1a7f37, #3fb950); }
+.hams-bad { color: light-dark(#cf222e, #e05252); font-weight: 600; }
+.hams-warn { color: light-dark(#9a6700, #d29922); }
+.hams-faint { opacity: .6; }
 .hams-btn { padding: 3px 12px; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); border-radius: 6px; cursor: pointer;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   background: color-mix(in srgb, currentColor 6%, transparent); color: inherit; }
@@ -614,8 +624,8 @@ window.__ModuleLoader__.load({
 .hams-textarea { min-height: 90px; resize: vertical; }
 .hams-badge { display: inline-block; padding: 1px 9px; border-radius: 10px; font-size: calc(12px + var(--dsh-content-font-delta, 0px));
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent); }
-.hams-badge-good { color: #3fb950; border-color: color-mix(in srgb, #3fb950 45%, transparent); }
-.hams-badge-bad { color: #d29922; border-color: color-mix(in srgb, #d29922 45%, transparent); }
+.hams-badge-good { color: light-dark(#1a7f37, #3fb950); border-color: color-mix(in srgb, currentColor 45%, transparent); }
+.hams-badge-bad { color: light-dark(#9a6700, #d29922); border-color: color-mix(in srgb, currentColor 45%, transparent); }
 .hams-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .hams-err { color: #e05252; padding: 8px; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); }
 .hams-pre { font-size: calc(11.5px + var(--dsh-content-font-delta, 0px)); white-space: pre-wrap; margin: 4px 0; opacity: .8;
@@ -690,9 +700,9 @@ window.__ModuleLoader__.load({
 .hams-tc-kv .hams-tc-k { opacity: .6; }
 .hams-tc-bar { height: 6px; border-radius: 4px; overflow: hidden; margin: 6px 0 2px; max-width: 420px;
   background: color-mix(in srgb, currentColor 12%, transparent); }
-.hams-tc-fill { height: 100%; border-radius: 4px; background: #3fb950; transition: width .4s ease; }
-.hams-tc-fill.run { background: #d29922; }
-.hams-tc-fill.bad { background: #e05252; }
+.hams-tc-fill { height: 100%; border-radius: 4px; background: light-dark(#1a7f37, #3fb950); transition: width .4s ease; }
+.hams-tc-fill.run { background: light-dark(#9a6700, #d29922); }
+.hams-tc-fill.bad { background: light-dark(#cf222e, #e05252); }
 .hams-tc-agg { margin-top: 4px; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); opacity: .85; }
 .hams-tc-details { margin-top: 6px; }
 `
@@ -1419,8 +1429,8 @@ window.__ModuleLoader__.load({
         options: [['local', 'pset.mode.local'], ['remote', 'pset.mode.remote']] },
       { id: 'machine_id', labelKey: 'pset.colMachine', column: 'machine', kind: 'machine',
         visible: (s) => s.run_mode === 'remote' },
-      { id: 'remote_root', labelKey: 'pset.colRoot', column: 'remote_root', kind: 'text',
-        visible: (s) => s.run_mode === 'remote' },
+      // remote_root is NOT a table row anymore: it moved into the merged
+      // remote-root line above the table (browse-only — no free-typed paths)
       { id: 'scheduler', labelKey: 'pset.colSched', column: 'scheduler',
         visible: (s) => s.run_mode === 'remote' && s.simulator === 'spectre',
         options: [['lsf', 'pset.sched.lsf'], ['direct', 'pset.sched.direct']] },
@@ -1447,11 +1457,12 @@ window.__ModuleLoader__.load({
       return { state: 'ok', text: steps[steps.length - 1].result, title }
     }
 
-    // The table edits STAGE into a draft (nothing hits the wire per cell);
-    // while the draft differs from the saved settings every status cell shows a
-    // red "unsaved" marker (the saved verdicts are stale by definition) until
-    // the Confirm button commits the whole object through POST /api/tool.
-    function SettingsTable({ draft, machines, run, onChange, dirty }) {
+    // The table edits STAGE into a draft (nothing hits the wire per cell); a
+    // row whose staged value differs from the SAVED settings shows a red
+    // "out of sync" marker in its own status cell (per-row, not global — the
+    // saved verdicts of untouched rows stay visible) until the Confirm button
+    // commits the whole object through POST /api/tool.
+    function SettingsTable({ draft, settings, machines, run, onChange }) {
       const cols = SETTING_COLS.filter((c) => !c.visible || c.visible(draft))
       const settingCell = (c) => {
         if (c.kind === 'machine') {
@@ -1464,21 +1475,18 @@ window.__ModuleLoader__.load({
             machines.map((m) => h('option', { key: m.id, value: m.id },
               txt(m.name || m.host) + (m.host && m.host !== m.name ? ' · ' + txt(m.host) : ''))))
         }
-        if (c.kind === 'text') {
-          return h('input', { className: 'hams-input', type: 'text', spellCheck: false,
-            placeholder: '/home/…', title: tr('pset.rootHint'),
-            value: draft[c.id] ?? '', onChange: (e) => onChange(c.id, e.target.value.trim() || null) })
-        }
         return h('select', { className: 'hams-select', value: draft[c.id] ?? '',
           onChange: (e) => onChange(c.id, e.target.value) },
           c.options.map(([v, k]) => h('option', { key: v, value: v }, tr(k))))
       }
       const resultCell = (c) => {
+        const rowDirty = !!settings
+          && JSON.stringify(draft[c.id] ?? null) !== JSON.stringify(settings[c.id] ?? null)
         const agg = selfcheckColumnResult(run, c.column)
           ?? (c.column === 'run_mode' && run?.summary
             ? { state: run.summary.ok ? 'ok' : 'bad', text: tr(run.summary.ok ? 'selfchk.summaryOk' : 'selfchk.summaryFail'), title: '' }
             : null)
-        if (dirty) {
+        if (rowDirty) {
           return h('td', { key: c.id, className: 'hams-bad', title: tr('pset.stagedHint') }, '● ' + tr('pset.unsaved'))
         }
         if (!agg) return h('td', { key: c.id, className: 'hams-faint' }, '—')
@@ -1486,7 +1494,11 @@ window.__ModuleLoader__.load({
         const icon = agg.state === 'ok' ? '✅' : agg.state === 'warn' ? '⚠' : agg.state === 'skip' ? '⏭' : '✗'
         return h('td', { key: c.id, className: cls, title: agg.title || agg.text }, icon + ' ' + txt(agg.text))
       }
-      return h('table', { className: 'hams-table' },
+      return h('table', { className: 'hams-table hams-settable' },
+        h('colgroup', null,
+          h('col', { key: 'name', style: { width: '25%' } }),
+          h('col', { key: 'value', style: { width: '25%' } }),
+          h('col', { key: 'status', style: { width: '50%' } })),
         h('thead', null, h('tr', null, [tr('pset.colName'), tr('pset.colValue'), tr('chk.colStatus')]
           .map((c) => h('th', { key: c }, c)))),
         h('tbody', null, cols.map((c) => h('tr', { key: c.id },
@@ -1513,16 +1525,17 @@ window.__ModuleLoader__.load({
               tr(s.section === 'remote' ? 'selfchk.scopeRemote' : 'selfchk.scopeLocal',
                 { machine: run.scope?.machine?.name ?? run.scope?.machine?.host ?? '' }))))
         }
-        const icon = s.ok === true ? '✅' : s.ok === false ? '✗' : '⏭'
-        const cls = s.ok === true ? 'hams-good' : s.ok === false ? 'hams-bad' : 'hams-faint'
-        rows.push(h('tr', { key: rows.length, className: s.ok === false ? 'hams-rowbad' : '' },
-          h('td', { title: s.skipReason ?? '' }, txt(s.item),
-            s.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + txt(s.warn)) : null),
-          h('td', { title: s.detail || '' },
-            txt(s.result || (s.skipReason ? tr('selfchk.skipped') + ' — ' + s.skipReason : '-')),
-            s.ok !== false && s.detail ? h(ClampText, { text: s.detail }) : null),
-          h('td', null, s.ms != null ? s.ms + ' ms' : ''),
-          h('td', { className: cls }, icon)))
+      const inFlight = s.ms == null && s.ok === undefined && !s.skipReason
+      const icon = inFlight ? '⏳' : s.ok === true ? '✅' : s.ok === false ? '✗' : '⏭'
+      const cls = inFlight ? 'hams-warn' : s.ok === true ? 'hams-good' : s.ok === false ? 'hams-bad' : 'hams-faint'
+      rows.push(h('tr', { key: rows.length, className: s.ok === false ? 'hams-rowbad' : '' },
+        h('td', { title: s.skipReason ?? '' }, txt(s.item),
+          s.warn ? h('span', { className: 'hams-warn' }, ' ⚠ ' + txt(s.warn)) : null),
+        h('td', { title: s.detail || '' },
+          txt(s.result || (s.skipReason ? tr('selfchk.skipped') + ' — ' + s.skipReason : '-')),
+          s.ok !== false && s.detail ? h(ClampText, { text: s.detail }) : null),
+        h('td', null, s.ms != null ? s.ms + ' ms' : ''),
+        h('td', { className: cls }, icon)))
       }
       return h('table', { className: 'hams-table' },
         h('thead', null, h('tr', null, [tr('chk.colItem'), tr('chk.colResult'), tr('chk.colElapsed'), tr('chk.colStatus')]
@@ -1548,29 +1561,66 @@ window.__ModuleLoader__.load({
       const [saveState, setSaveState] = useState(null) // {status:'running'|'done'|'failed', path?, error?}
       const [browseOpen, setBrowseOpen] = useState(false)
       const [checkAllPending, setCheckAllPending] = useState(false) // auto-save once the check-all run lands
+      const [stopping, setStopping] = useState(false) // a stop request is in flight / awaiting the status flip
       const machines = info?.machines ?? []
+      // Last server settings this panel saw: the adoption baseline — a draft
+      // key still equal to it was never user-edited, so it follows the server
+      const lastServerRef = useRef(projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.settings : null)
+      const aliveRef = useRef(true)
+      useEffect(() => { aliveRef.current = true; return () => { aliveRef.current = false } }, [])
+
+      // Reconcile with workspace_config.json: external writes (the tool's
+      // settings argument from chat, another session's confirm button) land
+      // here. Untouched draft keys adopt the new server value; user-staged
+      // keys stay and show their own "out of sync" row.
+      const refetchSettings = useCallback(() => {
+        if (!sessionId) return
+        fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId))
+          .then((r) => {
+            if (!aliveRef.current) return
+            const prevServer = lastServerRef.current
+            lastServerRef.current = r.settings
+            setSettings((prev) => (JSON.stringify(prev) === JSON.stringify(r.settings) ? prev : r.settings))
+            setDraft((prev) => {
+              if (prev == null) return r.settings
+              if (prevServer == null || JSON.stringify(prevServer) === JSON.stringify(r.settings)) return prev
+              const next = { ...prev }
+              for (const k of Object.keys(r.settings)) {
+                if (JSON.stringify(next[k] ?? null) === JSON.stringify(prevServer[k] ?? null)) next[k] = r.settings[k]
+              }
+              return next
+            })
+          })
+          .catch((e) => {
+            if (aliveRef.current && lastServerRef.current == null) setSettingsError(String(e.message ?? e))
+          })
+      }, [sessionId])
 
       // Same-project remount (session switch inside one workspace): adopt the
       // module snapshot instead of clearing — the table never flashes blank and
       // a running self-check keeps polling by runId. Different/first project:
       // full reset, same as before.
       useEffect(() => {
-        let alive = true
         const adopt = !!projectPath && selfcheckMemory.path === projectPath
-        if (!adopt) { setSettings(null); setDraft(null); setSettingsError(null); setRun(null); setStartError(null); setEnvRun(null) }
+        if (!adopt) {
+          setSettings(null); setDraft(null); setSettingsError(null); setRun(null); setStartError(null); setEnvRun(null)
+          lastServerRef.current = null
+        }
         if (!sessionId) return
-        fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sessionId))
-          .then((r) => {
-            if (!alive) return
-            setSettings((prev) => (JSON.stringify(prev) === JSON.stringify(r.settings) ? prev : r.settings))
-            setDraft((prev) => (prev == null || JSON.stringify(prev) === JSON.stringify(r.settings) ? r.settings : prev))
-          })
-          .catch((e) => { if (alive && !adopt) setSettingsError(String(e.message ?? e)) })
+        refetchSettings()
         // No restore fetch here: a global "latest run" surface would bleed
         // verdicts across projects. The table only fills from a run THIS
         // sidebar started (POST then poll by runId) — or the module snapshot.
-        return () => { alive = false }
-      }, [sessionId, projectPath])
+      }, [sessionId, projectPath, refetchSettings])
+
+      // 1 s settings poll: the table follows tool-side config writes within a
+      // second (paused while the tab is hidden — the next visible pass catches
+      // up), and every action button refetches on completion as well
+      useEffect(() => {
+        if (!sessionId) return
+        const timer = setInterval(() => { if (!document.hidden) refetchSettings() }, 1_000)
+        return () => clearInterval(timer)
+      }, [sessionId, refetchSettings])
 
       // write the snapshot back for the next same-project remount
       useEffect(() => {
@@ -1601,6 +1651,9 @@ window.__ModuleLoader__.load({
           document.removeEventListener('visibilitychange', onVisible)
         }
       }, [runId, runStatus])
+
+      // a stop request is one-shot: clear it once the status leaves 'running'
+      useEffect(() => { if (runStatus !== 'running') setStopping(false) }, [runStatus])
 
       // staged edits: nothing leaves the browser until Confirm (or one of the
       // action buttons, which also commit pending edits so UI/config/AGENTS.md
@@ -1633,10 +1686,23 @@ window.__ModuleLoader__.load({
         try {
           const r = await callToolRoute({ sessionId, action: 'run', lang: effectiveLang(), settings: settingsArg })
           commitOk(r)
+          refetchSettings()
           setRun({ id: r.run_id, status: 'running', steps: [], diagnoses: [], scope: null })
         } catch (e) {
           setStartError(tr('selfchk.startFailed', { msg: String(e.message ?? e) }))
           setCheckAllPending(false)
+        }
+      }
+
+      // stop the running self-check (action=stop deliberately carries NO
+      // settings payload — an emergency stop must not commit staged edits)
+      const stopRun = async () => {
+        setStopping(true)
+        try {
+          await callToolRoute({ sessionId, action: 'stop', run_id: runId })
+        } catch (e) {
+          setStartError(tr('selfchk.stopFailed', { msg: String(e.message ?? e) }))
+          setStopping(false)
         }
       }
 
@@ -1662,6 +1728,7 @@ window.__ModuleLoader__.load({
         try {
           const r = await callToolRoute({ sessionId, action: 'save_agentsmd', settings: pendingSettings() })
           commitOk(r)
+          refetchSettings()
           setSaveState({ status: 'done', path: r.path })
         } catch (e) {
           setSaveState({ status: 'failed', error: String(e.message ?? e) })
@@ -1689,26 +1756,29 @@ window.__ModuleLoader__.load({
       const saving = saveState?.status === 'running'
 
       return h('div', { style: { marginTop: '10px' } },
-        h('div', { className: 'hams-dim' }, h('b', null, tr('pset.title')), ' · ', tr('selfchk.title')),
+        h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: '0 0 2px' } },
+          h('b', { style: { flexShrink: 0 } }, tr('pset.title'))),
         settingsError && h('div', { className: 'hams-err' }, txt(settingsError)),
         !draft && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
         draft && h('div', null,
-          // working directory: always visible — "local" read-only, or the bound
-          // remote directory picked through the dsh-ssh directory browser (the
-          // free-typed text input is retired; the full-path preview stays)
+          // remote root (the working-directory row merged in, 2026-11-21):
+          // browse-only — the free-typed root input and the separate
+          // working-directory concept are both retired; the dim preview shows
+          // where run artifacts resolve (root + remote_dir, default
+          // .harnessams/selfcheck)
           h('div', { className: 'hams-row', style: { flexWrap: 'nowrap' } },
-            h('b', { style: { flexShrink: 0 } }, tr('pset.dirLabel')),
+            h('b', { style: { flexShrink: 0 } }, tr('pset.rootLabel')),
             remote
-              ? h('span', { className: 'hams-dim', title: dirPreview,
+              ? h('span', { className: 'hams-dim', title: draft.remote_root || '',
                   style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                txt(draft.remote_dir || '—'))
+                txt(draft.remote_root || '—'))
               : h('span', { className: 'hams-dim' }, 'local · ' + tr('pset.dirLocalHint')),
             remote && h('button', { className: 'hams-btn hams-btn-sm', style: { flexShrink: 0 },
-              disabled: !machine || !root, title: root ? tr('pset.browseTitle') : tr('pset.rootMissing'),
+              disabled: !machine, title: tr('pset.browseTitle'),
               onClick: () => setBrowseOpen(true) }, tr('pset.browse'))),
           remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
             '→ ', txt(dirPreview), ' · ', tr('pset.dirRemoteRel')),
-          h(SettingsTable, { draft, machines, run, onChange: updateSetting, dirty }),
+          h(SettingsTable, { draft, settings, machines, run, onChange: updateSetting }),
           // confirm row: staged edits land in workspace_config.json (and AGENTS.md
           // re-syncs) only here — red "unsaved" cells mark the pending state
           h('div', { className: 'hams-row' },
@@ -1723,6 +1793,9 @@ window.__ModuleLoader__.load({
               saving ? tr('agents.saving') : tr('agents.saveBtn')),
             h('button', { className: 'hams-btn hams-btn-sm', disabled: running || saving || !sessionId, onClick: startRun },
               running && !checkAllPending ? tr('selfchk.running') : tr('selfchk.run')),
+            running && h('button', { className: 'hams-btn hams-btn-sm', disabled: stopping || !sessionId,
+              onClick: () => void stopRun() },
+              stopping ? tr('selfchk.stopping') : tr('selfchk.stop')),
             h('button', { className: 'hams-btn hams-btn-sm', disabled: envRunning || !sessionId, onClick: () => void runLocalEnv() },
               envRunning ? tr('chk.running') : tr('chk.btn.local')),
             h('button', { className: 'hams-btn hams-btn-sm', disabled: running || saving || !sessionId,
@@ -1734,15 +1807,17 @@ window.__ModuleLoader__.load({
           saveState?.status === 'failed' && h('div', { className: 'hams-err' }, txt(tr('agents.saveFailed', { msg: saveState.error ?? '' }))),
           envRun?.status === 'failed' && h('div', { className: 'hams-err' }, txt(envRun.error)),
           envRun?.status === 'done' && h(LocalEnvResults, { run: envRun }),
-          browseOpen && remote && machine && root && h(RemoteDirBrowse, {
-            sessionId, machineId: machine.id, rootDir: root,
+          browseOpen && remote && machine && h(RemoteDirBrowse, {
+            sessionId, machineId: machine.id, rootDir: root || null,
             onCancel: () => setBrowseOpen(false),
-            onPick: (dir) => { setBrowseOpen(false); if (dir && dir !== draft.remote_dir) updateSetting('remote_dir', dir) },
+            onPick: (dir) => { setBrowseOpen(false); if (dir && dir !== draft.remote_root) updateSetting('remote_root', dir) },
           }),
           h(SelfcheckSteps, { run }),
           run?.summary && h('div', { className: 'hams-row' },
-            h('span', { className: run.summary.ok ? 'hams-good' : 'hams-bad', style: { fontWeight: 600 } },
-              tr(run.summary.ok ? (run.summary.fallback ? 'selfchk.summaryFallback' : 'selfchk.summaryOk') : 'selfchk.summaryFail'))),
+            run.status === 'cancelled'
+              ? h('span', { className: 'hams-warn', style: { fontWeight: 600 } }, tr('selfchk.stopped'))
+              : h('span', { className: run.summary.ok ? 'hams-good' : 'hams-bad', style: { fontWeight: 600 } },
+                tr(run.summary.ok ? (run.summary.fallback ? 'selfchk.summaryFallback' : 'selfchk.summaryOk') : 'selfchk.summaryFail'))),
           (run?.diagnoses ?? []).map((d, i) => h('div', { key: i, className: d.status === 'done' ? 'hams-dim' : 'hams-err' },
             d.status === 'done' ? tr('selfchk.diagDone', { id: d.sessionId ?? '' }) : tr('selfchk.diagFail', { err: d.error ?? '' })))))
     }

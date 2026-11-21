@@ -45,9 +45,25 @@ import { selfcheckTools, runSelfcheckAction } from './tools/selfcheck.js'
 import { safeTrashTool } from './trash.js'
 
 export const name = 'dsh-harnessams'
-// workspaceRegistry/tools are required on the web composition (both ship with dsh-base);
-// the handlers still guard against undefined so degraded embeds fail soft, not loud.
-export const inject = ['webServer', 'workspaceRegistry', 'tools']
+// workspaceRegistry/tools/systemPrompt are required on the web composition
+// (all ship with dsh-base); the handlers still guard against undefined so
+// degraded embeds fail soft, not loud. systemPrompt is declared for the
+// waiting-policy section (cordis blocks ctx access to undeclared services —
+// optional chaining cannot save that, live-caught 2026-11-21).
+export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt']
+
+// Remote waiting policy injected into the system prompt while this plugin is
+// enabled (2026-11-21, the "no dumb sleep" wave): bounded sleeps, progress-
+// driven polling, and an ask-first gate before any improvised ssh fallback —
+// which must still go through the dsh-ssh tools, never a raw shell ssh.
+// Static text, registered once at plugin load, so the KV prefix stays stable.
+export const REMOTE_WAIT_POLICY = [
+  '## HarnessAMS remote waiting policy',
+  '- Poll status (batch_poll; harnessams_selfcheck "status" for self-checks) instead of blind-sleeping a guessed duration.',
+  '- Sleep <=30 s per command, re-check after each, repeat until the run finishes; prefer 10 s -> 20 s -> 40 s backoff with ETA from completed/total.',
+  '- While a progress card is displayed, refresh it at least once every 5 s (poll, do not sleep).',
+  '- If the standard chain cannot proceed (repeated failures, stuck run, missing capability), stop and ask the user first. Any improvised fallback requires explicit approval and must still use the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download) - never raw ssh commands from the shell.',
+].join('\n')
 
 export function toolDefinitions(ctx = {}) {
   return [...selfcheckTools(ctx), ...batchTools(ctx), ...analysisTools(ctx), safeTrashTool()]
@@ -71,6 +87,16 @@ export function apply(ctx) {
     if (ctx.logger?.info) ctx.logger.info('[harnessams] registered %d tools', names.size)
     else console.log('[harnessams] registered', names.size, 'tools')
   }, 'harnessams tools')
+  ctx.effect(() => {
+    // belt-and-braces: inject declares the service, but a hand-rolled embed
+    // without it still loads the rest of the plugin
+    if (!ctx.systemPrompt?.section) return
+    return ctx.systemPrompt.section({
+      name: 'harnessams:remote-wait-policy',
+      order: 5500, // after TOOLS_SDK (5000), before DELIVERABLE_FILE_REFERENCES (9000)
+      text: REMOTE_WAIT_POLICY,
+    })
+  }, 'harnessams system prompt section')
 }
 
 async function readBodyJson(req, limit = 1 << 20) {
@@ -149,7 +175,7 @@ async function handle(req, res, ctx) {
         console: 'sidebar entry "HarnessAMS" (client half)',
         project: ctx.workspaceRegistry ? 'workspaceRegistry mapped' : 'workspaceRegistry unavailable (tier 2 degraded)',
         sessions: '/api/session-config?sessionId=…',
-        tool: 'POST /api/tool {sessionId, action: run|status|env|save_agentsmd} — the harnessams_selfcheck surface',
+        tool: 'POST /api/tool {sessionId, action: run|status|stop|env|save_agentsmd} — the harnessams_selfcheck surface',
       },
     })
     return
