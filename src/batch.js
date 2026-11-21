@@ -128,6 +128,13 @@ export function collectRunFiles(runDir, files) {
     .sort((a, b) => a.name.localeCompare(b.name))
 }
 
+// template*.scs family (2026-11-21 relaxation, supersedes the exact-name
+// rename): the template uploads under its OWN name and
+// sweep_config.netlist_template must match it exactly — the worker reads the
+// config name remotely, so any declared-vs-uploaded mismatch is a guaranteed
+// remote failure caught here, before anything is submitted.
+export const TEMPLATE_NAME_RE = /^template[\w.-]*\.scs$/
+
 export function templateUploadPlan(runDir, files, config) {
   const templates = files.filter((f) => /^template[._]/.test(path.posix.basename(f.name)))
   if (templates.length > 1) {
@@ -136,16 +143,44 @@ export function templateUploadPlan(runDir, files, config) {
   const declared = config?.netlist_template
   if (templates.length) {
     const base = path.posix.basename(templates[0].name)
-    if (base !== 'template.scs') templates[0].uploadName = 'template.scs'
-  }
-  if (declared && declared !== 'template.scs') {
-    throw new Error(`sweep_config.netlist_template is ${JSON.stringify(declared)}; the remote batch `
-      + 'convention always uploads the template as template.scs — set netlist_template to "template.scs"')
+    if (!TEMPLATE_NAME_RE.test(base)) {
+      throw new Error(`template file ${JSON.stringify(base)} is not a template*.scs family name`)
+    }
+    if (declared && declared !== base) {
+      throw new Error(`sweep_config.netlist_template is ${JSON.stringify(declared)} but the run `
+        + `directory holds ${JSON.stringify(base)} — set netlist_template to ${JSON.stringify(base)}`)
+    }
+    if (!declared && base !== 'template.scs') {
+      throw new Error(`${base} requires sweep_config.netlist_template = ${JSON.stringify(base)} `
+        + '(the worker defaults to "template.scs")')
+    }
+  } else if (declared && declared !== 'template.scs') {
+    throw new Error(`sweep_config.netlist_template is ${JSON.stringify(declared)} but no template `
+      + 'file is being uploaded — add the template to run_dir or reset netlist_template')
   }
   if (!files.some((f) => f.name === 'sweep_config.json')) {
     throw new Error('sweep_config.json is required in run_dir (the worker reads it remotely)')
   }
   return files
+}
+
+// The Sim run-directory convention (2026-11-21):
+// <base>/Sim<N>_<YYYYMMDD>_batch<M> — the Sim index is the design iteration,
+// batches accumulate per iteration per day: the highest existing index
+// continues with batch<M>+1 on the same date, any new date starts
+// Sim<N>+1 at batch1. Pure function over the sibling directory names.
+export function nextSimDir(names, today) {
+  const re = /^Sim(\d+)_(\d{8})_batch(\d+)$/
+  let best = null // [simIndex, date, batch]
+  for (const name of names ?? []) {
+    const m = re.exec(String(name))
+    if (!m) continue
+    const cur = [Number(m[1]), m[2], Number(m[3])]
+    if (!best || cur[0] > best[0] || (cur[0] === best[0] && cur[2] > best[2])) best = cur
+  }
+  if (!best) return `Sim0_${today}_batch1`
+  if (best[1] === today) return `Sim${best[0]}_${today}_batch${best[2] + 1}`
+  return `Sim${best[0] + 1}_${today}_batch1`
 }
 
 // LSF submit, idempotent against dsh-ssh's broken-connection replay (a replayed

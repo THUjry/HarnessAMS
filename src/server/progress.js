@@ -45,13 +45,20 @@ function totalFromConfig(runDir) {
   return lists.reduce((n, l) => n * l.length, 1)
 }
 
-// Project root from a run-dir string ("<root>/sweep/RoundN/top"), null when the
-// shape does not match. String-level like tools/sim_analysis.js deriveProjectDir, so
+// Project root from a run-dir string ("<root>/sweep/RoundN/top" or the Sim
+// convention "<root>[.../sweep]/Sim<N>_<date>_batch<M>"), null when the shape
+// does not match. String-level like tools/sim_analysis.js deriveProjectDir, so
 // POSIX remote paths derive identically (existence is checked separately).
 export function projectRootOf(p) {
   const norm = String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
   const m = /(.+)\/sweep\/Round[^/]+\/top$/.exec(norm)
-  return m ? m[1] : null
+  if (m) return m[1]
+  const s = /(.+)\/Sim\d+_\d{8}_batch\d+$/.exec(norm)
+  if (s) {
+    const cut = s[1].endsWith('/sweep') ? s[1].slice(0, -'/sweep'.length) : s[1]
+    return cut || null
+  }
+  return null
 }
 
 // One run directory, normalized for the card. Source ladder: sweep_progress.json
@@ -99,28 +106,50 @@ export function readRunProgress(runDir) {
   }
 }
 
-// Cross-batch summary over <project>/sweep/Round*/top. Batches without a `top`
-// run directory are skipped (half-created rounds are noise, not progress).
+// Cross-batch summary over <project>/sweep/Round*/top plus the Sim-convention
+// run directories (2026-11-21: <project>/Sim*/ and <project>/sweep/Sim*/ — the
+// run dir IS the batch). Batches without a readable run directory are skipped
+// (half-created rounds are noise, not progress).
 export function summarizeProject(projectDir) {
   const root = String(projectDir ?? '').trim()
   const sweepDir = path.join(root, 'sweep')
   const empty = { project_dir: root || null, local: false, batches: [],
     totals: { batches: 0, batches_done: 0, batches_unplanned: 0, sims_total: 0, sims_completed: 0, sims_failed: 0, sims_pending: 0 } }
-  if (!root || !statDir(sweepDir)?.isDirectory()) return empty
-  const rounds = fs.readdirSync(sweepDir, { withFileTypes: true })
-    .filter((e) => e.isDirectory() && /^Round/.test(e.name))
-    .map((e) => e.name)
-    .sort((a, b) => (parseInt(a.slice(5), 10) || 0) - (parseInt(b.slice(5), 10) || 0) || a.localeCompare(b))
+  if (!root) return empty
+  const hasSweep = !!statDir(sweepDir)?.isDirectory()
   const batches = []
-  for (const round of rounds) {
-    if (batches.length >= MAX_BATCHES) break
-    const runDir = path.join(sweepDir, round, 'top')
-    if (!statDir(runDir)?.isDirectory()) continue
+  const addBatch = (round, runDir) => {
+    if (batches.length >= MAX_BATCHES) return
+    if (!statDir(runDir)?.isDirectory()) return
     const p = readRunProgress(runDir)
     batches.push({ round, dir: p.run_dir, source: p.source, status: p.status, total: p.total,
       completed: p.completed, succeeded: p.succeeded, failed: p.failed, pending: p.pending,
       simulator: p.simulator, compute_node: p.compute_node, updated_at: p.updated_at })
   }
+  if (statDir(sweepDir)?.isDirectory()) {
+    const rounds = fs.readdirSync(sweepDir, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && (/^Round/.test(e.name) || /^Sim\d+_\d{8}_batch\d+$/.test(e.name)))
+      .map((e) => e.name)
+      .sort((a, b) => (parseInt(a.slice(5), 10) || 0) - (parseInt(b.slice(5), 10) || 0) || a.localeCompare(b))
+    for (const round of rounds) {
+      addBatch(round, /^Round/.test(round) ? path.join(sweepDir, round, 'top') : path.join(sweepDir, round))
+    }
+  }
+  // Sim convention at the project root: <project>/Sim*/ (after the sweep/
+  // entries; a same-named dir under both bases counts once — seen-set dedup)
+  if (statDir(root)?.isDirectory()) {
+    const seen = new Set(batches.map((b) => b.round))
+    const sims = fs.readdirSync(root, { withFileTypes: true })
+      .filter((e) => e.isDirectory() && /^Sim\d+_\d{8}_batch\d+$/.test(e.name))
+      .map((e) => e.name)
+      .sort((a, b) => a.localeCompare(b))
+    for (const name of sims) {
+      if (!seen.has(name)) addBatch(name, path.join(root, name))
+    }
+  }
+  // Old shape contract: a project with neither a sweep/ directory nor any Sim
+  // run dir reports local:false so the card omits the aggregate block quietly.
+  if (!hasSweep && !batches.length) return empty
   const num = (v) => (typeof v === 'number' && isFinite(v) ? v : 0)
   const totals = {
     batches: batches.length,

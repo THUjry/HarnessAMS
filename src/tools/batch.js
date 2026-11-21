@@ -10,7 +10,7 @@ import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../re
 import {
   DEFAULT_INCLUDES, DEFAULT_REMOTE_PYTHON, buildDirectCommand, buildSubmitCommand, collectRunFiles, countFetched,
   defaultRemoteScriptsDir, extractArchive, fetchCommand,
-  listCommand, parseJobId, parsePollOutput, parseRemoteList, pluginScripts,
+  listCommand, nextSimDir, parseJobId, parsePollOutput, parseRemoteList, pluginScripts,
   pollCommand, postSubmitCommand, readJob, remoteJoin,
   resolveRemoteDir, sanitizeRel, simScriptsDir, templateUploadPlan, writeJob,
 } from '../batch.js'
@@ -41,7 +41,8 @@ export function batchTools(ctx) {
         + 'Writes .batch_job.json in the run directory for batch_poll/batch_fetch.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
-        remote_dir: { type: 'string', required: true, description: 'Remote batch directory: absolute, or relative to remote_root' },
+        remote_dir: { type: 'string', description: 'Remote batch directory: absolute, or relative to remote_root. '
+          + 'Omit to auto-generate the next Sim<N>_<YYYYMMDD>_batch<M> directory under remote_root (the run-directory convention)' },
         remote_root: { type: 'string', required: true, description: 'Absolute remote root that fences remote_dir — the project\'s workspace_config.json settings.remote_root (shown in the AGENTS.md config table)' },
         worker: { type: 'string', required: true, description: 'Worker script relative to the scripts root (e.g. spectre/spectre_sweep_worker.py) or an absolute remote path' },
         worker_args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed to the worker (e.g. --config sweep_config.json --max-parallel 8)' },
@@ -61,7 +62,25 @@ export function batchTools(ctx) {
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
         const target = await resolveMachine(ctx, args.machine_id, args.remote_root)
-        const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)
+        let remoteDir
+        if (args.remote_dir) {
+          remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)
+        } else {
+          // Auto Sim<N>_<YYYYMMDD>_batch<M> under remote_root (2026-11-21):
+          // list the root once and pick the next free name per the
+          // convention; the point_meta probe below still guards collisions.
+          const ls = await execRemote(ctx, target.alias,
+            `ls -1 ${shq(target.remoteRoot)} 2>/dev/null`, { timeoutMs: 30_000 })
+          if (!ls.ok) {
+            throw new Error(`remote_root listing failed (cannot auto-name the batch dir): `
+              + `${(ls.stderr || ls.stdout || ls.text || '').slice(0, 300)}`)
+          }
+          const now = new Date()
+          const p2 = (n) => String(n).padStart(2, '0')
+          const today = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}`
+          remoteDir = resolveRemoteDir(target.remoteRoot,
+            nextSimDir(String(ls.stdout ?? '').split(/\r?\n/), today))
+        }
         const syncScripts = args.sync_scripts !== false
         const rawScripts = args.remote_scripts_dir
           || defaultRemoteScriptsDir(target.remoteRoot)

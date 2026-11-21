@@ -20,7 +20,7 @@ import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { resolveMachine } from '../src/remote.js'
-import { buildDirectCommand, buildSubmitCommand, parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
+import { buildDirectCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
 
 const execFileAsync = promisify(execFile)
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
@@ -75,7 +75,7 @@ function pollValue({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN
 // src/tools.ts (ssh_exec failures are values, not throws). Commands arrive
 // already wrapped by execRemote (timeout -s KILL ... -- sh -c "..."); routing
 // matches substrings inside the wrapper, exactly like the assertions below.
-function makeCtx({ poll = {}, archive = null, failUpload = false, existing = 0 } = {}) {
+function makeCtx({ poll = {}, archive = null, failUpload = false, existing = 0, ls = '' } = {}) {
   const calls = []
   const ok = (value) => ({ isError: false, value })
   return {
@@ -110,6 +110,7 @@ function makeCtx({ poll = {}, archive = null, failUpload = false, existing = 0 }
           return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: './00/point_meta.json\n./00/netlist.scs.raw/sp.sp\n', stderr: '', durationMs: 3 }))
         }
         if (cmd.includes('wc -l')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: `${existing}\n`, stderr: '', durationMs: 3 }))
+        if (cmd.includes('ls -1') && cmd.includes('/home/op/sim')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: ls, stderr: '', durationMs: 3 }))
         return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 3 }))
       },
     },
@@ -378,26 +379,75 @@ test('batch tools reject escaped paths and unresolvable machines', async () => {
   }
 })
 
-test('batch_submit enforces the template.scs upload convention', async () => {
+test('batch_submit enforces the template*.scs family convention (own name + declared match)', async () => {
   try {
+    // declared-vs-uploaded mismatch is caught before anything is submitted
     const run = makeRunDir({
       template: 'template_thorough.scs',
-      config: { netlist_template: 'template_thorough.scs', parameters: { SW: [0, 1] } },
+      config: { netlist_template: 'template.scs', parameters: { SW: [0, 1] } },
     })
     const ctx = makeCtx()
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: run, remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
-    }, {}), /netlist_template is "template_thorough.scs"/)
+    }, {}), /netlist_template is "template\.scs" but the run directory holds "template_thorough\.scs"/)
 
-    const run2 = makeRunDir({ template: 'template_thorough.scs' })
+    // a non-default family name with no declaration also fails (the worker
+    // would look for template.scs remotely)
+    const runNd = makeRunDir({
+      template: 'template_thorough.scs',
+      config: { parameters: { SW: [0, 1] }, sweep_mode: 'cross_product' },
+    })
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
+      run_dir: runNd, remote_dir: 'batchX', machine_id: 'node1', remote_root: '/home/op/sim',
+      worker: 'spectre/spectre_sweep_worker.py',
+    }, {}), /requires sweep_config\.netlist_template/)
+
+    // declared + matching: the file uploads under its OWN name (no rename)
+    const run2 = makeRunDir({
+      template: 'template_thorough.scs',
+      config: { netlist_template: 'template_thorough.scs', parameters: { SW: [0, 1] } },
+    })
     await tool(ctx, 'batch_submit').execute({
       run_dir: run2, remote_dir: 'batch2', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {})
     const uploads = ctx.calls.filter((c) => c.name === 'ssh_upload')
       .map((c) => c.arguments.remotePath)
-    assert.ok(uploads.includes('/home/op/sim/batch2/template.scs'), uploads.join('\n'))
+    assert.ok(uploads.includes('/home/op/sim/batch2/template_thorough.scs'), uploads.join('\n'))
+    assert.ok(!uploads.some((p) => p.endsWith('/batch2/template.scs')), uploads.join('\n'))
+  } finally {
+    restoreEnv()
+  }
+})
+
+test('batch_submit auto-names the remote dir Sim<N>_<date>_batch<M> when remote_dir is omitted', async () => {
+  try {
+    const ctx = makeCtx({ ls: 'Sim0_20260805_batch1\nSim0_20260805_batch2\nSim1_20260806_batch1\nmisc\n' })
+    const out = await tool(ctx, 'batch_submit').execute({
+      run_dir: makeRunDir(), machine_id: 'node1', remote_root: '/home/op/sim',
+      worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    // Sim1 is the highest index but dated yesterday -> new index, batch1
+    const today = new Date()
+    const pad = (n) => String(n).padStart(2, '0')
+    const stamp = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`
+    assert.equal(out.remote_dir, `/home/op/sim/Sim2_${stamp}_batch1`, out.remote_dir)
+
+    const ctx2 = makeCtx({ ls: `Sim2_${stamp}_batch1\n` }) // same index, today -> batch+1
+    const out2 = await tool(ctx2, 'batch_submit').execute({
+      run_dir: makeRunDir(), machine_id: 'node1', remote_root: '/home/op/sim',
+      worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.equal(out2.remote_dir, `/home/op/sim/Sim2_${stamp}_batch2`, out2.remote_dir)
+
+    // the auto-name path lists the remote root once (ls -1) before anything else
+    // (shq single-quotes the root path, so match the two parts separately)
+    const lsCall = ctx2.calls.find((c) => {
+      const cmd = String(c.arguments?.command || '')
+      return cmd.includes('ls -1') && cmd.includes('/home/op/sim')
+    })
+    assert.ok(lsCall, 'remote root listing issued')
   } finally {
     restoreEnv()
   }
@@ -419,4 +469,21 @@ test('batch_submit surfaces upload failures and refuses to clobber a batch', asy
   } finally {
     restoreEnv()
   }
+})
+
+test('nextSimDir: Sim<N>_<date>_batch<M> naming rules (2026-11-21 convention)', () => {
+  // empty root -> Sim0 batch1
+  assert.equal(nextSimDir([], '20261121'), 'Sim0_20261121_batch1')
+  assert.equal(nextSimDir(['misc', 'Round1', 'sim0_x'], '20261121'), 'Sim0_20261121_batch1')
+  // highest index dated today -> same index, batch+1 (not lexicographic: batch9 -> batch10)
+  assert.equal(nextSimDir(['Sim2_20261121_batch9'], '20261121'), 'Sim2_20261121_batch10')
+  // numeric index ordering beats lexicographic (Sim10 > Sim9, not the reverse)
+  assert.equal(nextSimDir(['Sim9_20261120_batch1', 'Sim10_20261120_batch3'], '20261121'),
+    'Sim11_20261121_batch1')
+  // highest index dated another day -> new index, batch1
+  assert.equal(nextSimDir(['Sim0_20260805_batch1', 'Sim0_20260805_batch2', 'Sim1_20260806_batch1'], '20261121'),
+    'Sim2_20261121_batch1')
+  // same highest index across days: its latest batch still governs
+  assert.equal(nextSimDir(['Sim1_20260805_batch4', 'Sim1_20261120_batch2'], '20261121'),
+    'Sim2_20261121_batch1')
 })

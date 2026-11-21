@@ -65,8 +65,17 @@ export async function registerReportIntoSession(storeDir, sessionId, reportPath)
 }
 
 // The sweep convention places run directories at <project>/sweep/RoundN/top;
-// derive the project root from a run_dir (null when the shape does not match).
+// the Sim convention (2026-11-21) places them at <project>/Sim<N>_<date>_
+// batch<M>/ (or <project>/sweep/Sim*/). Derive the project root from a
+// run_dir (null when the shape does not match).
+const SIM_DIR_RE = /^Sim\d+_\d{8}_batch\d+$/
+
 function deriveProjectDir(runDir) {
+  const abs = path.resolve(runDir)
+  if (SIM_DIR_RE.test(path.basename(abs))) {
+    const parent = path.basename(path.dirname(abs))
+    return parent === 'sweep' ? path.dirname(path.dirname(abs)) : path.dirname(abs)
+  }
   const round = path.basename(path.dirname(runDir))
   const sweep = path.basename(path.dirname(path.dirname(runDir)))
   if (/^Round/.test(round) && sweep === 'sweep') {
@@ -172,7 +181,10 @@ function detectSimulator(workDir, override) {
       if (name) return name
     } catch { /* unreadable marker falls through to template sniffing */ }
   }
-  if (fs.existsSync(path.join(workDir, 'template.scs'))) return 'spectre'
+  try {
+    // template*.scs family (2026-11-21): any family member marks a spectre run
+    if (fs.readdirSync(workDir).some((n) => /^template[\w.-]*\.scs$/.test(n))) return 'spectre'
+  } catch { /* unreadable directory falls through */ }
   return null
 }
 
@@ -265,7 +277,7 @@ const HEAD = `<!DOCTYPE html>
 <body>
 <h1>__CASCADE__ - sweep report</h1>
 <div class="meta">Generated __NOW__ | PDK: __PDK__ | Simulator: __SIMULATOR__</div>
-<div class="selector-bar">Round: <select id="round-select"></select><span id="round-info" class="meta"></span></div>
+<div class="selector-bar">Batch: <select id="round-select"></select><span id="round-info" class="meta"></span></div>
 `
 
 const BODY_TOP = `
@@ -274,6 +286,9 @@ const BODY_TOP = `
 <h2>2. Metric charts (click a legend item / curve to highlight its detail row)</h2>
 <div id="legend-grid"></div>
 <div id="chart-metrics"></div>
+<h2 id="section-curves">2b. Sweep curves (one trace per parameter combination)</h2>
+<div id="curves-note" class="meta"></div>
+<div id="curve-charts"></div>
 <h2>3. Per-point details</h2>
 <div style="max-height: 420px; overflow: auto;">
 <table id="points-table"><thead id="points-head"></thead><tbody id="points-body"></tbody></table>
@@ -338,6 +353,7 @@ function buildReport(RD) {
   try { buildSummary(RD); } catch (e) { console.warn("summary", e); }   // hard rule: per-section isolation
   try { buildLegend(RD); } catch (e) { console.warn("legend", e); }
   try { buildCharts(RD); } catch (e) { console.warn("charts", e); }
+  try { buildCurves(RD); } catch (e) { console.warn("curves", e); }
   try { buildTable(RD); } catch (e) { console.warn("table", e); }
   bind(RD);                                  // hard rule: re-bind Plotly events after every buildReport
 }
@@ -395,6 +411,53 @@ function buildCharts(RD) {
       });
     });
     Plotly.newPlot("chart-" + mi, traces, baseLayout(mk), { displayModeBar: false });
+  });
+}
+
+// 2b sweep curves (2026-11-21): one trace PER PARAMETER COMBINATION per
+// signal, x = the shared sweep axis (freq/time or the requested x_signal).
+// Complex signals arrive as magnitude dB; the section hides itself when the
+// round carries no curve data (scalar-only runs keep the metric report).
+function buildCurves(RD) {
+  var host = document.getElementById("curve-charts");
+  host.innerHTML = "";
+  var C = RD.curves;
+  if (!C || !C.points || !C.points.length) {
+    document.getElementById("section-curves").style.display = "none";
+    document.getElementById("curves-note").textContent = "";
+    return;
+  }
+  document.getElementById("section-curves").style.display = "";
+  document.getElementById("curves-note").textContent = C.note || "";
+  var n = C.points.length;
+  for (var i = 0; i < C.signals.length; i++) {
+    var div = document.createElement("div");
+    div.className = "chart";
+    div.id = "curve-" + i;
+    if (C.signals.length > 1) { div.style.height = "360px"; }
+    host.appendChild(div);
+  }
+  C.signals.forEach(function (sk, si) {
+    var traces = [];
+    C.points.forEach(function (p, pi) {
+      traces.push({
+        x: p.x, y: (p.y && p.y[sk.name]) ? p.y[sk.name] : [],
+        mode: "lines", name: p.label,
+        line: { width: 2, color: ctrlColor(pi, n) },
+        legendgroup: String(p.index),
+        connectgaps: false,
+        hovertemplate: esc(p.label) + "<br>" + esc(C.x_signal) + "=%{x}<br>" + esc(sk.name) + "=%{y:.4g}<extra></extra>",
+      });
+    });
+    var layout = baseLayout(sk.name + (sk.dB ? " (dB)" : ""));
+    layout.xaxis.title.text = C.x_signal;
+    Plotly.newPlot("curve-" + si, traces, layout, { displayModeBar: false });
+    // hard rule: el.on only, re-bound right after every newPlot
+    var el = document.getElementById("curve-" + si);
+    el.on("plotly_click", function (evt) {
+      if (evt.points && evt.points[0]) { highlight(C.points[evt.points[0].pointNumber].index); }
+    });
+    el.on("plotly_deselect", resetAll);
   });
 }
 
@@ -564,23 +627,141 @@ function resolvePlotlySrc(forceCdn, outDir, project, plotlyArg) {
   return rel.replace(/\\/g, '/')
 }
 
-function findRounds(projectDir, only) {
-  const sweepRoot = path.join(projectDir, 'sweep')
-  const rounds = []
-  let names
-  try { names = fs.readdirSync(sweepRoot) } catch { return rounds }
-  names.sort()
-  for (const name of names) {
-    if (!/^Round\d+$/.test(name)) continue
-    if (only && name !== only) continue
-    const top = path.join(sweepRoot, name, 'top')
-    const resultsPath = path.join(top, 'results.json')
-    if (isFileLoose(resultsPath)) rounds.push({ name, top, resultsPath })
-  }
-  return rounds
+// Numeric sort key: legacy RoundN entries order by N; Sim<N>_<date>_batch<M>
+// entries (2026-11-21) order by (N, date, M) — a lexicographic sort would
+// place Sim10_* before Sim2_*.
+function runSortKey(name) {
+  const rm = /^Round(\d+)$/.exec(name)
+  if (rm) return [0, Number(rm[1]), 0, 0]
+  const sm = /^Sim(\d+)_(\d{8})_batch(\d+)$/.exec(name)
+  if (sm) return [1, Number(sm[1]), Number(sm[2]), Number(sm[3])]
+  return [2, 0, 0, 0]
 }
 
-function buildRoundData(name, top, resultsPath) {
+function findRounds(projectDir, only) {
+  const rounds = []
+  const seen = new Set()
+  const push = (name, top) => {
+    if (seen.has(name)) return
+    const resultsPath = path.join(top, 'results.json')
+    if (isFileLoose(resultsPath)) { seen.add(name); rounds.push({ name, top, resultsPath }) }
+  }
+  // legacy layout: <project>/sweep/RoundN/top
+  try {
+    const names = fs.readdirSync(path.join(projectDir, 'sweep')).sort()
+    for (const name of names) {
+      if (!/^Round\d+$/.test(name)) continue
+      if (only && name !== only) continue
+      push(name, path.join(projectDir, 'sweep', name, 'top'))
+    }
+    // Sim convention inside sweep/: <project>/sweep/Sim*/
+    for (const name of names) {
+      if (!SIM_DIR_RE.test(name)) continue
+      if (only && name !== only) continue
+      push(name, path.join(projectDir, 'sweep', name))
+    }
+  } catch { /* no sweep/ directory */ }
+  // Sim convention at the project root: <project>/Sim*/
+  try {
+    for (const name of fs.readdirSync(projectDir).sort()) {
+      if (!SIM_DIR_RE.test(name)) continue
+      if (only && name !== only) continue
+      push(name, path.join(projectDir, name))
+    }
+  } catch { /* unreadable project dir */ }
+  return rounds.sort((a, b) => {
+    const ka = runSortKey(a.name)
+    const kb = runSortKey(b.name)
+    for (let i = 0; i < ka.length; i++) if (ka[i] !== kb[i]) return ka[i] - kb[i]
+    return a.name.localeCompare(b.name)
+  })
+}
+
+// --- 2b sweep curves (2026-11-21): one trace per parameter combination ----
+// Curve source: the spectre_parse outputs at <run>/psf/<point>_psf.json
+// (per-point signal arrays; complex signals carry [re, im] pairs and plot as
+// magnitude in dB). The section renders only when those files exist — a
+// scalar-only run keeps the legacy metric-only report (backward compatible).
+const CURVE_SIGNAL_LIMIT = 6
+const CURVE_VALUE_LIMIT = 2_000_000
+
+function isCurveArray(v) {
+  return !!v && typeof v === 'object' && Array.isArray(v.values)
+}
+
+function loadPsfCurves(top, resultsPoints, opts = {}) {
+  const psfDir = path.join(top, 'psf')
+  let files
+  try { files = fs.readdirSync(psfDir).filter((n) => n.endsWith('_psf.json')) } catch { return null }
+  const byPoint = []
+  for (const f of files.sort()) {
+    let j
+    try { j = readJsonBom(path.join(psfDir, f)) } catch { continue }
+    if (!j || typeof j !== 'object' || !j.signals) continue
+    byPoint.push({ point: String(j.point ?? f.replace(/_psf\.json$/, '')), signals: j.signals })
+  }
+  if (!byPoint.length) return null
+  // candidate y-signals: array-valued in at least one point, filtered by the
+  // requested signal list when given
+  const wanted = opts.signals && opts.signals.length ? new Set(opts.signals) : null
+  let yNames = [...new Set(byPoint.flatMap((p) => Object.keys(p.signals)
+    .filter((k) => isCurveArray(p.signals[k]))))]
+    .filter((k) => !wanted || wanted.has(k))
+    .sort()
+  // x signal: explicit > freq > time > the first array signal (dropped from y)
+  const hasArray = (name) => byPoint.some((p) => isCurveArray(p.signals[name]))
+  let xSignal = opts.xSignal && hasArray(opts.xSignal) ? opts.xSignal
+    : (hasArray('freq') ? 'freq' : (hasArray('time') ? 'time' : null))
+  if (!xSignal) {
+    if (!yNames.length) return null
+    xSignal = yNames.shift()
+  } else {
+    yNames = yNames.filter((k) => k !== xSignal)
+  }
+  if (!yNames.length) return null
+  if (yNames.length > CURVE_SIGNAL_LIMIT) yNames = yNames.slice(0, CURVE_SIGNAL_LIMIT)
+  const dB = {}
+  for (const k of yNames) {
+    const sample = byPoint.find((p) => isCurveArray(p.signals[k]))
+    dB[k] = !!(sample && sample.signals[k].complex)
+  }
+  // per-point curves; the label comes from the results.json params (k=v) and
+  // the index is reused, so cross-highlight matches the metric table rows
+  const points = []
+  let total = 0
+  let truncated = false
+  for (const p of byPoint) {
+    const xArr = isCurveArray(p.signals[xSignal]) ? p.signals[xSignal].values : null
+    if (!xArr || !xArr.length) continue
+    if (total + xArr.length * (yNames.length + 1) > CURVE_VALUE_LIMIT) { truncated = true; break }
+    total += xArr.length * (yNames.length + 1)
+    const rp = resultsPoints.find((q) => String(q.point_name) === p.point || Number(p.point) === q.index)
+    const label = rp && rp.params
+      ? Object.entries(rp.params).map(([k, v]) => `${k}=${v}`).join(', ')
+      : p.point
+    const y = {}
+    for (const k of yNames) {
+      const arr = isCurveArray(p.signals[k]) ? p.signals[k].values : null
+      if (!arr) { y[k] = null; continue }
+      y[k] = dB[k]
+        ? arr.map((v) => {
+          const m = Math.hypot(Array.isArray(v) ? (v[0] ?? 0) : (v ?? 0), Array.isArray(v) ? (v[1] ?? 0) : 0)
+          return m > 0 ? 20 * Math.log10(m) : -300
+        })
+        : arr.map((v) => (typeof v === 'number' && Number.isFinite(v) ? v : null))
+    }
+    points.push({ index: rp ? rp.index : (Number(p.point) || p.point), label, x: xArr, y })
+  }
+  if (!points.length) return null
+  return {
+    x_signal: xSignal,
+    signals: yNames.map((k) => ({ name: k, dB: dB[k] })),
+    points,
+    ...(truncated ? { note: `curve data capped at ${CURVE_VALUE_LIMIT} values — ${byPoint.length - points.length} point(s) omitted` } : {}),
+  }
+}
+
+function buildRoundData(name, top, resultsPath, curveOpts = {}) {
   const res = readJsonBom(resultsPath)
   const metaPath = path.join(top, 'cell_meta.json')
   const meta = isFileLoose(metaPath) ? readJsonBom(metaPath) : {}
@@ -607,6 +788,7 @@ function buildRoundData(name, top, resultsPath) {
     groupBy = paramNames[0]
     groupValues = [(points[0].params || {})[paramNames[0]]]
   }
+  const curves = loadPsfCurves(top, points, curveOpts)
   return {
     round: name,
     testbench: meta.testbench || meta.cell_name || '',
@@ -622,6 +804,7 @@ function buildRoundData(name, top, resultsPath) {
     n_failed: res.n_failed ?? 0,
     summary: res.summary || {},
     points,
+    ...(curves ? { curves } : {}),
   }
 }
 
@@ -633,7 +816,8 @@ function genSweepReport(projectDir, opts = {}) {
   const project = path.resolve(projectDir)
   const rounds = findRounds(project, opts.round)
   if (!rounds.length) {
-    throw new Error(`no round with a results.json found (${path.join(project, 'sweep', 'Round*')})`)
+    throw new Error(`no run directory with a results.json found (${path.join(project, 'sweep', 'Round*', 'top')} `
+      + `or ${path.join(project, 'Sim*_********_batch*')})`)
   }
   const outDir = path.join(project, 'Analysis')
   const dataDir = path.join(outDir, 'data')
@@ -643,10 +827,13 @@ function genSweepReport(projectDir, opts = {}) {
   let pdkName = ''
   let simulatorName = ''
   for (const r of rounds) {
-    const rd = buildRoundData(r.name, r.top, r.resultsPath)
+    const rd = buildRoundData(r.name, r.top, r.resultsPath,
+      { signals: opts.signals, xSignal: opts.xSignal })
     pdkName = pdkName || rd.pdk
     simulatorName = simulatorName || rd.simulator
-    const jsName = `Round${r.name.replace('Round', '')}.js`
+    const jsName = r.name.startsWith('Round')
+      ? `Round${r.name.replace('Round', '')}.js`
+      : `${r.name}.js`
     // hard rule: data JS is plain utf-8 without BOM, one var line. JSON.stringify
     // vs ensure_ascii=True only differs by CJK literals, which load identically
     // in the utf-8 report page.
@@ -685,21 +872,27 @@ export function analysisTools() {
       name: 'sim_analysis',
       description: 'Analyze a finished sweep and optionally render its dashboard. Always aggregates every '
         + 'NN/point_meta.json of the run directory into results.json (per-point metrics, min/max/mean summary; '
-        + 'the simulator label comes from the run\'s .simulator marker or the template extension). When '
+        + 'the simulator label comes from the run\'s .simulator marker or a template*.scs family member). When '
         + 'report=true, also regenerates the sweep-result HTML report (interactive Plotly metric charts, '
-        + 'summary cards, per-point table; works from file:// and inside the WebUI) at '
-        + '<project>/Analysis/<project>_report.html — the project root defaults to the sweep/RoundN/top '
-        + 'structure of run_dir — and registers the report into the CALLING session\'s HarnessAMS dashboard '
-        + '(the session identity comes from the execution context; nearest .harnessams/sessions.json above '
-        + 'the project). A registration failure never fails the analysis.',
+        + 'per-parameter-combination sweep curves from the spectre_parse psf outputs, summary cards, per-point '
+        + 'table; works from file:// and inside the WebUI) at <project>/Analysis/<project>_report.html — the '
+        + 'project root defaults to the run_dir\'s sweep/RoundN/top or Sim<N>_<date>_batch<M> structure — with '
+        + 'a batch dropdown switching between every results.json-bearing run directory, and registers the '
+        + 'report into the CALLING session\'s HarnessAMS dashboard (the session identity comes from the '
+        + 'execution context; nearest .harnessams/sessions.json above the project). A registration failure '
+        + 'never fails the analysis.',
       parameters: {
-        run_dir: { type: 'string', required: true, description: 'Run directory (sweep/RoundN/top) holding NN/point_meta.json' },
+        run_dir: { type: 'string', required: true, description: 'Run directory (sweep/RoundN/top or Sim<N>_<date>_batch<M>) holding NN/point_meta.json' },
         out: { type: 'string', description: 'Output results.json path (default: <run_dir>/results.json; must stay at the default when report=true)' },
         simulator: { type: 'string', enum: ['spectre'], description: 'Override the detected simulator label' },
         report: { type: 'boolean', description: 'Also generate the HTML dashboard for the project (default false)' },
-        round: { type: 'string', description: 'report only: round name to render (e.g. Round1; default: all Round*)' },
-        project_dir: { type: 'string', description: 'report only: project root containing sweep/Round*/top '
-          + '(default: derived from run_dir\'s sweep/RoundN/top structure)' },
+        round: { type: 'string', description: 'report only: run-directory name to render (e.g. Round1 or Sim0_20260805_batch1; default: all discovered)' },
+        project_dir: { type: 'string', description: 'report only: project root containing the run directories '
+          + '(default: derived from run_dir\'s sweep/RoundN/top or Sim* structure)' },
+        signals: { type: 'string', description: 'report only: comma list of curve signals for the sweep-curves section '
+          + '(default: auto-pick common array signals from <run>/psf, bounded; complex signals plot as magnitude dB)' },
+        x_signal: { type: 'string', description: 'report only: the sweep x-axis signal (default: freq, else time, '
+          + 'else the first array signal)' },
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
@@ -741,7 +934,12 @@ export function analysisTools() {
               + '(pass project_dir explicitly or use a conventional run directory)') })())
         let report
         try {
-          report = genSweepReport(project, { round: args.round ? String(args.round) : null })
+          report = genSweepReport(project, {
+            round: args.round ? String(args.round) : null,
+            signals: typeof args.signals === 'string'
+              ? args.signals.split(',').map((s) => s.trim()).filter(Boolean) : null,
+            xSignal: args.x_signal ? String(args.x_signal) : null,
+          })
         } catch (e) {
           throw new Error(`report generation failed: ${e.message}`)
         }

@@ -208,3 +208,65 @@ test('sim_analysis: numeric point ordering (>=100 dirs) and report inline-JSON e
     await rm(ws, { recursive: true, force: true })
   }
 })
+
+test('sim_analysis report: Sim* run dirs join the batch dropdown; psf curves add one trace per parameter combination', async () => {
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-simdirs-'))
+  try {
+    const proj = path.join(ws, 'projAtt')
+    const mkRun = async (name, points) => {
+      const run = path.join(proj, name)
+      for (const [idx, params] of points) {
+        const nn = String(idx).padStart(2, '0')
+        await mkdir(path.join(run, nn), { recursive: true })
+        await writeFile(path.join(run, nn, 'point_meta.json'), JSON.stringify({
+          point_index: idx, point_name: nn, status: 'success', params, signals: {},
+        }), 'utf8')
+      }
+      return run
+    }
+    const run1 = await mkRun('Sim0_20260805_batch1', [[0, { SW: 0 }], [1, { SW: 1 }]])
+    const run2 = await mkRun('Sim0_20260805_batch2', [[0, { SW: 0 }]])
+    const run3 = await mkRun('Sim1_20260806_batch1', [[0, { SW: 0 }]])
+
+    // spectre_parse outputs for run1: freq + a complex s21 per point
+    await mkdir(path.join(run1, 'psf'), { recursive: true })
+    for (const [nn, s21] of [['00', [[0.9, 0.1], [0.8, 0.2]]], ['01', [[0.5, 0.05], [0.4, 0.1]]]]) {
+      await writeFile(path.join(run1, 'psf', `${nn}_psf.json`), JSON.stringify({
+        point: nn, raw_dir: 'x', signals: {
+          freq: { complex: false, values: [1e9, 2e9] },
+          s21: { complex: true, values: s21 },
+        },
+      }), 'utf8')
+    }
+
+    const tool = makeTool(analysisTools().find((d) => d.name === 'sim_analysis'))
+    // collect the sibling runs first (real flow: every batch is collected when
+    // its own analysis runs; discovery requires a results.json per run dir)
+    await tool.execute({ run_dir: run2 })
+    await tool.execute({ run_dir: run3 })
+
+    const res = await tool.execute({ run_dir: run1, report: true })
+    assert.equal(res.ok, true)
+    assert.match(res.report_dir, /projAtt[\\/]Analysis$/) // Sim layout derived, no project_dir
+
+    const dataDir = path.join(res.report_dir, 'data')
+    const rd = JSON.parse((await readFile(path.join(dataDir, 'Sim0_20260805_batch1.js'), 'utf8'))
+      .replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
+    assert.equal(rd.curves.x_signal, 'freq')
+    assert.deepEqual(rd.curves.signals, [{ name: 's21', dB: true }])
+    assert.equal(rd.curves.points.length, 2)
+    assert.equal(rd.curves.points[0].label, 'SW=0')
+    assert.equal(rd.curves.points[1].label, 'SW=1')
+    const want = 20 * Math.log10(Math.hypot(0.9, 0.1))
+    assert.ok(Math.abs(rd.curves.points[0].y.s21[0] - want) < 1e-9)
+
+    const html = await readFile(res.report_path, 'utf8')
+    assert.match(html, /2b\. Sweep curves/)
+    for (const f of ['Sim0_20260805_batch1.js', 'Sim0_20260805_batch2.js', 'Sim1_20260806_batch1.js']) {
+      await readFile(path.join(dataDir, f)) // throws if a discovered batch is missing
+      assert.match(html, new RegExp(f.replace(/\./g, '\.')))
+    }
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
