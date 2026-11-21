@@ -241,69 +241,91 @@ function inlineJson(v) {
   return JSON.stringify(v).replaceAll('</', '<\\/')
 }
 
+// Visual language follows the verified AttST0p5dB_ch.html dashboard
+// (2026-11-21 user request): centered container on #f9f9f7, #fcfcfb cards
+// with 12px radius + soft shadow, system-ui, H1 32px, chart titles 20px /
+// ticks 16px, curve charts carry NO legend (the table swatches map colors to
+// parameter combinations), selection dims the other curves (width 4 vs 1,
+// opacity 1 vs 0.08) and lights the table row; blank-click deselects.
 const HEAD = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__CASCADE__ - sweep report</title>
 <script src="__PLOTLY__"></script>
 <script>window.Plotly || document.write('<script src="/harnessams/assets/plotly.min.js"><\\/script>');</script>
 <style>
-  body { font-family: "Segoe UI", system-ui, sans-serif; margin: 0 24px 48px; color: #1c2733; }
-  h1 { font-size: 22px; margin: 18px 0 4px; }
-  h2 { font-size: 18px; margin: 26px 0 8px; border-left: 4px solid #2b6cb0; padding-left: 8px; }
-  .meta { color: #5a6b7b; font-size: 13px; margin-bottom: 12px; }
-  .selector-bar { display: flex; gap: 16px; align-items: center; margin: 10px 0; }
-  select { padding: 4px 8px; font-size: 14px; }
-  .cards { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; }
-  .card { border: 1px solid #d7e0e8; border-radius: 8px; padding: 10px 16px; min-width: 200px; background: #f8fafc; }
-  .card .k { font-size: 13px; color: #5a6b7b; }
-  .card .v { font-size: 18px; font-weight: 600; margin-top: 2px; }
-  .chart { width: 100%; height: 480px; margin: 8px 0 20px; }
-  table { border-collapse: collapse; width: 100%; font-size: 13px; }
-  th, td { border: 1px solid #d7e0e8; padding: 4px 8px; text-align: right; }
-  th { background: #eef3f8; position: sticky; top: 0; }
-  td.l, th.l { text-align: left; }
-  tr.ok td { background: #ffffff; }
-  tr.bad td { background: #fde8e8; }
-  tr.sel td { background: #fff3c4 !important; }
-  #info-bar { position: sticky; bottom: 0; background: #2b6cb0; color: #fff; padding: 6px 12px;
-              border-radius: 6px; display: none; font-size: 13px; cursor: pointer; margin-top: 10px; }
-  .legend-item { display: inline-block; margin: 0 10px 6px 0; font-size: 13px; cursor: pointer;
-                 padding: 2px 8px; border-radius: 4px; border: 1px solid transparent; }
-  .legend-item.selected { border-color: #2b6cb0; background: #e8f0fa; }
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #f9f9f7; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; padding: 36px; display: flex; flex-direction: column; align-items: center; }
+.container { max-width: 1200px; width: 100%; }
+h1 { font-size: 32px; font-weight: 600; color: #0b0b0b; margin: 0 0 4px 0; }
+.filter-line { font-size: 17px; color: #898781; margin: 0 0 6px 0; }
+.hint { font-size: 18px; color: #898781; margin: 0 0 20px 0; }
+.cards { display: flex; flex-wrap: wrap; gap: 14px; margin: 0 0 20px 0; }
+.card { background: #fcfcfb; border-radius: 8px; padding: 12px 20px; box-shadow: 0 1px 4px rgba(0,0,0,0.06); min-width: 190px; }
+.card .k { font-size: 14px; color: #898781; }
+.card .v { font-size: 19px; font-weight: 600; color: #0b0b0b; margin-top: 2px; }
+.card .s { font-size: 14px; color: #52514e; margin-top: 2px; }
+#info-bar { background: #fcfcfb; border-radius: 8px; padding: 14px 24px; margin-bottom: 20px; font-size: 19px; color: #0b0b0b; box-shadow: 0 1px 4px rgba(0,0,0,0.06); min-height: 32px; cursor: pointer; }
+#info-bar:hover { background: #f0f0ee; }
+.chart-box { background: #fcfcfb; border-radius: 12px; padding: 20px 16px 12px 16px; margin-bottom: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+#selector-bar { display: flex; align-items: center; gap: 12px; margin: 18px 0 20px 0; flex-wrap: wrap; }
+#selector-bar label { font-size: 16px; font-weight: 600; color: #52514e; }
+#round-select { font-size: 16px; padding: 8px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fcfcfb; cursor: pointer; }
+#round-select:hover { border-color: #888; }
+#round-info { font-size: 15px; color: #898781; }
+.table-box { background: #fcfcfb; border-radius: 12px; padding: 20px; margin-bottom: 24px; box-shadow: 0 2px 6px rgba(0,0,0,0.08); }
+.table-box h2 { font-size: 20px; font-weight: 600; color: #0b0b0b; margin-bottom: 14px; }
+.tbl { width: 100%; border-collapse: collapse; font-size: 15px; }
+.tbl th { background: #f3f3f1; color: #52514e; font-weight: 600; padding: 10px 14px; text-align: left; border-bottom: 2px solid #ddd; }
+.tbl th.sortable { cursor: pointer; user-select: none; }
+.tbl th.sortable:hover { background: #e8e8e4; }
+.tbl th .sort-arrow { margin-left: 4px; font-size: 12px; opacity: 0.4; }
+.tbl th.sort-active .sort-arrow { opacity: 1; }
+.tbl td { padding: 8px 14px; border-bottom: 1px solid #eee; color: #0b0b0b; cursor: pointer; }
+.tbl tr:hover td { background: #f0f5ff; }
+.tbl tr.selected td { background: #dce8ff; font-weight: 600; }
+.tbl td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.swatch { display: inline-block; width: 14px; height: 14px; border-radius: 3px; vertical-align: middle; margin-right: 6px; }
+.tbl tr.bad td:first-child .swatch { outline: 2px solid #c0392b; }
 </style>
 </head>
 <body>
-<h1>__CASCADE__ - sweep report</h1>
-<div class="meta">Generated __NOW__ | PDK: __PDK__ | Simulator: __SIMULATOR__</div>
-<div class="selector-bar">Batch: <select id="round-select"></select><span id="round-info" class="meta"></span></div>
-`
-
-const BODY_TOP = `
-<h2>1. Summary metrics</h2>
-<div class="cards" id="summary-cards"></div>
-<h2>2. Metric charts (click a legend item / curve to highlight its detail row)</h2>
-<div id="legend-grid"></div>
-<div id="chart-metrics"></div>
-<h2 id="section-curves">2b. Sweep curves (one trace per parameter combination)</h2>
-<div id="curves-note" class="meta"></div>
-<div id="curve-charts"></div>
-<h2>3. Per-point details</h2>
-<div style="max-height: 420px; overflow: auto;">
-<table id="points-table"><thead id="points-head"></thead><tbody id="points-body"></tbody></table>
+<div class="container">
+<h1>__CASCADE__ — sweep report</h1>
+<div class="filter-line">Generated __NOW__ | PDK: __PDK__ | Simulator: __SIMULATOR__</div>
+<div id="selector-bar">
+  <label for="round-select">Select batch:</label>
+  <select id="round-select"></select>
+  <span id="round-info"></span>
 </div>
-<div id="info-bar"></div>
+<div id="dashboard-area" style="display:none">
+  <p class="hint">Click curve / table row → cross-highlight | Click blank area or info bar to deselect</p>
+  <div id="info-bar">Click a curve or table row to view details</div>
+  <div class="cards" id="summary-cards"></div>
+  <div id="chart-area"></div>
+  <div class="table-box"><h2>All Parameter Combinations</h2>
+    <div style="overflow-x:auto"><table class="tbl" id="points-table">
+      <thead id="points-head"></thead><tbody id="points-body"></tbody>
+    </table></div>
+  </div>
+</div>
+<div id="placeholder" style="padding:60px;text-align:center;color:#aaa;font-size:18px">Select a batch to load data</div>
+</div>
 `
 
 // Raw template (the Python original was an r-string): preserves the regex
-// backslashes below verbatim.
+// backslashes below verbatim. No ${...} interpolation — everything is string
+// concatenation, matching the original generator's style.
 const FOOT_JS = String.raw`
 <script>
 const MANIFEST = { project: "__CASCADE__", rounds: [__ROUNDS__] };
-var ROUND_DATA = null;                       // hard rule: var, not const (round switching re-declares and overwrites)
+var ROUND_DATA = null;                       // hard rule: var, not const (batch switching re-declares)
 
-const CHART_DIVS = ["chart-metrics"];
+var sel = null, clickFired = false, sortCol = null, sortAsc = true;
+var PTS = [], N = 0, PARAM_KEYS = [], METRIC_KEYS = [], CURVE = null;
+var CURVE_DIVS = [];                         // legend-less curve charts (swatch-mapped)
 
 function num(v, n) {                         // hard rule: robust formatter
   return (typeof v === "number" && isFinite(v)) ? v.toFixed(n === undefined ? 4 : n) : "-";
@@ -316,21 +338,26 @@ function fmtVal(v) {
   if (a !== 0 && (a < 1e-3 || a >= 1e6)) return v.toExponential(3);
   return num(v, 4).replace(/\.?0+$/, "");
 }
-
-function ctrlColor(i, n) {                   // HSL blue-to-red gradient
-  const h = 240 - 240 * (n <= 1 ? 0 : i / (n - 1));
-  return "hsl(" + Math.round(h) + ",70%,45%)";
+function labelOf(p) {                        // k=v comma label of one parameter combination
+  if (p && p.params) {
+    return Object.keys(p.params).map(function (k) { return k + "=" + show(p.params[k]); }).join(", ");
+  }
+  return show(p ? p.index : "-");
+}
+function hsl(i, n) {                         // HSL blue-to-red gradient (swatch + curve colors)
+  n = n || N;
+  return "hsl(" + Math.round(240 - 240 * (n <= 1 ? 0.5 : i / (n - 1))) + ",65%,50%)";
 }
 
 function populateSelect() {
-  const sel = document.getElementById("round-select");
-  sel.innerHTML = "";
+  const selEl = document.getElementById("round-select");
+  selEl.innerHTML = "";
   for (const r of MANIFEST.rounds) {
     const opt = document.createElement("option");
-    opt.value = r.file; opt.textContent = r.title + " - " + r.n_points + " points";
-    sel.appendChild(opt);
+    opt.value = r.file; opt.textContent = r.title + " (" + r.n_points + " pts)";
+    selEl.appendChild(opt);
   }
-  sel.onchange = function () { loadRound(sel.value); };
+  selEl.onchange = function () { loadRound(selEl.value); };
 }
 
 function loadRound(file) {                   // hard rule: script injection + ?v= cache-bust
@@ -348,14 +375,18 @@ function loadRound(file) {                   // hard rule: script injection + ?v
 
 function buildReport(RD) {
   if (!RD) return;
+  PTS = RD.points || []; N = PTS.length;
+  for (const p of PTS) { p.label = p.label || labelOf(p); }
+  PARAM_KEYS = RD.param_names || []; METRIC_KEYS = RD.metric_names || []; CURVE = RD.curves || null;
+  document.getElementById("placeholder").style.display = "none";
+  document.getElementById("dashboard-area").style.display = "block";
   document.getElementById("round-info").textContent =
     "Status: " + RD.n_success + " success / " + RD.n_failed + " failed";
+  sortCol = null; sortAsc = true; sel = null;
+  document.getElementById("info-bar").textContent = "Click a curve or table row to view details";
   try { buildSummary(RD); } catch (e) { console.warn("summary", e); }   // hard rule: per-section isolation
-  try { buildLegend(RD); } catch (e) { console.warn("legend", e); }
   try { buildCharts(RD); } catch (e) { console.warn("charts", e); }
-  try { buildCurves(RD); } catch (e) { console.warn("curves", e); }
   try { buildTable(RD); } catch (e) { console.warn("table", e); }
-  bind(RD);                                  // hard rule: re-bind Plotly events after every buildReport
 }
 
 function buildSummary(RD) {
@@ -364,172 +395,226 @@ function buildSummary(RD) {
   for (const [k, s] of Object.entries(RD.summary || {})) {
     const c = document.createElement("div");
     c.className = "card";
-    c.innerHTML = '<div class="k">' + esc(show(k)) + '</div>' +
-      '<div class="v">min ' + fmtVal(s.min) + ' / max ' + fmtVal(s.max) + '</div>' +
-      '<div class="k">mean ' + fmtVal(s.mean) + ' (n=' + s.n + ')</div>';
+    c.innerHTML = '<div class="k">' + esc(show(k)) + '</div>'
+      + '<div class="v">min ' + fmtVal(s.min) + ' / max ' + fmtVal(s.max) + '</div>'
+      + '<div class="s">mean ' + fmtVal(s.mean) + ' (n=' + s.n + ')</div>';
     cards.appendChild(c);
   }
+  cards.style.display = cards.childElementCount ? "" : "none";
 }
 
-function buildLegend(RD) {
-  const lg = document.getElementById("legend-grid");
-  lg.innerHTML = "";
-  RD.group_values.forEach(function (v, i) {
-    const el = document.createElement("span");
-    el.className = "legend-item";
-    el.dataset.value = String(v);
-    el.style.color = ctrlColor(i, RD.group_values.length);
-    el.textContent = RD.group_by + " = " + show(v);
-    lg.appendChild(el);
-  });
-}
-
-function buildCharts(RD) {
-  const host = document.getElementById("chart-metrics");
-  host.innerHTML = "";
-  const metrics = RD.metric_names;
-  const rows = Math.ceil(metrics.length / 2);
-  for (let i = 0; i < metrics.length; i++) {
-    const div = document.createElement("div");
-    div.className = "chart";
-    div.id = "chart-" + i;
-    if (metrics.length > 1) { div.style.height = "360px"; }
-    host.appendChild(div);
-  }
-  metrics.forEach(function (mk, mi) {
-    const traces = [];
-    RD.group_values.forEach(function (gv, gi) {
-      const pts = RD.points.filter(function (p) { return String(p.params[RD.group_by]) === String(gv); });
-      traces.push({
-        x: pts.map(function (p) { return p.index; }),
-        y: pts.map(function (p) { return (p.metrics && typeof p.metrics[mk] === "number") ? p.metrics[mk] : null; }),
-        mode: "lines+markers", name: RD.group_by + "=" + show(gv),
-        line: { width: 2, color: ctrlColor(gi, RD.group_values.length) },
-        marker: { size: 7, opacity: 0.4, color: ctrlColor(gi, RD.group_values.length) },
-        connectgaps: false,
-        hovertemplate: "point %{x}<br>" + mk + " = %{y}<extra>" + RD.group_by + "=" + show(gv) + "</extra>",
-      });
-    });
-    Plotly.newPlot("chart-" + mi, traces, baseLayout(mk), { displayModeBar: false });
-  });
-}
-
-// 2b sweep curves (2026-11-21): one trace PER PARAMETER COMBINATION per
-// signal, x = the shared sweep axis (freq/time or the requested x_signal).
-// Complex signals arrive as magnitude dB; the section hides itself when the
-// round carries no curve data (scalar-only runs keep the metric report).
-function buildCurves(RD) {
-  var host = document.getElementById("curve-charts");
-  host.innerHTML = "";
-  var C = RD.curves;
-  if (!C || !C.points || !C.points.length) {
-    document.getElementById("section-curves").style.display = "none";
-    document.getElementById("curves-note").textContent = "";
-    return;
-  }
-  document.getElementById("section-curves").style.display = "";
-  document.getElementById("curves-note").textContent = C.note || "";
-  var n = C.points.length;
-  for (var i = 0; i < C.signals.length; i++) {
-    var div = document.createElement("div");
-    div.className = "chart";
-    div.id = "curve-" + i;
-    if (C.signals.length > 1) { div.style.height = "360px"; }
-    host.appendChild(div);
-  }
-  C.signals.forEach(function (sk, si) {
-    var traces = [];
-    C.points.forEach(function (p, pi) {
-      traces.push({
-        x: p.x, y: (p.y && p.y[sk.name]) ? p.y[sk.name] : [],
-        mode: "lines", name: p.label,
-        line: { width: 2, color: ctrlColor(pi, n) },
-        legendgroup: String(p.index),
-        connectgaps: false,
-        hovertemplate: esc(p.label) + "<br>" + esc(C.x_signal) + "=%{x}<br>" + esc(sk.name) + "=%{y:.4g}<extra></extra>",
-      });
-    });
-    var layout = baseLayout(sk.name + (sk.dB ? " (dB)" : ""));
-    layout.xaxis.title.text = C.x_signal;
-    Plotly.newPlot("curve-" + si, traces, layout, { displayModeBar: false });
-    // hard rule: el.on only, re-bound right after every newPlot
-    var el = document.getElementById("curve-" + si);
-    el.on("plotly_click", function (evt) {
-      if (evt.points && evt.points[0]) { highlight(C.points[evt.points[0].pointNumber].index); }
-    });
-    el.on("plotly_deselect", resetAll);
-  });
-}
-
-function baseLayout(ylabel) {
+function chartLayout(ytitle, xtitle, legend) {
   return {
-    title: { text: ylabel, font: { size: 20 } },
-    xaxis: { title: { text: "sweep point index", font: { size: 16 } }, tickfont: { size: 16 }, dtick: 1 },
-    yaxis: { title: { text: ylabel, font: { size: 16 } }, tickfont: { size: 16 } },
-    height: 480, margin: { t: 48, b: 60, l: 76, r: 40 },
-    clickmode: "event", hovermode: "closest", showlegend: true,
+    title: { text: ytitle, font: { size: 20 } },
+    xaxis: { title: { text: xtitle, standoff: 14 }, tickfont: { size: 16 }, showgrid: true,
+      gridcolor: "#e8e8e8", zeroline: false, linecolor: "#ccc", linewidth: 1, ticks: "outside", ticklen: 5 },
+    yaxis: { title: { text: ytitle, standoff: 12 }, tickfont: { size: 16 }, gridcolor: "#e8e8e8",
+      zeroline: true, zerolinecolor: "#ddd" },
+    margin: { t: 48, b: 60, l: 76, r: 40 }, height: 480,
+    showlegend: !!legend, hovermode: "closest", clickmode: "event",
+    hoverlabel: { font: { size: 15 }, bgcolor: "#fff", bordercolor: "#ccc" },
+    paper_bgcolor: "#fcfcfb", plot_bgcolor: "#fcfcfb",
+    font: { family: "system-ui, -apple-system, sans-serif", color: "#0b0b0b" },
   };
 }
 
-function buildTable(RD) {
-  const head = document.getElementById("points-head");
-  const body = document.getElementById("points-body");
-  const cols = ["index"].concat(RD.param_names, RD.metric_names, ["status", "elapsed_s"]);
-  head.innerHTML = "<tr>" + cols.map(function (c) {
-    return '<th class="l">' + esc(show(c)) + "</th>";
-  }).join("") + "</tr>";
-  body.innerHTML = "";
-  RD.points.forEach(function (p) {
-    const tr = document.createElement("tr");
-    tr.className = (p.status === "success" || p.status === "partial") ? "ok" : "bad";
-    tr.dataset.index = String(p.index);
-    let html = "<td>" + esc(String(p.index)) + "</td>";
-    RD.param_names.forEach(function (k) { html += '<td class="l">' + esc(show(p.params ? p.params[k] : "-")) + "</td>"; });
-    RD.metric_names.forEach(function (k) { html += "<td>" + fmtVal(p.metrics ? p.metrics[k] : null) + "</td>"; });
-    html += "<td>" + esc(show(p.status)) + "</td><td>" + num(p.elapsed_sec, 2) + "</td>";
-    tr.innerHTML = html;
-    body.appendChild(tr);
-  });
+function newChartBox(id) {
+  const box = document.createElement("div");
+  box.className = "chart-box";
+  const div = document.createElement("div");
+  div.id = id;
+  box.appendChild(div);
+  document.getElementById("chart-area").appendChild(box);
+  return div;
 }
 
-let bindDone = false;
-let selIndex = null;
+function buildCharts(RD) {
+  const area = document.getElementById("chart-area");
+  area.innerHTML = "";
+  CURVE_DIVS = [];
+  let n = 0;
 
-function highlight(idx) {                    // cross-highlight: charts <-> detail table
-  const rows = document.querySelectorAll("#points-body tr");
-  rows.forEach(function (r) { r.classList.toggle("sel", r.dataset.index === String(idx)); });
-  const bar = document.getElementById("info-bar");
-  const p = ROUND_DATA.points.find(function (q) { return String(q.index) === String(idx); });
-  if (p) {
-    bar.style.display = "block";
-    bar.textContent = "point " + p.index + " | " + JSON.stringify(p.params) +
-      " | " + JSON.stringify(p.metrics);
-  } else { bar.style.display = "none"; }
-  selIndex = idx;
-}
-
-function resetAll() { highlight(null); }
-
-function bind(RD) {                          // hard rule: rebind after newPlot; el.on only
-  RD.metric_names.forEach(function (mk, mi) {
-    const el = document.getElementById("chart-" + mi);
-    el.on("plotly_click", function (evt) {
-      if (evt.points && evt.points[0]) { highlight(evt.points[0].x); }
+  // scalar metric charts: metric vs point index, traces = group values (legend:
+  // groups are not parameter combinations, so the table swatches cannot map them)
+  const byGroup = RD.group_by && RD.group_values && RD.group_values.length > 1;
+  for (let mi = 0; mi < METRIC_KEYS.length; mi++) {
+    const mk = METRIC_KEYS[mi];
+    const div = newChartBox("chart-metric-" + mi);
+    const traces = [];
+    if (byGroup) {
+      RD.group_values.forEach(function (gv, gi) {
+        const pts = PTS.filter(function (p) { return String(p.params[RD.group_by]) === String(gv); });
+        traces.push({
+          x: pts.map(function (p) { return p.index; }),
+          y: pts.map(function (p) { return (p.metrics && typeof p.metrics[mk] === "number") ? p.metrics[mk] : null; }),
+          mode: "lines+markers", name: RD.group_by + "=" + show(gv),
+          line: { width: 2, color: hsl(gi, RD.group_values.length) }, marker: { size: 7, opacity: 0.3, color: hsl(gi, RD.group_values.length) },
+          connectgaps: false, cliponaxis: false,
+          hovertemplate: "%{fullData.name}<br>point %{x}<br>" + esc(mk) + ": %{y:.4g}<extra></extra>",
+        });
+      });
+    } else {
+      traces.push({
+        x: PTS.map(function (p) { return p.index; }),
+        y: PTS.map(function (p) { return (p.metrics && typeof p.metrics[mk] === "number") ? p.metrics[mk] : null; }),
+        mode: "lines+markers", name: mk,
+        line: { width: 2, color: "hsl(210,65%,45%)" }, marker: { size: 7, opacity: 0.3, color: "hsl(210,65%,45%)" },
+        connectgaps: false, cliponaxis: false,
+        hovertemplate: "%{fullData.name}<br>point %{x}: %{y:.4g}<extra></extra>",
+      });
+    }
+    const layout = chartLayout(mk, "sweep point index", byGroup);
+    layout.xaxis.dtick = 1;
+    Plotly.newPlot(div, traces, layout, { displayModeBar: false });
+    const el = div;
+    el.on("plotly_click", function (evt) {                       // index-axis charts: x IS the point index
+      clickFired = true;
+      if (evt.points && evt.points[0]) { toggle(String(evt.points[0].x)); }
     });
     el.on("plotly_deselect", resetAll);
-  });
-  if (!bindDone) {                           // hard rule: native DOM handlers bound exactly once
-    document.getElementById("info-bar").onclick = resetAll;
-    document.getElementById("legend-grid").addEventListener("click", function (e) {
-      const t = e.target.closest(".legend-item");
-      if (!t) return;
-      const v = t.dataset.value;
-      const p = ROUND_DATA.points.find(function (q) { return String(q.params[ROUND_DATA.group_by]) === v; });
-      if (p) highlight(selIndex === p.index ? null : p.index);
-    });
-    bindDone = true;
+    addBlankDeselect(el);
+    n++;
   }
+
+  // sweep curves (spectre_parse psf data): ONE TRACE PER PARAMETER COMBINATION,
+  // legend-less — the table swatches carry the color mapping (AttST0p5dB style)
+  if (CURVE && CURVE.points && CURVE.points.length) {
+    if (CURVE.note) {
+      const note = document.createElement("p");
+      note.className = "filter-line"; note.textContent = CURVE.note;
+      area.appendChild(note);
+    }
+    CURVE.signals.forEach(function (sk, si) {
+      const div = newChartBox("chart-curve-" + si);
+      const traces = CURVE.points.map(function (p, pi) {
+        return {
+          x: p.x, y: (p.y && p.y[sk.name]) ? p.y[sk.name] : [],
+          mode: "lines+markers", name: p.label,
+          line: { width: 2, color: hsl(pi, CURVE.points.length) },
+          marker: { size: 7, opacity: 0.3, color: hsl(pi, CURVE.points.length), line: { width: 0 } },
+          legendgroup: String(p.index), cliponaxis: false, connectgaps: false,
+          hovertemplate: esc(p.label) + "<br>" + esc(CURVE.x_signal) + ": %{x:.4g}<br>" + esc(sk.name) + (sk.dB ? " (dB)" : "") + ": %{y:.4g}<extra></extra>",
+        };
+      });
+      Plotly.newPlot(div, traces, chartLayout(sk.name + (sk.dB ? " (dB)" : ""), CURVE.x_signal, false), { displayModeBar: false });
+      CURVE_DIVS.push(div.id);
+      div.on("plotly_click", function (evt) {
+        clickFired = true;
+        if (evt.points && evt.points[0]) { toggle(String(CURVE.points[evt.points[0].pointNumber].index)); }
+      });
+      div.on("plotly_deselect", resetAll);
+      addBlankDeselect(div);
+      n++;
+    });
+  }
+  if (!n) area.innerHTML = '<p class="hint">No metric or curve data in this batch.</p>';
 }
+
+// blank-area click deselects (AttST0p5dB pattern): a plotly_click sets the
+// flag first; a bare click that follows within the timeout resets
+function addBlankDeselect(el) {
+  el.addEventListener("click", function () {
+    setTimeout(function () { if (!clickFired && sel !== null) resetAll(); clickFired = false; }, 10);
+  });
+}
+
+function buildTable(RD) {
+  const COLS = [{ key: "index", label: "#", kind: "num" }]
+    .concat(PARAM_KEYS.map(function (k) { return { key: k, label: k, kind: "param" }; }))
+    .concat(METRIC_KEYS.map(function (k) { return { key: k, label: k, kind: "metric" }; }))
+    .concat([{ key: "status", label: "status", kind: "txt" }, { key: "elapsed_sec", label: "elapsed s", kind: "num" }]);
+
+  function sortArrow(ci) { return sortCol !== ci ? "" : (sortAsc ? " ▴" : " ▾"); }
+  function buildHead() {
+    let h = "<tr><th></th>";
+    COLS.forEach(function (c, ci) {
+      h += '<th class="sortable" data-col="' + ci + '">' + esc(c.label) + '<span class="sort-arrow">' + sortArrow(ci) + '</span></th>';
+    });
+    document.getElementById("points-head").innerHTML = h + "</tr>";
+    document.querySelectorAll("#points-head th.sortable").forEach(function (th) {
+      th.addEventListener("click", function () { sortTable(parseInt(this.dataset.col, 10)); });
+    });
+  }
+  function cellVal(p, c) {
+    if (c.kind === "metric") return { txt: fmtVal(p.metrics ? p.metrics[c.key] : null), cls: "num" };
+    if (c.kind === "num") return { txt: num(p[c.key], 2), cls: "num" };
+    if (c.key === "index") return { txt: esc(String(p.index)), cls: "num" };
+    return { txt: esc(show(p[c.key])), cls: "" };
+  }
+  function buildRows(list) {
+    let t = "";
+    list.forEach(function (p) {
+      const gi = PTS.indexOf(p);
+      t += '<tr data-index="' + esc(String(p.index)) + '" class="' + ((p.status === "success" || p.status === "partial") ? "ok" : "bad") + '">';
+      t += '<td><span class="swatch" style="background:' + hsl(gi) + '"></span></td>';
+      COLS.forEach(function (c) { const cv = cellVal(p, c); t += '<td class="' + cv.cls + '">' + cv.txt + "</td>"; });
+      t += "</tr>";
+    });
+    document.getElementById("points-body").innerHTML = t;
+    document.querySelectorAll("#points-body tr").forEach(function (tr) {
+      tr.addEventListener("click", function () { toggle(this.dataset.index); });
+    });
+    if (sel !== null) {
+      const r = document.querySelector('#points-body tr[data-index="' + sel + '"]');
+      if (r) r.classList.add("selected");
+    }
+  }
+  function sortTable(ci) {
+    if (sortCol === ci) sortAsc = !sortAsc; else { sortCol = ci; sortAsc = true; }
+    document.querySelectorAll("#points-head th.sortable").forEach(function (th, i) {
+      th.classList.toggle("sort-active", i === ci);
+    });
+    buildHead();
+    const c = COLS[ci];
+    const sorted = PTS.slice().sort(function (a, b) {
+      const va = cellVal(a, c).txt, vb = cellVal(b, c).txt;
+      const na = parseFloat(va), nb = parseFloat(vb);
+      if (isFinite(na) && isFinite(nb) && va !== "" && vb !== "") return sortAsc ? na - nb : nb - na;
+      return sortAsc ? String(va).localeCompare(String(vb)) : String(vb).localeCompare(String(va));
+    });
+    buildRows(sorted);
+  }
+  buildHead();
+  buildRows(PTS);
+}
+
+function toggle(idx) { sel !== null && String(sel) === String(idx) ? resetAll() : highlight(idx); }
+
+function highlight(idx) {                    // cross-highlight: table row + curve dimming + info bar
+  document.querySelectorAll("#points-body .selected").forEach(function (r) { r.classList.remove("selected"); });
+  sel = idx;
+  const p = PTS.find(function (q) { return String(q.index) === String(idx); });
+  const bar = document.getElementById("info-bar");
+  if (p) {
+    let txt = "<b>" + esc(p.label) + "</b>";
+    const ms = p.metrics ? Object.keys(p.metrics).map(function (k) { return esc(k) + " = " + fmtVal(p.metrics[k]); }) : [];
+    if (ms.length) txt += " → " + ms.join(" | ");
+    bar.innerHTML = txt;
+  }
+  CURVE_DIVS.forEach(function (id) {         // selected curve width 4 / others 1 @ opacity 0.08
+    const el = document.getElementById(id);
+    if (!el || !el.data) return;
+    const w = [], o = [];
+    el.data.forEach(function (tr) {
+      const m = p && tr.name === p.label;
+      w.push(m ? 4 : 1); o.push(m ? 1 : 0.08);
+    });
+    Plotly.restyle(id, { "line.width": w, opacity: o });
+  });
+  const row = document.querySelector('#points-body tr[data-index="' + idx + '"]');
+  if (row) row.classList.add("selected");
+}
+
+function resetAll() {
+  sel = null;
+  document.getElementById("info-bar").textContent = "Click a curve or table row to view details";
+  CURVE_DIVS.forEach(function (id) {
+    if (document.getElementById(id)) Plotly.restyle(id, { "line.width": 2, opacity: 1 });
+  });
+  document.querySelectorAll("#points-body .selected").forEach(function (r) { r.classList.remove("selected"); });
+}
+
+document.getElementById("info-bar").onclick = resetAll;
 
 populateSelect();
 if (MANIFEST.rounds.length) { loadRound(MANIFEST.rounds[0].file); }
@@ -856,7 +941,6 @@ function genSweepReport(projectDir, opts = {}) {
     .replaceAll('__NOW__', nowStamp)
     .replaceAll('__PDK__', htmlEscape(pdkName || 'n/a'))
     .replaceAll('__SIMULATOR__', htmlEscape(simulatorName || 'n/a'))
-  html += BODY_TOP
   html += FOOT_JS
     .replaceAll('__CASCADE__', htmlEscape(projectName))
     .replaceAll('__ROUNDS__', roundsJs)

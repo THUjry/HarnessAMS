@@ -261,7 +261,8 @@ test('sim_analysis report: Sim* run dirs join the batch dropdown; psf curves add
     assert.ok(Math.abs(rd.curves.points[0].y.s21[0] - want) < 1e-9)
 
     const html = await readFile(res.report_path, 'utf8')
-    assert.match(html, /2b\. Sweep curves/)
+    assert.match(html, /All Parameter Combinations/)
+    assert.match(html, /chart-curve-/)  // curve charts + swatch table (AttST0p5dB-style redesign)
     for (const f of ['Sim0_20260805_batch1.js', 'Sim0_20260805_batch2.js', 'Sim1_20260806_batch1.js']) {
       await readFile(path.join(dataDir, f)) // throws if a discovered batch is missing
       assert.match(html, new RegExp(f.replace(/\./g, '\.')))
