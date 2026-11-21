@@ -37,6 +37,7 @@ test('agentsmd: a fresh workspace gets the empty flat table + pointer + first-fi
     assert.ok(md1.includes('  last_selfcheck_overall: null'))
     assert.ok(md1.includes('  run_mode: null'), 'unmeasured fields are the YAML null literal in the template')
     assert.ok(!md1.includes('machines:'), 'no machines section anymore (registry facts stay out)')
+    assert.ok(!md1.includes('Self-check workflow'), 'the first-fill template (no settings yet) renders no workflow section')
 
     // a later call never rewrites — an agent-filled table survives
     await writeFile(agentsMdPath(ws), md1.replace('  run_mode: null', '  run_mode: "agent-filled"'), 'utf8')
@@ -72,7 +73,28 @@ test('agentsmd: values sync fills measured flat facts, keeps the pointer, REMOVE
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
     assert.ok(!md.includes('machines:'), 'machines section retired')
+    assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre)'), 'the values sync renders the settings-matched workflow branch')
+    assert.ok(md.includes('ok-via-fallback'), 'the LSF branch carries the fallback rule')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block after the sync')
+  } finally { await rm(ws, { recursive: true, force: true }) }
+})
+
+test('agentsmd: re-syncing under different settings switches the workflow branch without residue', async () => {
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-workflow-'))
+  try {
+    await ensureAgentsMdTemplate(ws)
+    const remoteLsf = { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+      scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
+    const localSpectre = { run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
+      scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
+    await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: remoteLsf })
+    let md = await readFile(agentsMdPath(ws), 'utf8')
+    assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre)'))
+    await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: localSpectre })
+    md = await readFile(agentsMdPath(ws), 'utf8')
+    assert.ok(md.includes('### Self-check workflow (local / spectre)'), 'branch switched to the saved settings')
+    assert.ok(!md.includes('LSF'), 'old branch fully replaced (uppercase LSF only lives in the workflow text)')
+    assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
@@ -156,6 +178,7 @@ test('agentsmd route+writers: .harnessams creation lays the template; /api/tool 
     assert.ok(!md2.includes(INSTRUCTION))
     assert.ok(md2.includes('  run_mode: "remote"'), 'settings snapshot comes from workspace_config.json')
     assert.ok(md2.includes('  scheduler: "direct"'), 'the riding settings landed before the sync')
+    assert.ok(md2.includes('### Self-check workflow (remote / direct / spectre)'), 'save_agentsmd renders the workflow for the riding settings')
 
     // a second POST keeps exactly one block
     await callPost(handler, base + '/tool', { sessionId: 's1', action: 'save_agentsmd' })

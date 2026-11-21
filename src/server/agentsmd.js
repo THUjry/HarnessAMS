@@ -12,6 +12,9 @@
 //     buttons and the self-check finalize both land there) writes the same
 //     block with plugin-measured values; that rewrite carries no instruction
 //     line, so a stale first-fill prompt is removed with it;
+//   - values builds also render the self-check WORKFLOW branch for the saved
+//     settings (selfcheckWorkflow.js), so the block documents how this
+//     workspace runs; the first-fill template has no settings and renders none;
 //   - plugin writes are external writes (no watcher): the block enters context
 //     on the next session or after the next first-party fs call, as an
 //     appended instruction delta — prefix cache intact.
@@ -23,6 +26,7 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { localEnvFacts } from './checks.js'
+import { workflowSection } from './selfcheckWorkflow.js'
 
 const BEGIN = '<!-- hams-config:begin (HarnessAMS plugin-managed block; the harnessams_selfcheck tool overwrites it — keep edits outside the markers) -->'
 const END = '<!-- hams-config:end -->'
@@ -30,7 +34,8 @@ const HEADER = '## Project Config (HarnessAMS)'
 const POINTER = 'Project state lives in `.harnessams/`: workspace_config.json (workspace env + run settings incl. remote_root), '
   + 'sessions.json (per-session display/reports/confirmed check params), check_params.json (project check-param fallback), '
   + 'selfcheck/ (run records; artifacts are cleaned after runs — only selfcheck_run.json persists). '
-  + 'The yaml below is the plugin-maintained mirror of workspace_config.json plus measured facts.'
+  + 'The yaml below is the plugin-maintained mirror of workspace_config.json plus measured facts; '
+  + 'the self-check workflow section in between is rendered from the same settings.'
 const INSTRUCTION = 'Before starting any task in this workspace: run the project checks (self-check + local environment), fill the table below with MEASURED values, then proceed with the task. Skip only if the user explicitly asks to skip the self-check.'
 
 export function agentsMdPath(workspacePath) {
@@ -80,6 +85,9 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
 function buildSection(facts, { withInstruction = false } = {}) {
   const parts = [BEGIN, HEADER, '', POINTER]
   if (withInstruction) parts.push('', INSTRUCTION)
+  // values builds carry settings, so they also carry the workflow branch that
+  // matches them; the first-fill template (no settings) renders no workflow
+  if (facts.settings) parts.push('', workflowSection(facts.settings))
   parts.push('', '```yaml', yamlLines(facts).join('\n'), '```', END)
   return parts.join('\n')
 }
