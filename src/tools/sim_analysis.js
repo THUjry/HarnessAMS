@@ -258,7 +258,7 @@ const HEAD = `<!DOCTYPE html>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #f9f9f7; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; padding: 36px; display: flex; flex-direction: column; align-items: center; }
-.container { max-width: 1200px; width: 100%; }
+.container { max-width: none; width: 100%; }   /* full-width: the selector stays left-anchored on wide screens (user 2026-11-21), the sidebar iframe is unaffected */
 h1 { font-size: 32px; font-weight: 600; color: #0b0b0b; margin: 0 0 4px 0; }
 .filter-line { font-size: 17px; color: #898781; margin: 0 0 6px 0; }
 .hint { font-size: 18px; color: #898781; margin: 0 0 20px 0; }
