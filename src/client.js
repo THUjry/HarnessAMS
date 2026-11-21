@@ -808,13 +808,18 @@ window.__ModuleLoader__.load({
     // (cross-batch aggregate). While the tool call is in flight (active) poll every
     // 3 s with the visibility pause/resume discipline shared by the sidebar polls;
     // settled cards fetch once on mount (one fetch per scroll-back remount is fine).
-    function useSimProgress({ runDir, projectDir, active }) {
+    function useSimProgress({ runDir, projectDir, cwd, active }) {
       const [data, setData] = useState({ prog: null, agg: null })
       useEffect(() => {
-        // API already ends with /api — the endpoints hang right off it.
-        const progUrl = runDir ? API + '/progress?runDir=' + encodeURIComponent(runDir) : null
-        const aggUrl = projectDir ? API + '/progress-summary?projectDir=' + encodeURIComponent(projectDir)
-          : runDir ? API + '/progress-summary?runDir=' + encodeURIComponent(runDir) : null
+        // API already ends with /api — the endpoints hang right off it. cwd is
+        // the workspace-fence key (server: cwd must resolve to a registered
+        // workspace and the paths must stay inside it, review D-3); without it
+        // the endpoints answer 400, so skip the fetch outright.
+        if (!cwd) return
+        const enc = encodeURIComponent
+        const progUrl = runDir ? API + '/progress?runDir=' + enc(runDir) + '&cwd=' + enc(cwd) : null
+        const aggUrl = projectDir ? API + '/progress-summary?projectDir=' + enc(projectDir) + '&cwd=' + enc(cwd)
+          : runDir ? API + '/progress-summary?runDir=' + enc(runDir) + '&cwd=' + enc(cwd) : null
         if (!progUrl && !aggUrl) return
         let alive = true
         let last = ''
@@ -840,7 +845,7 @@ window.__ModuleLoader__.load({
           clearInterval(timer)
           document.removeEventListener('visibilitychange', onVis)
         }
-      }, [runDir, projectDir, active])
+      }, [runDir, projectDir, cwd, active])
       return data
     }
 
@@ -1086,7 +1091,7 @@ window.__ModuleLoader__.load({
       const args = cardArgsOf(props)
       const result = phase === 'result' && props.block ? cardResultOf(props) : null
       const roots = cardRoots(toolName, args, result ? result.data : null)
-      const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir, active: phase === 'start' })
+      const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir, cwd: props.cwd, active: phase === 'start' })
       if (!on) {
         return h('div', { className: 'hams-tc' },
           h('div', { className: 'hams-tc-head' },

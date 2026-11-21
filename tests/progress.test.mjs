@@ -11,8 +11,8 @@ import path from 'node:path'
 import { registerRoutes, callGet } from './helpers.mjs'
 import { projectRootOf, readRunProgress, summarizeProject } from '../src/server/progress.js'
 
-async function makeHandler() {
-  const handler = await registerRoutes({ workspaceRegistry: { list: () => [] } })
+async function makeHandler(registryList = []) {
+  const handler = await registerRoutes({ workspaceRegistry: { list: () => registryList } })
   return (route) => callGet(handler, 'http://127.0.0.1/harnessams' + route)
 }
 
@@ -133,8 +133,9 @@ test('progress: summarizeProject aggregates sweep/Round*/top with totals', async
   }
 })
 
-test('progress: GET endpoints answer single-run and cross-batch payloads', async () => {
+test('progress: GET endpoints fence by cwd→workspace then answer payloads', async () => {
   const proj = await mkdtemp(path.join(tmpdir(), 'hams-prog-api-'))
+  const stray = await mkdtemp(path.join(tmpdir(), 'hams-prog-stray-'))
   try {
     const top1 = path.join(proj, 'sweep', 'Round1', 'top')
     await mkdir(top1, { recursive: true })
@@ -146,10 +147,11 @@ test('progress: GET endpoints answer single-run and cross-batch payloads', async
     await writeFile(path.join(top2, 'sweep_config.json'),
       JSON.stringify({ parameters: { a: [1, 2, 3, 4] } }))
 
-    const call = await makeHandler()
+    const call = await makeHandler([{ id: 'w1', path: proj, sessionIds: ['s1'], title: 'p' }])
     const q = (v) => encodeURIComponent(v)
+    const cwdq = '&cwd=' + q(proj)
 
-    const one = await call('/api/progress?runDir=' + q(top1))
+    const one = await call('/api/progress?runDir=' + q(top1) + cwdq)
     assert.equal(one.code, 200)
     assert.equal(one.body.ok, true)
     assert.equal(one.body.source, 'progress')
@@ -157,30 +159,41 @@ test('progress: GET endpoints answer single-run and cross-batch payloads', async
     assert.equal(one.body.pending, 5)
     assert.equal(one.body.simulator, 'spectre')
 
-    const missing = await call('/api/progress?runDir=' + q('/no/such/dir'))
+    // inside the workspace but not present → local:false (client omits the block)
+    const missing = await call('/api/progress?runDir=' + q(path.join(proj, 'no', 'such')) + cwdq)
     assert.equal(missing.code, 200)
     assert.equal(missing.body.ok, true)
     assert.equal(missing.body.local, false)
 
-    const aggByRun = await call('/api/progress-summary?runDir=' + q(top2))
+    const aggByRun = await call('/api/progress-summary?runDir=' + q(top2) + cwdq)
     assert.equal(aggByRun.code, 200)
     assert.equal(aggByRun.body.local, true)
     assert.equal(aggByRun.body.project_dir, path.resolve(proj).replace(/\\/g, '/')) // derived root is slash-normalized
     assert.equal(aggByRun.body.totals.batches, 2)
     assert.equal(aggByRun.body.totals.sims_pending, 9) // Round1 8-3 + Round2 4
 
-    const aggByProject = await call('/api/progress-summary?projectDir=' + q(proj))
+    const aggByProject = await call('/api/progress-summary?projectDir=' + q(proj) + cwdq)
     assert.equal(aggByProject.code, 200)
     assert.equal(aggByProject.body.totals.batches, 2)
 
-    // POSIX remote-shaped path: derives but is not local → local:false
-    const remoteish = await call('/api/progress-summary?runDir=' + q('/home/u/proj/sweep/Round1/top'))
-    assert.equal(remoteish.code, 200)
-    assert.equal(remoteish.body.local, false)
+    // fence (review D-3): missing cwd → 400
+    assert.equal((await call('/api/progress?runDir=' + q(top1))).code, 400)
+    // fence: cwd outside every registered workspace → 400
+    assert.equal((await call('/api/progress?runDir=' + q(top1) + '&cwd=' + q(stray))).code, 400)
+    // fence: registered cwd but the requested path escapes the workspace → 403
+    assert.equal((await call('/api/progress?runDir=' + q(stray) + cwdq)).code, 403)
+    assert.equal((await call('/api/progress-summary?projectDir=' + q(stray) + cwdq)).code, 403)
 
-    assert.equal((await call('/api/progress')).code, 400)
-    assert.equal((await call('/api/progress-summary')).code, 400)
+    // POSIX remote-shaped path: outside the workspace root by construction →
+    // the fence 403s before the payload ladder (remote batches poll post-fetch
+    // local paths, so remote-shaped strings no longer reach local:false)
+    const remoteish = await call('/api/progress-summary?runDir=' + q('/home/u/proj/sweep/Round1/top') + cwdq)
+    assert.equal(remoteish.code, 403)
+
+    assert.equal((await call('/api/progress?cwd=' + q(proj))).code, 400)
+    assert.equal((await call('/api/progress-summary?cwd=' + q(proj))).code, 400)
   } finally {
     await rm(proj, { recursive: true, force: true })
+    await rm(stray, { recursive: true, force: true })
   }
 })

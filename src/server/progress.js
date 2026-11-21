@@ -3,8 +3,11 @@
 // (/api/progress) and the cross-batch project summary (/api/progress-summary).
 // Pure file reads — the sweep worker rewrites sweep_progress.json every ~30 s
 // and drops one NN/point_meta.json per finished point; nothing here starts or
-// stops a simulation and nothing is session-scoped (the run dir comes from the
-// tool arguments the card already shows).
+// stops a simulation. Paths are fenced (progressFence below, review D-3
+// 2026-11-21): the card passes its session cwd — the toolview slot owner has
+// no sessionId (verified in the rc.5 host client), so cwd is the session
+// identity — which must resolve to a registered workspace, and every
+// caller-supplied path must stay inside that workspace.
 //
 // Paths may be remote-shaped POSIX strings (a mirror path only syncs progress
 // files after batch_fetch); anything not present on this host answers
@@ -145,4 +148,41 @@ export function progressSummaryPayload({ runDir, projectDir }) {
       totals: { batches: 0, batches_done: 0, batches_unplanned: 0, sims_total: 0, sims_completed: 0, sims_failed: 0, sims_pending: 0 } }
   }
   return summarizeProject(root)
+}
+
+// Workspace fence for the two progress endpoints (review D-3, 2026-11-21).
+// Anchor: the toolview slot owner carries the session cwd (not a sessionId —
+// host client verified: owner = {callId, toolName, ...call, openFile, cwd,
+// home, ...}), and the DSH workspace registry lists every legitimate project
+// root. cwd must map to one of them; runDir/projectDir must then stay inside
+// that root. Remote-shaped POSIX strings fail containment on a Windows host by
+// construction (path.resolve parks them under the current drive, not the
+// workspace) — remote batches poll the local fetched paths after batch_fetch.
+export function progressFence(registry, params) {
+  const cwd = String(params.get('cwd') ?? '').trim()
+  if (!cwd) return { code: 400, error: 'cwd is required (the session working directory)' }
+  const ws = workspaceForCwd(registry, cwd)
+  if (!ws) return { code: 400, error: 'cwd is not a registered workspace' }
+  const runDir = String(params.get('runDir') ?? '').trim()
+  const projectDir = String(params.get('projectDir') ?? '').trim()
+  if (!runDir && !projectDir) return { code: 400, error: 'runDir or projectDir is required' }
+  if (runDir && !insideRoot(ws.path, runDir)) return { code: 403, error: 'runDir escapes the workspace' }
+  if (projectDir && !insideRoot(ws.path, projectDir)) return { code: 403, error: 'projectDir escapes the workspace' }
+  return { runDir: runDir || null, projectDir: projectDir || null }
+}
+
+// cwd → workspace: the session cwd is the workspace root (or inside it).
+function workspaceForCwd(registry, cwd) {
+  const list = registry && typeof registry.list === 'function' ? registry.list() : []
+  for (const ws of list) {
+    if (typeof ws?.path === 'string' && ws.path && insideRoot(ws.path, cwd)) return ws
+  }
+  return null
+}
+
+// Lexical containment (no realpath — the candidates may not exist yet); the
+// relative() form absorbs separator and Windows drive-letter case differences.
+function insideRoot(root, target) {
+  const rel = path.relative(path.resolve(String(root)), path.resolve(String(target)))
+  return rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel))
 }

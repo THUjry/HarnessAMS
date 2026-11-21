@@ -37,7 +37,7 @@ import { readCheckParams } from './server/checkparams.js'
 import { remoteBrowse } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
-import { progressPayload, progressSummaryPayload } from './server/progress.js'
+import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
 import { registerTools } from './tool.js'
 import { batchTools } from './tools/batch.js'
 import { analysisTools } from './tools/sim_analysis.js'
@@ -282,21 +282,25 @@ async function handle(req, res, ctx) {
   }
   if (route === '/api/progress') {
     // Session tool cards (tool.call.toolview): live single-run progress while a
-    // local sweep blocks its tool call. Read-only; run dir comes from the tool
-    // arguments the card already shows, so no session mapping is involved.
-    const runDir = url.searchParams.get('runDir')
-    if (!runDir) { json(400, { error: 'runDir is required' }); return }
-    json(200, { ok: true, ...progressPayload(runDir) })
+    // local sweep blocks its tool call. Read-only and workspace-fenced (D-3):
+    // the card passes its cwd (the slot's session identity — the toolview owner
+    // has no sessionId) plus the run dir from the tool arguments it already
+    // shows; progressFence resolves the cwd to a registered workspace and keeps
+    // the run dir inside it.
+    const fence = progressFence(ctx.workspaceRegistry, url.searchParams)
+    if (fence.error) { json(fence.code, { error: fence.error }); return }
+    if (!fence.runDir) { json(400, { error: 'runDir is required' }); return }
+    json(200, { ok: true, ...progressPayload(fence.runDir) })
     return
   }
   if (route === '/api/progress-summary') {
     // Cross-batch aggregate over <project>/sweep/Round*/top ("3/5 batches done,
-    // 120/360 sims, 240 pending"). The project root is derived from a run dir or
-    // passed explicitly; local:false lets the client omit the block quietly.
-    const runDir = url.searchParams.get('runDir')
-    const projectDir = url.searchParams.get('projectDir')
-    if (!runDir && !projectDir) { json(400, { error: 'runDir or projectDir is required' }); return }
-    json(200, { ok: true, ...progressSummaryPayload({ runDir, projectDir }) })
+    // 120/360 sims, 240 pending"). Same workspace fence; the project root is
+    // derived from a run dir or passed explicitly; local:false lets the client
+    // omit the block quietly.
+    const fence = progressFence(ctx.workspaceRegistry, url.searchParams)
+    if (fence.error) { json(fence.code, { error: fence.error }); return }
+    json(200, { ok: true, ...progressSummaryPayload({ runDir: fence.runDir, projectDir: fence.projectDir }) })
     return
   }
   if (route.startsWith('/dash/')) {
