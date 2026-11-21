@@ -2,7 +2,7 @@
   "meta": {
     "process": "sky130 (open PDK)",
     "device": "sky130_fd_pr__nfet_01v8_lvt",
-    "source": "OpenPDK sky130_spectre Pi8dB worked design (tb/Pi8dB_ng.sp header + results/COMPARE_Pi8dB.md, 2026-11-19, ngspice-47 vs Spectre 21.1, tt 27C)",
+    "source": "sky130-spectre-models repo Pi8dB worked design (3-testbench/spectre + results/COMPARE_Pi8dB.md; ngspice-47 vs Spectre 21.1, tt 27C)",
     "notes": [
       "ron_w_ohm_um is the on-resistance x total-width product: two independent sizings from the verified Pi8dB cell both give 740 ohm*um (12 ohm @ w=61.7um, 17.1 ohm @ w=43.3um), so W_tot = ron_w/Ron_target.",
       "coff_w_ff_um is an ESTIMATE back-extracted from the Pi8dB Cp optimum (Cp = 40 fF compensating a w=43.3 um shunt switch, Cp ~= Coff): 40/43.3 = 0.92 fF/um. Re-characterize with a dedicated off-state Z run before relying on it for flatness prediction.",

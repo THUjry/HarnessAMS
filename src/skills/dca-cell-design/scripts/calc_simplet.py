@@ -3,15 +3,15 @@
 calc_simplet.py — SimpleT/shunt ATT design, direct Rpoly/Ron input (sky130)
 ============================================================================
 Shunt path: PORT0 → Rpoly → M0 → GND with IN-OUT shorted (0-ohm bridge).
-Design method (2026-11-21): the shunt-arm total comes from the ideal
-formula, then the switch Ron is a DIRECT input (--ron, suggested 1/3..1/5
-of R_shunt; default R_shunt/4); the resistive part is the remainder
-Rpoly = R_shunt - Ron. The legacy ZTC ratio method is retired — residual
-temperature drift is accepted and recorded, not compensated.
+Design method: the shunt-arm total comes from the ideal formula, then the
+switch Ron is a DIRECT input (--ron, suggested 1/3..1/5 of R_shunt; default
+R_shunt/4); the resistive part is the remainder Rpoly = R_shunt - Ron. The
+legacy ZTC ratio method is retired — residual temperature drift is accepted
+and recorded, not compensated.
 
-Geometry comes from the bundled sky130 data pack (data/sky130/): poly
-res_high_po (rsh effective incl. heads), switch sky130_fd_pr__nfet_01v8_lvt
-(ron_w product, l=0.15, Vgs=1.8), MIM cap (order-of-magnitude fF/um^2).
+Switch data comes from the bundled sky130_examples/nfet_switch.json
+(sky130_fd_pr__nfet_01v8_lvt ron_w product, l=0.15, Vgs=1.8). R/C are IDEAL
+elements — no resistor geometry is computed.
 
 Run: python calc_simplet.py <attn_db> [--ron <ohm>]
          [--data-dir <dir>] [--json <file>]
@@ -26,18 +26,14 @@ R0 = 50.0
 FREQS = [1, 5, 10, 15, 20, 25, 30, 35, 40]  # GHz, flatness estimate band
 
 DEFAULT_DATA_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'sky130'))
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'sky130_examples'))
 
 
 def load_pack(data_dir):
-    with open(os.path.join(data_dir, 'resistors.json'), encoding='utf-8') as f:
-        resistors = json.load(f)
     with open(os.path.join(data_dir, 'nfet_switch.json'), encoding='utf-8') as f:
         nfet = json.load(f)
     nfet['device'] = nfet['meta']['device']   # flattened for the sizing helpers
-    with open(os.path.join(data_dir, 'mimcap.json'), encoding='utf-8') as f:
-        mimcap = json.load(f)
-    return resistors, nfet, mimcap
+    return nfet
 
 
 def r_shunt_from_db(attn_db):
@@ -66,24 +62,6 @@ def ron_to_switch(ron_target, nfet):
             'coff_ff': round(coff_ff, 1) if coff_ff else None}
 
 
-def r_to_poly(target_r, resistors, device='res_high_po', w_grid=(0.69, 1.0, 1.41, 2.0, 3.0, 5.0, 8.0, 10.0, 20.0)):
-    """Poly geometry from the effective sheet resistance. R = rsh_eff*l/w."""
-    rsh = resistors[device]['recommended_rsh_effective_ohm_sq']
-    best = None
-    for w in w_grid:
-        l = target_r * w / rsh
-        if l < 0.5:            # below the PO-resistor minimum length
-            continue
-        if best is None or l < best[1]:
-            best = (w, l)
-    if best is None:
-        # fall back to the narrowest width and report the (sub-min) length
-        best = (w_grid[0], target_r * w_grid[0] / rsh)
-    w, l = best
-    return {'device': device, 'w_um': w, 'l_um': round(l, 2),
-            'r_ohm': round(rsh * l / w, 2), 'rsh_eff': rsh}
-
-
 def shunt_s21(r_poly, ron, cp_ff, coff_ff, f_ghz, on):
     """S21 of the shunt cell at one frequency (1-port shunt across a 50-ohm thru).
 
@@ -99,7 +77,7 @@ def shunt_s21(r_poly, ron, cp_ff, coff_ff, f_ghz, on):
 
 
 def design(attn_db, ron=None, data_dir=None):
-    resistors, nfet, mimcap = load_pack(data_dir or DEFAULT_DATA_DIR)
+    nfet = load_pack(data_dir or DEFAULT_DATA_DIR)
     r_shunt_target = r_shunt_from_db(attn_db)
 
     # --- direct input: arm total from the formula, Ron GIVEN ---
@@ -110,10 +88,9 @@ def design(attn_db, ron=None, data_dir=None):
     attn_ach = attn_from_r_shunt(r_shunt)
 
     m0 = ron_to_switch(ron, nfet)
-    rpoly_geo = r_to_poly(rpoly, resistors)
 
-    # Cp first estimate: ~ Coff of the shunt switch (the Pi8dB calibration had
-    # Cp* ~= Coff of the shunt device). Refined by the mandatory Cp scan.
+    # Cp first estimate: ~ Coff of the shunt switch (the verified 8 dB Pi
+    # calibration had Cp* ~= Coff of the shunt device). Refined by the scan.
     cp_ff = m0['coff_ff']
 
     print("=" * 60)
@@ -126,9 +103,8 @@ def design(attn_db, ron=None, data_dir=None):
     print(f"  Achieved attenuation: {attn_ach:.3f} dB  (residual {attn_ach - attn_db:+.3f} dB)")
     print(f"\n  M0 (shunt switch): {m0['device']} l={m0['l_um']} w={m0['w_um']} nf={m0['nf']}"
           f" (wf={m0['wf_um']} um), Ron={ron:.2f} ohm, Coff~{m0['coff_ff']} fF")
-    print(f"  Rpoly: {rpoly_geo['device']} w={rpoly_geo['w_um']} l={rpoly_geo['l_um']} um"
-          f" -> R={rpoly_geo['r_ohm']} ohm (rsh_eff={rpoly_geo['rsh_eff']:.0f})")
-    print(f"  Cp first estimate: {cp_ff:.0f} fF (scan in simulation — see design.md)")
+    print(f"  Rpoly: IDEAL resistor r={rpoly:.2f} ohm")
+    print(f"  Cp first estimate: {cp_ff:.0f} fF (scan in simulation)")
 
     if cp_ff and m0['coff_ff']:
         print(f"\n  {'f (GHz)':>8} {'att dB':>8}")
@@ -139,10 +115,11 @@ def design(attn_db, ron=None, data_dir=None):
     out = {
         'architecture': 'simplet', 'attn_target_db': attn_db,
         'attn_achieved_db': round(attn_ach, 4),
-        'Rpoly': rpoly_geo, 'M0': m0,
+        'Rpoly': {'r_ohm': round(rpoly, 2), 'element': 'ideal resistor'},
+        'M0': m0,
         'cp_first_estimate_ff': cp_ff,
         'method': 'arm total from the ideal formula + direct Ron input '
-                  '(1/3..1/5 guidance, ZTC retired), sky130 data pack',
+                  '(1/3..1/5 guidance, ZTC retired), sky130 switch data',
     }
     return out
 
@@ -154,7 +131,7 @@ if __name__ == '__main__':
                     help='direct input: shunt switch on-resistance [ohm] '
                          '(suggested 1/3..1/5 of R_shunt; default R_shunt/4)')
     ap.add_argument('--data-dir', default=None,
-                    help='sky130 data pack dir (default: bundled with the skill)')
+                    help='dir holding nfet_switch.json (default: the bundled sky130_examples)')
     ap.add_argument('--json', default=None, help='also write the design dict here')
     args = ap.parse_args()
     result = design(args.attn_db, args.ron, args.data_dir)

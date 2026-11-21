@@ -1,4 +1,4 @@
-// template_ST.scs — SimpleT (shunt) ATT cell, sky130 switch + IDEAL R/C (2026-11-21)
+// template_ST.scs — SimpleT (shunt) ATT cell, sky130 switch + IDEAL R/C
 // Default values = the 1 dB class from calc_simplet.py 1 (Rpoly 187.79 ohm,
 // Ron 17.10 ohm). Fill-in map from calc_simplet.py:
 //   Rp <- Rpoly (shunt resistor value)   M0 <- shunt switch (ron)
@@ -10,7 +10,7 @@
 // R/C are IDEAL elements by decision: analytic flatness predictions are
 // advisory — ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
 simulatorOptions options temp=@@temperature@@ reltol=2e-4
-include "models/sky130_fd_pr__nfet_01v8_lvt.scs" // <- adjust to the project's transcribed-library path
+include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model — in a real project point at the transcribed-library copy
 
 parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
 

@@ -1,4 +1,4 @@
-// Plugin-bundled skills (2026-11-21, the simulation-analysis wave): every
+// Plugin-bundled skills: every
 // <pkg>/skills/<name>/SKILL.md registers into the host skill registry
 // (ctx.skills) so the model-facing catalog lists it and the `skill` tool
 // loads the body on demand. Only name + description enter the catalog (two

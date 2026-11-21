@@ -17,7 +17,7 @@ scripts. SmartAnaSim ships the sweep worker (`spectre/spectre_sweep_worker.py`,
 uploaded automatically by `batch_submit` through the project's
 `workspace.sim_scripts_dir`) and the parsers; HarnessAMS ships the remote
 batch channel (`batch_*`) and the report/progress tools
-(`gen-sweep-report` / `sim_progress`). The D-012 file layout (2026-11-21): raw
+(`gen-sweep-report` / `sim_progress`). The D-012 file layout: raw
 simulation data lives under `RawResults/` (remote `<remote_root>/RawResults/Sim*`
 is the batch_submit default; a raw local fetch lands in `<project>/RawResults/`),
 processed compact results in `<project>/SimResults/`, report figures in `<project>/Figs/`,
@@ -52,7 +52,7 @@ instance line instead.
 ### Run directory naming: `Sim<N>_<YYYYMMDD>_batch<M>`
 
 Local and remote run directories follow `<base>/Sim<N>_<YYYYMMDD>_batch<M>/`
-(e.g. `Sim0_20260805_batch1`). `batch_submit` generates the next free name
+(e.g. `Sim0_<YYYYMMDD>_batch1`). `batch_submit` generates the next free name
 under `remote_root` automatically when `remote_dir` is omitted — same `Sim`
 index continues with `batch<M>+1` on the same day, a new day starts a new
 `Sim<N>+1`. Pass `remote_dir` explicitly only to reuse a specific location.
@@ -82,7 +82,7 @@ index continues with `batch<M>+1` on the same day, a new day starts a new
    S-parameter runs add `"*/netlist.scs.raw/sp.sp"` to `includes` so the raw
    curves come back too.
 5. **Analyze — REMOTE by default** — run the parsing/metrics ON the cluster
-   and pull back only compact results (the AsymATT put/exec/get triple):
+   and pull back only compact results (the put/exec/get triple):
    `ssh_upload` the analyzers (the SmartAnaSim scripts `spectre/spectre_psf_parse.py`
    + `snp/snp_common.py` under the project's `sim_scripts_dir`, both pure
    stdlib — upload them side by side; or your own self-contained script),

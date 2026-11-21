@@ -1,4 +1,4 @@
-// template_T.scs — T-type ATT cell, sky130 switches + IDEAL R/C (2026-11-21)
+// template_T.scs — T-type ATT cell, sky130 switches + IDEAL R/C
 // Default values = the 4 dB class from calc_t_type.py 4 (Rs 13.18 ohm/arm,
 // Rp 71.22 ohm, ron1 12 ohm, ron 17.07 ohm). Fill-in map from calc_t_type.py:
 //   Rs1/Rs2 <- Rs (per arm)        Rp <- shunt poly value
@@ -9,7 +9,7 @@
 // R/C are IDEAL elements by decision: analytic flatness predictions are
 // advisory — ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
 simulatorOptions options temp=@@temperature@@ reltol=2e-4
-include "models/sky130_fd_pr__nfet_01v8_lvt.scs" // <- adjust to the project's transcribed-library path
+include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model — in a real project point at the transcribed-library copy
 
 parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
 

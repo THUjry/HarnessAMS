@@ -5,11 +5,11 @@ calc_t_type.py — T-type ATT design, direct Rpoly/Ron input (sky130)
 Topology: balanced T-pad (Rs1/Rs2 series per arm, M1 bypass across IN-OUT,
 shunt arm Rp||Cp in series with M2 to GND).
 
-Design method (2026-11-21): the arm total comes from the ideal formulas,
-then the switch Ron is a DIRECT input (--ron, suggested 1/3..1/5 of the arm
-total; default arm/4); the resistive part is the remainder Rp = R3 - Ron.
-The bypass switch Ron1 is a direct input too (default 12-ohm class). No TC
-optimization; residual drift is accepted and recorded.
+Design method: the arm total comes from the ideal formulas, then the switch
+Ron is a DIRECT input (--ron, suggested 1/3..1/5 of the arm total; default
+arm/4); the resistive part is the remainder Rp = R3 - Ron. The bypass
+switch Ron1 is a direct input too (default: the verified 8 dB Pi 12-ohm
+class). No TC optimization; residual drift is accepted and recorded.
 
 Run: python calc_t_type.py <attn_db> [--ron1 <ohm>] [--ron <ohm>]
          [--data-dir <dir>] [--json <file>]
@@ -24,18 +24,14 @@ R0 = 50.0
 FREQS = [5, 10, 15, 20, 25, 30, 35, 40]  # GHz, flatness estimate band
 
 DEFAULT_DATA_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'data', 'sky130'))
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'sky130_examples'))
 
 
 def load_pack(data_dir):
-    with open(os.path.join(data_dir, 'resistors.json'), encoding='utf-8') as f:
-        resistors = json.load(f)
     with open(os.path.join(data_dir, 'nfet_switch.json'), encoding='utf-8') as f:
         nfet = json.load(f)
     nfet['device'] = nfet['meta']['device']   # flattened for the sizing helpers
-    with open(os.path.join(data_dir, 'pi8db_reference.json'), encoding='utf-8') as f:
-        pi8 = json.load(f)
-    return resistors, nfet, pi8
+    return nfet
 
 
 def ideal_t(attn_db):
@@ -73,24 +69,6 @@ def ron_to_switch(ron_target, nfet):
     return {'device': nfet['device'], 'l_um': nfet['l_um'], 'w_um': round(w_tot, 2),
             'nf': nf, 'wf_um': round(w_tot / nf, 2), 'ron_ohm': ron_target,
             'coff_ff': round(coff * w_tot, 1) if coff else None}
-
-
-def r_to_poly(target_r, resistors, device='res_high_po',
-              w_grid=(0.69, 1.0, 1.41, 2.0, 3.0, 5.0, 8.0, 10.0, 20.0)):
-    """Poly geometry from the effective sheet resistance. R = rsh_eff*l/w."""
-    rsh = resistors[device]['recommended_rsh_effective_ohm_sq']
-    best = None
-    for w in w_grid:
-        l = target_r * w / rsh
-        if l < 0.5:            # below the PO-resistor minimum length
-            continue
-        if best is None or l < best[1]:
-            best = (w, l)
-    if best is None:
-        best = (w_grid[0], target_r * w_grid[0] / rsh)
-    w, l = best
-    return {'device': device, 'w_um': w, 'l_um': round(l, 2),
-            'r_ohm': round(rsh * l / w, 2), 'rsh_eff': rsh}
 
 
 def solve(y, b):
@@ -159,11 +137,11 @@ def sweep(rs, rp, ron2, cp_ff, ron1, coff1_ff, coff2_ff):
 
 
 def design(attn_db, ron1=None, ron2=None, data_dir=None):
-    resistors, nfet, pi8 = load_pack(data_dir or DEFAULT_DATA_DIR)
+    nfet = load_pack(data_dir or DEFAULT_DATA_DIR)
 
     # --- direct inputs: arm total from the ideal formulas, Ron GIVEN ---
     if ron1 is None:
-        ron1 = pi8['design']['ron1_ohm']            # 12 ohm class (bypass switch)
+        ron1 = 12.0                                  # bypass-switch class (verified 8 dB Pi)
     a_prime, rs, r3 = design_aperture(attn_db, ron1)
     if ron2 is None:
         ron2 = r3 / 4.0                             # mid of the 1/3..1/5 guidance band
@@ -172,15 +150,13 @@ def design(attn_db, ron1=None, ron2=None, data_dir=None):
 
     m1 = ron_to_switch(ron1, nfet)
     m2 = ron_to_switch(ron2, nfet)
-    rs_geo = r_to_poly(rs, resistors)
-    rp_geo = r_to_poly(rpoly, resistors)
-    # Cp first estimate ~ Coff of the shunt switch (Pi8dB calibration).
+    # Cp first estimate ~ Coff of the shunt switch (verified 8 dB Pi calibration).
     cp_ff = m2['coff_ff']
 
     il_ref_dc = il_ref_t(ron1, rs)
 
     print("=" * 60)
-    print(f"  T-type ATT design (direct Rpoly/Ron, sky130) — {attn_db} dB")
+    print(f"  T-type ATT design (arm total + direct Ron, sky130) — {attn_db} dB")
     print("=" * 60)
     print(f"  Aperture B: A'={a_prime:.3f} dB, IL_ref={il_ref_dc:.4f} dB")
     print(f"  Rs (per arm) = {rs:.2f} ohm;  R3 (shunt total) = {r3:.2f} ohm ideal")
@@ -190,10 +166,8 @@ def design(attn_db, ron1=None, ron2=None, data_dir=None):
           f" -> Ron={ron1:.2f} ohm, Coff~{m1['coff_ff']} fF")
     print(f"  M2 (shunt):         {m2['device']} l={m2['l_um']} w={m2['w_um']} nf={m2['nf']}"
           f" -> Ron={ron2:.2f} ohm, Coff~{m2['coff_ff']} fF")
-    print(f"  Rs: {rs_geo['device']} w={rs_geo['w_um']} l={rs_geo['l_um']} um"
-          f" -> R={rs_geo['r_ohm']} ohm/arm (x2)")
-    print(f"  Rp: {rp_geo['device']} w={rp_geo['w_um']} l={rp_geo['l_um']} um"
-          f" -> R={rp_geo['r_ohm']} ohm")
+    print(f"  Rs: IDEAL resistor r={rs:.2f} ohm/arm (x2)")
+    print(f"  Rp: IDEAL resistor r={rpoly:.2f} ohm")
     print(f"  Cp first estimate: {cp_ff:.0f} fF (scan in simulation)")
 
     if cp_ff and m1['coff_ff'] and m2['coff_ff']:
@@ -209,10 +183,12 @@ def design(attn_db, ron1=None, ron2=None, data_dir=None):
     return {
         'architecture': 't-type', 'attn_target_db': attn_db,
         'a_prime_db': round(a_prime, 4), 'il_ref_db': round(il_ref_dc, 4),
-        'Rs': rs_geo, 'Rp': rp_geo, 'M1': m1, 'M2': m2,
+        'Rs': {'r_ohm': round(rs, 2), 'element': 'ideal resistor'},
+        'Rp': {'r_ohm': round(rpoly, 2), 'element': 'ideal resistor'},
+        'M1': m1, 'M2': m2,
         'cp_first_estimate_ff': cp_ff,
         'method': 'arm total from ideal formulas + direct Ron input (1/3..1/5 guidance), '
-                  'sky130 data pack',
+                  'sky130 switch data (sky130_examples/nfet_switch.json)',
     }
 
 
@@ -225,7 +201,7 @@ if __name__ == '__main__':
                     help='direct input: shunt switch Ron2 [ohm] '
                          '(suggested 1/3..1/5 of the shunt arm total; default arm/4)')
     ap.add_argument('--data-dir', default=None,
-                    help='sky130 data pack dir (default: bundled with the skill)')
+                    help='dir holding nfet_switch.json (default: the bundled sky130_examples)')
     ap.add_argument('--json', default=None, help='also write the design dict here')
     args = ap.parse_args()
     result = design(args.attn_db, args.ron1, args.ron, args.data_dir)
