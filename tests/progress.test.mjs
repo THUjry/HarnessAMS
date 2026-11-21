@@ -24,6 +24,10 @@ test('progress: projectRootOf derives the root from run-dir shapes', () => {
   assert.equal(projectRootOf('/proj/sweep/top'), null)
   assert.equal(projectRootOf(''), null)
   assert.equal(projectRootOf(null), null)
+  // D-012: <root>/RawResults/Sim* strips the RawResults base like sweep/
+  assert.equal(projectRootOf('/home/u/proj/RawResults/Sim0_20261121_batch1'), '/home/u/proj')
+  assert.equal(projectRootOf('D:\\w\\proj\\RawResults\\Sim3_20261121_batch2'), 'D:/w/proj')
+  assert.equal(projectRootOf('/home/u/proj/RawResults/run1'), null) // still needs the Sim shape
 })
 
 test('progress: readRunProgress walks the progress → worker_started → config ladder', async () => {
@@ -128,6 +132,42 @@ test('progress: summarizeProject aggregates sweep/Round*/top with totals', async
     } finally {
       await rm(empty, { recursive: true, force: true })
     }
+  } finally {
+    await rm(proj, { recursive: true, force: true })
+  }
+})
+
+test('progress: summarizeProject scans <project>/RawResults/Sim* (D-012 layout), deduped against the root', async () => {
+  const proj = await mkdtemp(path.join(tmpdir(), 'hams-rawres-'))
+  try {
+    const mkSim = async (base, name, files = {}) => {
+      const run = path.join(proj, base, name)
+      await mkdir(run, { recursive: true })
+      for (const [n, body] of Object.entries(files)) await writeFile(path.join(run, n), body)
+      return run
+    }
+    await mkSim('RawResults', 'Sim0_20261121_batch1', {
+      'sweep_progress.json': JSON.stringify({ status: 'completed', total_points: 8, completed: 8,
+        succeeded: 8, failed: 0, simulator: 'spectre' }),
+    })
+    await mkSim('RawResults', 'Sim0_20261121_batch2', {
+      'sweep_config.json': JSON.stringify({ parameters: { SW: [0, 1, 2] } }),
+    })
+    // same-named dir at the project root counts ONCE (seen-set dedup)
+    await mkSim('', 'Sim0_20261121_batch1', {
+      'sweep_progress.json': JSON.stringify({ status: 'running', total_points: 8, completed: 1,
+        succeeded: 1, failed: 0 }),
+    })
+    // a RawResults sibling that is not a Sim dir is noise
+    await mkdir(path.join(proj, 'RawResults', 'notes'), { recursive: true })
+
+    const s = summarizeProject(proj)
+    assert.equal(s.local, true)
+    assert.deepEqual(s.batches.map((b) => b.round), ['Sim0_20261121_batch1', 'Sim0_20261121_batch2'])
+    // dedup kept the FIRST sighting (the RawResults copy, completed)
+    assert.equal(s.batches[0].status, 'completed')
+    assert.equal(s.batches[1].total, 3)
+    assert.deepEqual(s.totals.batches, 2)
   } finally {
     await rm(proj, { recursive: true, force: true })
   }

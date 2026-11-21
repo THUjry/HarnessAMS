@@ -428,26 +428,28 @@ test('batch_submit auto-names the remote dir Sim<N>_<date>_batch<M> when remote_
       run_dir: makeRunDir(), machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {})
-    // Sim1 is the highest index but dated yesterday -> new index, batch1
+    // Sim1 is the highest index but dated yesterday -> new index, batch1; the
+    // auto-name lands under <remote_root>/RawResults (D-012 layout)
     const today = new Date()
     const pad = (n) => String(n).padStart(2, '0')
     const stamp = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`
-    assert.equal(out.remote_dir, `/home/op/sim/Sim2_${stamp}_batch1`, out.remote_dir)
+    assert.equal(out.remote_dir, `/home/op/sim/RawResults/Sim2_${stamp}_batch1`, out.remote_dir)
 
     const ctx2 = makeCtx({ ls: `Sim2_${stamp}_batch1\n` }) // same index, today -> batch+1
     const out2 = await tool(ctx2, 'batch_submit').execute({
       run_dir: makeRunDir(), machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {})
-    assert.equal(out2.remote_dir, `/home/op/sim/Sim2_${stamp}_batch2`, out2.remote_dir)
+    assert.equal(out2.remote_dir, `/home/op/sim/RawResults/Sim2_${stamp}_batch2`, out2.remote_dir)
 
-    // the auto-name path lists the remote root once (ls -1) before anything else
-    // (shq single-quotes the root path, so match the two parts separately)
+    // the auto-name path probes the remote root strictly, then lists the
+    // RawResults base tolerantly (shq single-quotes paths; match parts)
     const lsCall = ctx2.calls.find((c) => {
       const cmd = String(c.arguments?.command || '')
-      return cmd.includes('ls -1') && cmd.includes('/home/op/sim')
+      return cmd.includes('ls -1') && cmd.includes('/home/op/sim/RawResults')
     })
-    assert.ok(lsCall, 'remote root listing issued')
+    assert.ok(lsCall, 'RawResults listing issued')
+    assert.ok(String(lsCall.arguments?.command || '').includes('__NOROOT__'), 'root probe marker present')
   } finally {
     restoreEnv()
   }

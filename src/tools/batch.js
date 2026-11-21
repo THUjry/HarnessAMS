@@ -42,7 +42,8 @@ export function batchTools(ctx) {
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
         remote_dir: { type: 'string', description: 'Remote batch directory: absolute, or relative to remote_root. '
-          + 'Omit to auto-generate the next Sim<N>_<YYYYMMDD>_batch<M> directory under remote_root (the run-directory convention)' },
+          + 'Omit to auto-generate the next Sim<N>_<YYYYMMDD>_batch<M> directory under <remote_root>/RawResults '
+          + '(the D-012 raw-simulation-data convention; mirror the same name locally under <project>/RawResults)' },
         remote_root: { type: 'string', required: true, description: 'Absolute remote root that fences remote_dir — the project\'s workspace_config.json settings.remote_root (shown in the AGENTS.md config table)' },
         worker: { type: 'string', required: true, description: 'Worker script relative to the scripts root (e.g. spectre/spectre_sweep_worker.py) or an absolute remote path' },
         worker_args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed to the worker (e.g. --config sweep_config.json --max-parallel 8)' },
@@ -66,19 +67,23 @@ export function batchTools(ctx) {
         if (args.remote_dir) {
           remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)
         } else {
-          // Auto Sim<N>_<YYYYMMDD>_batch<M> under remote_root (2026-11-21):
-          // list the root once and pick the next free name per the
-          // convention; the point_meta probe below still guards collisions.
+          // Auto Sim<N>_<YYYYMMDD>_batch<M> under <remote_root>/RawResults
+          // (D-012, 2026-11-21): list once and pick the next free name per the
+          // convention. The root itself is probed strictly; a missing
+          // RawResults/ subdir is fine (empty list → Sim0_..._batch1, uploads
+          // create it); the point_meta probe below still guards collisions.
+          const rawBase = `${target.remoteRoot.replace(/\/+$/, '')}/RawResults`
           const ls = await execRemote(ctx, target.alias,
-            `ls -1 ${shq(target.remoteRoot)} 2>/dev/null`, { timeoutMs: 30_000 })
-          if (!ls.ok) {
+            `ls -1d ${shq(target.remoteRoot)} >/dev/null 2>&1 || echo __NOROOT__; `
+            + `ls -1 ${shq(rawBase)} 2>/dev/null || true`, { timeoutMs: 30_000 })
+          if (!ls.ok || String(ls.stdout ?? '').includes('__NOROOT__')) {
             throw new Error(`remote_root listing failed (cannot auto-name the batch dir): `
               + `${(ls.stderr || ls.stdout || ls.text || '').slice(0, 300)}`)
           }
           const now = new Date()
           const p2 = (n) => String(n).padStart(2, '0')
           const today = `${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}`
-          remoteDir = resolveRemoteDir(target.remoteRoot,
+          remoteDir = resolveRemoteDir(rawBase,
             nextSimDir(String(ls.stdout ?? '').split(/\r?\n/), today))
         }
         const syncScripts = args.sync_scripts !== false
@@ -282,9 +287,13 @@ export function batchTools(ctx) {
       description: 'Fetch artifacts from a remote batch: tar-gzips the requested files on the remote host, '
         + 'downloads the archive over dsh-ssh and extracts it into the local run directory (the archive is '
         + 'kept as fetch_<job_id>.tgz). If tar is unavailable it falls back to a bounded per-file download. '
-        + 'Afterwards sim_analysis / spectre_parse / snp_read can read the local run directory directly.',
+        + 'Afterwards sim_progress / spectre_parse / snp_read can read the local run directory directly. '
+        + 'Raw fetches land in <project>/RawResults/<Sim*> (the D-012 convention, mirroring the remote layout); '
+        + 'prefer pulling only compact analysis results into <project>/SimResults (ssh_download) whenever '
+        + 'the raw psf is not needed locally.',
       parameters: {
-        run_dir: { type: 'string', required: true, description: 'Local run directory to extract into' },
+        run_dir: { type: 'string', required: true, description: 'Local run directory to extract into '
+          + '(typically <project>/RawResults/<Sim*> — the mirrored remote batch name)' },
         includes: { type: 'array', items: { type: 'string' },
           description: 'Files to fetch: names (point_meta.json) or paths (*/netlist.scs.raw/sp.sp); '
             + 'default point_meta.json, sweep_progress.json, errlog.txt, bsub.out, bsub.err' },

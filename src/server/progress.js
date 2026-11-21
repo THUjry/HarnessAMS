@@ -46,16 +46,20 @@ function totalFromConfig(runDir) {
 }
 
 // Project root from a run-dir string ("<root>/sweep/RoundN/top" or the Sim
-// convention "<root>[.../sweep]/Sim<N>_<date>_batch<M>"), null when the shape
-// does not match. String-level like tools/sim_analysis.js deriveProjectDir, so
-// POSIX remote paths derive identically (existence is checked separately).
+// convention "<root>[.../sweep|/RawResults]/Sim<N>_<date>_batch<M>"), null when
+// the shape does not match. String-level like the retired sim_analysis.js
+// deriveProjectDir did, so POSIX remote paths derive identically (existence is
+// checked separately).
 export function projectRootOf(p) {
   const norm = String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
   const m = /(.+)\/sweep\/Round[^/]+\/top$/.exec(norm)
   if (m) return m[1]
   const s = /(.+)\/Sim\d+_\d{8}_batch\d+$/.exec(norm)
   if (s) {
-    const cut = s[1].endsWith('/sweep') ? s[1].slice(0, -'/sweep'.length) : s[1]
+    let cut = s[1]
+    for (const base of ['/sweep', '/RawResults']) {
+      if (cut.endsWith(base)) cut = cut.slice(0, -base.length)
+    }
     return cut || null
   }
   return null
@@ -135,16 +139,21 @@ export function summarizeProject(projectDir) {
       addBatch(round, /^Round/.test(round) ? path.join(sweepDir, round, 'top') : path.join(sweepDir, round))
     }
   }
-  // Sim convention at the project root: <project>/Sim*/ (after the sweep/
-  // entries; a same-named dir under both bases counts once — seen-set dedup)
+  // Sim convention at the project root and under RawResults/ (D-012, 2026-11-21:
+  // raw sim data defaults to <project>/RawResults — the remote batch default and
+  // the local fetch-back landing; after the sweep/ entries; a same-named dir
+  // under several bases counts once — seen-set dedup)
   if (statDir(root)?.isDirectory()) {
     const seen = new Set(batches.map((b) => b.round))
-    const sims = fs.readdirSync(root, { withFileTypes: true })
-      .filter((e) => e.isDirectory() && /^Sim\d+_\d{8}_batch\d+$/.test(e.name))
-      .map((e) => e.name)
-      .sort((a, b) => a.localeCompare(b))
-    for (const name of sims) {
-      if (!seen.has(name)) addBatch(name, path.join(root, name))
+    for (const base of [path.join(root, 'RawResults'), root]) { // RawResults first: the D-012 canonical sighting wins a same-name dedup
+      if (!statDir(base)?.isDirectory()) continue
+      const sims = fs.readdirSync(base, { withFileTypes: true })
+        .filter((e) => e.isDirectory() && /^Sim\d+_\d{8}_batch\d+$/.test(e.name))
+        .map((e) => e.name)
+        .sort((a, b) => a.localeCompare(b))
+      for (const name of sims) {
+        if (!seen.has(name)) { seen.add(name); addBatch(name, path.join(base, name)) }
+      }
     }
   }
   // Old shape contract: a project with neither a sweep/ directory nor any Sim
