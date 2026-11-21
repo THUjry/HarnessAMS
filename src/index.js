@@ -59,13 +59,10 @@ export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt'
 // driven polling, and an ask-first gate before any improvised ssh fallback —
 // which must still go through the dsh-ssh tools, never a raw shell ssh.
 // Static text, registered once at plugin load, so the KV prefix stays stable.
-export const REMOTE_WAIT_POLICY = [
-  '## HarnessAMS remote waiting policy',
-  '- Poll status (batch_poll; harnessams_selfcheck "status" for self-checks) instead of blind-sleeping a guessed duration.',
-  '- Sleep <=30 s per command, re-check after each, repeat until the run finishes; prefer 10 s -> 20 s -> 40 s backoff with ETA from completed/total.',
-  '- While a progress card is displayed, refresh it at least once every 5 s (poll, do not sleep).',
-  '- If the standard chain cannot proceed (repeated failures, stuck run, missing capability), stop and ask the user first. Any improvised fallback requires explicit approval and must still use the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download) - never raw ssh commands from the shell.',
-].join('\n')
+// Prose, not bullets: the assembled host prompt is plain paragraphs (its core
+// sections and dsh-ssh's guidance carry no markdown block structure), so the
+// lone "##" heading was restyled into this paragraph the same day.
+export const REMOTE_WAIT_POLICY = 'HarnessAMS remote waiting policy: poll status (batch_poll; harnessams_selfcheck "status" for self-checks) instead of blind-sleeping a guessed duration. Sleep <=30 s per command, re-check after each, repeat until the run finishes (prefer 10 s -> 20 s -> 40 s backoff with ETA from completed/total); while a progress card is displayed, refresh it at least once every 5 s (poll, do not sleep); if the standard chain cannot proceed (repeated failures, stuck run, missing capability), stop and ask the user first; any improvised fallback requires explicit approval and must still use the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download), never raw ssh commands from the shell.'
 
 export function toolDefinitions(ctx = {}) {
   return [...selfcheckTools(ctx), ...batchTools(ctx), ...analysisTools(ctx), safeTrashTool()]
