@@ -210,20 +210,16 @@ window.__ModuleLoader__.load({
         'selfchk.diagDone': '已创建诊断会话 {id} — 请到左侧会话树查看。',
         'selfchk.diagFail': '创建诊断会话失败：{err}',
         'guide.s6t': '仿真进度卡片',
-        'guide.s6': '会话里的仿真工具调用（batch 提交/轮询/取回、进度、分析、spectre 装配/扫掠/解析）渲染为专属进度卡片：实时显示已完成几批、多少个仿真、待完成多少；本地扫批运行中卡片自动刷新。不需要时可在控制台页「显示设置」关闭（默认开启）。',
+        'guide.s6': '会话里三个重仿真工具调用（batch_poll 远程批轮询、sim_progress 仿真进度、spectre_run_sweep 扫批）渲染为专属进度卡片：调用瞬间即显示 0/N 首帧，运行中自动刷新（远程批直读远端进度，本地扫批读进度文件），并汇总已完成几批、多少个仿真、待完成多少；其余仿真工具调用回退为原始 JSON 显示。不需要时可在控制台页「显示设置」关闭（默认开启）。',
         'set.title': '显示设置',
         'set.toolview': '会话内仿真进度卡片',
         'set.toolviewHint': '关闭后这些工具调用回退为原始 JSON 显示。浏览器本地偏好，对本机所有会话生效。',
-        'card.title.batch_submit': '远程批提交',
         'card.title.batch_poll': '远程批轮询',
-        'card.title.batch_fetch': '远程批取回',
         'card.title.sim_progress': '仿真进度',
-        'card.title.gen-sweep-report': '扫描报告',
-        'card.title.spectre_assemble': 'Spectre 装配',
         'card.title.spectre_run_sweep': 'Spectre 扫批',
-        'card.title.spectre_parse': 'PSF 解析',
         'card.preparing': '等待参数…',
         'card.waitProgress': '等待首个进度文件（启动后约 30 秒出现）…',
+        'card.remoteUnreachable': '远端暂不可达，保留上次进度…',
         'card.interrupted': '已中断',
         'card.error': '调用失败',
         'card.status.completed': '已完成',
@@ -240,24 +236,10 @@ window.__ModuleLoader__.load({
         'card.label.pending': '待完成',
         'card.label.node': '计算节点',
         'card.label.updated': '更新于',
-        'card.label.job': '作业',
-        'card.label.jobState': 'LSF 状态',
-        'card.label.scheduler': '调度器',
+        'card.label.jobState': '队列状态',
+        'card.label.remote': '远端',
         'card.label.remoteDir': '远端目录',
         'card.label.runDir': '运行目录',
-        'card.label.projectDir': '项目目录',
-        'card.label.planned': '本批计划 {n} 个仿真',
-        'card.label.fetched': '取回 {n} 点 / {m} 个 sp 文件',
-        'card.label.mode': '取回方式',
-        'card.label.archive': '归档',
-        'card.label.results': '结果文件',
-        'card.label.rounds': '{n} 个 batch',
-        'card.label.figs': '{n} 张 PNG',
-        'card.label.report': '报告',
-        'card.label.registered': '已登记进任务仪表盘',
-        'card.label.registerFailed': '仪表盘登记失败',
-        'card.label.points': '解析 {n} 个点',
-        'card.label.warnings': '警告',
         'card.label.details': '详情',
         'card.agg.line': '已完成 {done}/{batches} 批 · 仿真 {comp}/{total} · 待完成 {pending}',
         'card.agg.unplanned': '（另有 {n} 批未计划）',
@@ -423,24 +405,21 @@ window.__ModuleLoader__.load({
         'selfchk.diagDone': 'Diagnosis session {id} created — see the session tree.',
         'selfchk.diagFail': 'Failed to create a diagnosis session: {err}',
         'guide.s6t': 'Simulation progress cards',
-        'guide.s6': 'Simulation tool calls in a conversation (batch submit/poll/fetch, progress, analysis, '
-          + 'spectre assemble/sweep/parse) render as dedicated progress cards: live batches done, simulations '
-          + 'finished and pending; a local sweep in flight refreshes the card automatically. Toggle them off in '
-          + 'the console page display settings (on by default).',
+        'guide.s6': 'The three heavy simulation tool calls in a conversation (batch_poll, sim_progress, '
+          + 'spectre_run_sweep) render as dedicated progress cards: a 0/N first frame appears the moment the '
+          + 'call starts, live refresh while it runs (remote batches read the remote progress, local sweeps the '
+          + 'progress file) plus the cross-batch aggregate; every other tool call falls back to the raw JSON '
+          + 'view. Toggle them off in the console page display settings (on by default).',
         'set.title': 'Display settings',
         'set.toolview': 'Simulation progress cards in conversations',
         'set.toolviewHint': 'When off, these tool calls fall back to the raw JSON view. Browser-local preference, '
           + 'applies to every session on this machine.',
-        'card.title.batch_submit': 'Remote batch submit',
         'card.title.batch_poll': 'Remote batch poll',
-        'card.title.batch_fetch': 'Remote batch fetch',
         'card.title.sim_progress': 'Simulation progress',
-        'card.title.gen-sweep-report': 'Sweep report',
-        'card.title.spectre_assemble': 'Spectre assemble',
         'card.title.spectre_run_sweep': 'Spectre sweep',
-        'card.title.spectre_parse': 'PSF parse',
         'card.preparing': 'Waiting for arguments…',
         'card.waitProgress': 'Waiting for the first progress file (appears ~30 s after start)…',
+        'card.remoteUnreachable': 'remote unreachable — showing last known progress…',
         'card.interrupted': 'Interrupted',
         'card.error': 'Call failed',
         'card.status.completed': 'Completed',
@@ -457,24 +436,10 @@ window.__ModuleLoader__.load({
         'card.label.pending': 'Pending',
         'card.label.node': 'Compute node',
         'card.label.updated': 'Updated',
-        'card.label.job': 'Job',
-        'card.label.jobState': 'LSF state',
-        'card.label.scheduler': 'Scheduler',
+        'card.label.jobState': 'queue state',
+        'card.label.remote': 'remote',
         'card.label.remoteDir': 'Remote dir',
         'card.label.runDir': 'Run dir',
-        'card.label.projectDir': 'Project dir',
-        'card.label.planned': 'This batch plans {n} simulations',
-        'card.label.fetched': 'Fetched {n} points / {m} sp files',
-        'card.label.mode': 'Fetch mode',
-        'card.label.archive': 'Archive',
-        'card.label.results': 'Results file',
-        'card.label.rounds': '{n} batch(es)',
-        'card.label.figs': '{n} PNG(s)',
-        'card.label.report': 'Report',
-        'card.label.registered': 'Registered into the task dashboard',
-        'card.label.registerFailed': 'Dashboard registration failed',
-        'card.label.points': 'Parsed {n} points',
-        'card.label.warnings': 'Warnings',
         'card.label.details': 'Details',
         'card.agg.line': '{done}/{batches} batches done · {comp}/{total} sims · {pending} pending',
         'card.agg.unplanned': '(+{n} unplanned batches)',
@@ -790,15 +755,17 @@ window.__ModuleLoader__.load({
     // ---------- session tool cards (DSH tool.call.toolview slot) ----------
     // DSH renders a generic JSON card per tool call; the tool.call.toolview slot
     // lets a plugin register custom renderers keyed by the exact wire tool name
-    // (a typo never renders — the generic card stays). One component covers all
-    // eight simulation tools; SmartAnaSim ships no client half and keyed matching
-    // is by name across plugins, so the top-level plugin renders both families.
-    // Local sweeps poll /api/progress live while their tool call blocks; result
-    // cards add the cross-batch aggregate from /api/progress-summary (LOCAL view —
-    // remote batches only after batch_fetch brought the progress files back, the
-    // same dual-window semantics as the sim_progress tool).
-    const SIM_CARD_TOOLS = ['batch_submit', 'batch_poll', 'batch_fetch', 'sim_progress',
-      'gen-sweep-report', 'spectre_assemble', 'spectre_run_sweep', 'spectre_parse']
+    // (a typo never renders — the generic card stays). D-016 scope ruling: cards
+    // cover ONLY the three heavy simulation tools (batch_poll, sim_progress,
+    // spectre_run_sweep); the lighter calls (submit/fetch/assemble/parse/report)
+    // stay on the DSH generic card. SmartAnaSim ships no client half and keyed
+    // matching is by name across plugins, so the top-level plugin renders both
+    // families. Local sweeps poll /api/progress live while their tool call
+    // blocks; the batch_poll card polls /api/progress-remote (the batch's own
+    // counters on the remote host, D-016) — first frame is the local 0/N
+    // submitted from the job file, so the card never shows a dead placeholder.
+    // Result cards add the cross-batch aggregate from /api/progress-summary.
+    const SIM_CARD_TOOLS = ['batch_poll', 'sim_progress', 'spectre_run_sweep']
 
     // Display toggle (default on): a browser-local preference, NOT project settings —
     // cards render in every session (remote projects included) and remote projects
@@ -814,12 +781,36 @@ window.__ModuleLoader__.load({
       try { window.dispatchEvent(new CustomEvent(TOOLVIEW_EVENT)) } catch { /* ancient host */ }
     }
 
+    // Normalize a /api/progress-remote payload into the /api/progress prog shape
+    // so every card branch renders both sources alike. A no-job-file answer is
+    // already local-shaped ({remote:false}); an unreachable answer is passed
+    // through untouched (the caller keeps the last frame and raises a note).
+    function normRemoteProg(pr) {
+      if (!pr || !pr.remote || pr.unreachable) return pr
+      const total = Number(pr.total) || 0
+      const completed = Number(pr.completed) || 0
+      return {
+        local: true, remote: true, run_dir: pr.run_dir ?? null, source: 'remote',
+        status: pr.state ?? null, job_state: pr.job_state ?? null,
+        total, completed,
+        succeeded: Number(pr.succeeded) || 0,
+        failed: Number(pr.failed) || 0,
+        pending: Math.max(total - completed, 0),
+        simulator: null,
+        compute_node: pr.compute_node ?? null,
+        updated_at: pr.updated_at ?? null,
+      }
+    }
+
     // Progress data for one card: /api/progress (single run) + /api/progress-summary
-    // (cross-batch aggregate). While the tool call is in flight (active) poll every
-    // 3 s with the visibility pause/resume discipline shared by the sidebar polls;
-    // settled cards fetch once on mount (one fetch per scroll-back remount is fine).
-    function useSimProgress({ runDir, projectDir, sessionId, active }) {
-      const [data, setData] = useState({ prog: null, agg: null })
+    // (cross-batch aggregate); the batch_poll card swaps the single-run source for
+    // /api/progress-remote (D-016, the remote batch's live counters) at the 5 s
+    // cadence the wait policy prescribes. While the tool call is in flight
+    // (active) poll with the visibility pause/resume discipline shared by the
+    // sidebar polls; settled cards fetch once on mount (one fetch per scroll-back
+    // remount is fine).
+    function useSimProgress({ runDir, projectDir, sessionId, active, remote, intervalMs }) {
+      const [data, setData] = useState({ prog: null, agg: null, remoteErr: null })
       useEffect(() => {
         // API already ends with /api — the endpoints hang right off it. sessionId
         // is the workspace-fence key (server: sessionProject mapping + path
@@ -827,7 +818,7 @@ window.__ModuleLoader__.load({
         // inject hook; without it the endpoints answer 400, so skip the fetch.
         if (!sessionId) return
         const enc = encodeURIComponent
-        const progUrl = runDir ? API + '/progress?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
+        const progUrl = runDir ? API + (remote ? '/progress-remote' : '/progress') + '?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
         const aggUrl = projectDir ? API + '/progress-summary?projectDir=' + enc(projectDir) + '&sessionId=' + enc(sessionId)
           : runDir ? API + '/progress-summary?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
         if (!progUrl && !aggUrl) return
@@ -839,14 +830,24 @@ window.__ModuleLoader__.load({
           return Promise.all([
             progUrl ? fetchJson(progUrl).catch(() => null) : Promise.resolve(null),
             aggUrl ? fetchJson(aggUrl).catch(() => null) : Promise.resolve(null),
-          ]).then(([p, a]) => {
-            if (!alive || my !== seq || (!p && !a)) return
-            const s = JSON.stringify([p, a])
-            if (s !== last) { last = s; setData({ prog: p, agg: a }) }
+          ]).then(([pr, a]) => {
+            if (!alive || my !== seq || (!pr && !a)) return
+            // Unreachable remote: keep the last prog frame and surface a dim
+            // note (D-016 — the card never goes blank mid-poll).
+            const unreachable = !!(pr && pr.unreachable)
+            const err = unreachable ? String(pr.error || '').slice(0, 200) : null
+            const prog = unreachable ? null : normRemoteProg(pr)
+            setData((prev) => {
+              const next = { prog: unreachable ? prev.prog : prog, agg: a, remoteErr: err }
+              const s = JSON.stringify([next.prog, a, err])
+              if (s === last) return prev
+              last = s
+              return next
+            })
           })
         }
         if (!active) { fetchOne(); return () => { alive = false } }
-        const timer = setInterval(() => { if (!document.hidden) fetchOne() }, 3000)
+        const timer = setInterval(() => { if (!document.hidden) fetchOne() }, intervalMs || 3000)
         const onVis = () => { if (!document.hidden) fetchOne() }
         document.addEventListener('visibilitychange', onVis)
         fetchOne()
@@ -855,7 +856,7 @@ window.__ModuleLoader__.load({
           clearInterval(timer)
           document.removeEventListener('visibilitychange', onVis)
         }
-      }, [runDir, projectDir, sessionId, active])
+      }, [runDir, projectDir, sessionId, active, remote, intervalMs])
       return data
     }
 
@@ -910,13 +911,14 @@ window.__ModuleLoader__.load({
       try { const v = JSON.parse(text); if (v && typeof v === 'object') data = v } catch { /* raw only */ }
       return { text, data }
     }
-    // (runDir, projectDir) candidates for the progress endpoints, per tool shape.
-    function cardRoots(toolName, args, data) {
+    // (runDir, projectDir) candidates for the progress endpoints. All three
+    // carded tools take run_dir as a required argument, so the start phase can
+    // fetch before any result exists.
+    function cardRoots(args, data) {
       const a = args || {}
       const r = data || {}
-      let runDir = a.run_dir || a.work_dir || a.raw_dir || r.run_dir || null
-      let projectDir = a.project_dir || (r.report_dir ? dirName(r.report_dir) : null) || null
-      if (toolName === 'spectre_assemble') runDir = a.out_dir || null
+      const runDir = a.run_dir || a.work_dir || a.raw_dir || r.run_dir || null
+      const projectDir = a.project_dir || (r.report_dir ? dirName(r.report_dir) : null) || null
       return { runDir: runDir || null, projectDir: projectDir || null }
     }
 
@@ -927,7 +929,6 @@ window.__ModuleLoader__.load({
       if (!d) return null
       if (toolName === 'batch_poll') return d.state
       if (toolName === 'sim_progress') return d.status
-      if (toolName === 'batch_submit') return d.state
       if (toolName === 'spectre_run_sweep') return (live.prog && live.prog.local && live.prog.status) || (d.ok ? 'completed' : 'failed')
       return d.ok ? 'completed' : 'failed'
     }
@@ -953,16 +954,23 @@ window.__ModuleLoader__.load({
     function simBody(toolName, args, result, live, phase) {
       const els = []
       const p = live.prog && live.prog.local ? live.prog : null
-      // While the tool call blocks (local sweep): live bar from the progress file.
+      // While the tool call blocks (a local sweep, or a batch_poll holding a
+      // wait): live bar from the progress source — local file or remote poll,
+      // both normalized to the same shape. An unreachable remote keeps the last
+      // frame plus a dim note (D-016: a visible card at every moment, never a
+      // dead placeholder).
       if (phase === 'start') {
+        if (live.remoteErr) els.push(h('div', { key: 'rerr', className: 'hams-dim' }, tr('card.remoteUnreachable')))
         if (p && p.total) {
           els.push(h(CardBar, { key: 'bar', p }), h(CardKv, { key: 'kv', items: [
+            p.remote ? { v: tr('card.label.remote'), cls: 'hams-faint' } : null,
             { k: tr('card.label.succeeded'), v: p.succeeded },
             { k: tr('card.label.failed'), v: p.failed },
             { k: tr('card.label.pending'), v: p.pending },
+            { k: tr('card.label.jobState'), v: p.job_state },
             { k: tr('card.label.node'), v: p.compute_node },
           ] }))
-        } else {
+        } else if (!live.remoteErr) {
           els.push(h('div', { key: 'wait', className: 'hams-dim' }, tr('card.waitProgress')))
         }
         return els
@@ -987,45 +995,6 @@ window.__ModuleLoader__.load({
         if (d.errlog_tail) els.push(h(ClampText, { key: 'err', text: String(d.errlog_tail), className: 'hams-warn' }))
         return els
       }
-      if (toolName === 'batch_submit') {
-        els.push(h(CardKv, { key: 'kv', items: [
-          { k: tr('card.label.job'), v: d.job_id },
-          { k: tr('card.label.scheduler'), v: d.scheduler },
-          { k: '', v: p && p.total ? tr('card.label.planned', { n: p.total }) : null },
-          { k: tr('card.label.remoteDir'), v: d.remote_dir },
-          { k: tr('card.label.warnings'), v: Array.isArray(d.warnings) && d.warnings.length ? d.warnings.length : null },
-        ] }))
-        return els
-      }
-      if (toolName === 'batch_fetch') {
-        const f = d.fetched || {}
-        els.push(h(CardKv, { key: 'kv', items: [
-          { k: tr('card.label.job'), v: d.job_id },
-          { k: '', v: (f.points != null || f.sp_files != null) ? tr('card.label.fetched', { n: f.points ?? 0, m: f.sp_files ?? 0 }) : null },
-          { k: tr('card.label.mode'), v: d.mode },
-          { k: tr('card.label.archive'), v: d.archive },
-        ] }))
-        return els
-      }
-      if (toolName === 'gen-sweep-report') {
-        const rounds = Array.isArray(d.rounds) ? d.rounds.length : null
-        const figs = Array.isArray(d.figs) ? d.figs.length : null
-        els.push(h(CardKv, { key: 'kv', items: [
-          { k: '', v: rounds ? tr('card.label.rounds', { n: rounds }) : null, cls: 'hams-good' },
-          { k: '', v: figs ? tr('card.label.figs', { n: figs }) : null, cls: 'hams-good' },
-          { k: tr('card.label.report'), v: d.report_path },
-          d.registered === true ? { k: '', v: tr('card.label.registered'), cls: 'hams-good' }
-            : d.registered === false ? { k: '', v: tr('card.label.registerFailed'), cls: 'hams-warn' } : null,
-        ] }))
-        return els
-      }
-      if (toolName === 'spectre_assemble') {
-        els.push(h(CardKv, { key: 'kv', items: [
-          { k: tr('card.label.projectDir'), v: d.project_dir || (args && args.project_dir) },
-          { k: '', v: p && p.total ? tr('card.label.planned', { n: p.total }) : null },
-        ] }))
-        return els
-      }
       if (toolName === 'spectre_run_sweep') {
         if (p && p.total) els.push(h(CardBar, { key: 'bar', p }))
         if (p && p.source === 'progress') {
@@ -1039,14 +1008,6 @@ window.__ModuleLoader__.load({
         const doneLine = String(d.output || '').split('\n').map((l) => l.trim()).filter((l) => l.indexOf('[sweep] done:') === 0).pop()
         if (doneLine) els.push(h('div', { key: 'done', className: 'hams-dim' }, txt(doneLine)))
         els.push(h(CardKv, { key: 'dir', items: [{ k: tr('card.label.runDir'), v: d.run_dir }] }))
-        return els
-      }
-      if (toolName === 'spectre_parse') {
-        const n = d.summary && Array.isArray(d.summary.points) ? d.summary.points.length : null
-        els.push(h(CardKv, { key: 'kv', items: [
-          { k: tr('card.label.results'), v: d.out_dir },
-          { k: '', v: n ? tr('card.label.points', { n }) : null },
-        ] }))
         return els
       }
       els.push(h('div', { key: 'raw', className: 'hams-dim' }, '—'))
@@ -1100,8 +1061,14 @@ window.__ModuleLoader__.load({
       const d = props.useDisclosure()
       const args = cardArgsOf(props)
       const result = phase === 'result' && props.block ? cardResultOf(props) : null
-      const roots = cardRoots(toolName, args, result ? result.data : null)
-      const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir, sessionId: props.sessionId, active: phase === 'start' })
+      const roots = cardRoots(args, result ? result.data : null)
+      // batch_poll is the remote-batch window: the remote progress source at
+      // the 5 s policy cadence (the local 0/N first frame arrives on the very
+      // first fetch — the job file needs no ssh). The other two tools stay on
+      // the local file source at 3 s.
+      const remote = toolName === 'batch_poll'
+      const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir,
+        sessionId: props.sessionId, active: phase === 'start', remote, intervalMs: remote ? 5000 : 3000 })
       if (!on) {
         return h('div', { className: 'hams-tc' },
           h('div', { className: 'hams-tc-head' },
@@ -2619,7 +2586,7 @@ window.__ModuleLoader__.load({
         }
       }, 1000)
       // Session tool cards: keyed by wire tool name, exact match (a typo never
-      // renders), so all eight names must be listed verbatim — guarded by the
+      // renders), so all three names must be listed verbatim — guarded by the
       // entry test against the registered tool-name set.
       slots.inject('tool.call.toolview', function* () {
         for (const key of SIM_CARD_TOOLS) {

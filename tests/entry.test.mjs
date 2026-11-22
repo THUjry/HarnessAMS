@@ -127,16 +127,19 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   assert.ok(src.includes("slots.inject('tool.call.toolview'"), 'must inject the tool card slot')
   // The endpoints hang off the /harnessams/api prefix (API constant) — pin the
-  // composed form so an '/api/api/…' double-prefix regression cannot come back.
-  assert.ok(src.includes("API + '/progress?runDir='"), 'cards must poll the progress endpoint')
+  // composed forms so an '/api/api/…' double-prefix regression cannot come back.
+  // D-016: the batch_poll card swaps the single-run source for the remote poll.
+  assert.ok(src.includes("API + (remote ? '/progress-remote' : '/progress')"), 'cards must pick the local/remote progress endpoint')
   assert.ok(src.includes("API + '/progress-summary"), 'cards must poll the progress-summary endpoint')
-  // A key typo never renders (silent generic-card fallback), so the eight names
-  // are pinned against the model-facing tool surface verbatim.
+  assert.ok(src.includes('normRemoteProg'), 'remote payloads must normalize to the prog shape')
+  assert.ok(src.includes('remoteErr'), 'unreachable remotes must surface a note, not a blank card')
+  // A key typo never renders (silent generic-card fallback), so the three heavy
+  // tool names are pinned against the model-facing tool surface verbatim (the
+  // D-016 scope ruling shrank the list from eight).
   const m = /const SIM_CARD_TOOLS = \[([^\]]+)\]/.exec(src)
   assert.ok(m, 'SIM_CARD_TOOLS list must exist')
   const cardTools = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean)
-  assert.deepEqual(cardTools.sort(), ['batch_fetch', 'batch_poll', 'batch_submit', 'gen-sweep-report',
-    'sim_progress', 'spectre_assemble', 'spectre_parse', 'spectre_run_sweep'])
+  assert.deepEqual(cardTools.sort(), ['batch_poll', 'sim_progress', 'spectre_run_sweep'])
   assert.ok(src.includes('hams-toolview'), 'card display toggle must persist via localStorage')
   assert.ok(src.includes('TOOLVIEW_EVENT'), 'mounted cards must flip without a reload')
   assert.ok(src.includes('DisplaySettingsSection'), 'console page must host the display toggle')
