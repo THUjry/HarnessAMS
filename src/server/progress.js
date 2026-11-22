@@ -68,7 +68,10 @@ export function projectRootOf(p) {
 // One run directory, normalized for the card. Source ladder: sweep_progress.json
 // (live counters, may lack `simulator` in pre-2026-10 files) → .worker_started
 // (worker announced total_points, first progress tick still ~30 s out) →
-// sweep_config.json (assembled but never run) → nothing readable.
+// .batch_job.json (a REMOTE batch was submitted for this run dir — the immediate
+// 0/N first frame for the batch_poll card while everything still lives on the
+// remote host, D-016) → sweep_config.json (assembled but never run) → nothing
+// readable.
 export function readRunProgress(runDir) {
   const dir = String(runDir ?? '').trim()
   const st = dir ? statDir(dir) : undefined
@@ -93,20 +96,59 @@ export function readRunProgress(runDir) {
     }
   }
   const started = readJsonTolerant(path.join(dir, '.worker_started'))
-  const total = (started && Number(started.total_points)) || totalFromConfig(dir)
+  if (started) {
+    const total = Number(started.total_points) || totalFromConfig(dir)
+    return {
+      local: true,
+      run_dir: dir,
+      source: 'worker_started',
+      status: 'running',
+      total: total ?? null,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      pending: total ?? null,
+      simulator: null,
+      compute_node: started?.host ?? null,
+      updated_at: started?.started_at ?? null,
+    }
+  }
+  // Remote batch, nothing mirrored locally yet: the job file batch_submit wrote
+  // carries total_points + submitted_at — an immediate 0/N submitted frame with
+  // zero ssh cost. A fetched sweep_progress.json (level 1) outranks this, so a
+  // mirror never regresses to "submitted".
+  const job = readJsonTolerant(path.join(dir, '.batch_job.json'))
+  if (job) {
+    const total = Number(job.total_points) || totalFromConfig(dir) || null
+    return {
+      local: true,
+      run_dir: dir,
+      source: 'job',
+      status: 'submitted',
+      total,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      pending: total ?? null,
+      simulator: null,
+      compute_node: null,
+      updated_at: job.submitted_at ?? null,
+    }
+  }
+  const cfgTotal = totalFromConfig(dir)
   return {
     local: true,
     run_dir: dir,
-    source: started ? 'worker_started' : 'config',
-    status: started ? 'running' : (total ? 'pending' : null),
-    total: total ?? null,
+    source: 'config',
+    status: cfgTotal ? 'pending' : null,
+    total: cfgTotal ?? null,
     completed: 0,
     succeeded: 0,
     failed: 0,
-    pending: total ?? null,
+    pending: cfgTotal ?? null,
     simulator: null,
-    compute_node: started?.host ?? null,
-    updated_at: started?.started_at ?? null,
+    compute_node: null,
+    updated_at: null,
   }
 }
 

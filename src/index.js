@@ -38,6 +38,7 @@ import { remoteBrowse } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
+import { progressRemotePayload } from './server/progressRemote.js'
 import { registerTools } from './tool.js'
 import { batchTools } from './tools/batch.js'
 import { genReportTools } from './tools/gen_report.js'
@@ -336,6 +337,22 @@ async function handle(req, res, ctx) {
     const fence = progressFence(ctx.workspaceRegistry, url.searchParams)
     if (fence.error) { json(fence.code, { error: fence.error }); return }
     json(200, { ok: true, ...progressSummaryPayload({ runDir: fence.runDir, projectDir: fence.projectDir }) })
+    return
+  }
+  if (route === '/api/progress-remote') {
+    // Remote live progress for the batch_poll card (D-016): polls the batch's
+    // own progress files on the remote host through the dsh-ssh exec funnel.
+    // Same workspace fence as the local endpoints; the machine and remote dir
+    // are resolved server-side from the run dir's .batch_job.json (written by
+    // batch_submit) — the caller supplies nothing beyond the fenced runDir. A
+    // short single-flight cache (progressRemote.js) keeps one ssh exec per run
+    // dir per ~4 s however many cards poll; failures answer 200 {unreachable}
+    // so the card keeps its last frame instead of going blank.
+    const fence = progressFence(ctx.workspaceRegistry, url.searchParams)
+    if (fence.error) { json(fence.code, { error: fence.error }); return }
+    if (!fence.runDir) { json(400, { error: 'runDir is required' }); return }
+    const payload = await progressRemotePayload(ctx, fence.runDir)
+    json(200, { ok: true, ...payload })
     return
   }
   if (route.startsWith('/dash/')) {

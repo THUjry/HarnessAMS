@@ -10,9 +10,10 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { registerRoutes, callGet } from './helpers.mjs'
 import { projectRootOf, readRunProgress, summarizeProject } from '../src/server/progress.js'
+import { resetRemoteCacheForTest } from '../src/server/progressRemote.js'
 
-async function makeHandler(registryList = []) {
-  const handler = await registerRoutes({ workspaceRegistry: { list: () => registryList } })
+async function makeHandler(registryList = [], ctxExtra = {}) {
+  const handler = await registerRoutes({ workspaceRegistry: { list: () => registryList }, ...ctxExtra })
   return (route) => callGet(handler, 'http://127.0.0.1/harnessams' + route)
 }
 
@@ -53,7 +54,22 @@ test('progress: readRunProgress walks the progress → worker_started → config
     assert.equal(cfg.pending, 6)
     assert.equal(cfg.completed, 0)
 
-    // .worker_started outranks the config (worker announced; first tick ~30 s out)
+    // .batch_job.json (a remote batch was submitted; everything still lives on
+    // the remote host) outranks the config — the immediate 0/N submitted frame
+    // the batch_poll card shows on its very first fetch (D-016)
+    await writeFile(path.join(run, '.batch_job.json'),
+      JSON.stringify({ job_id: '777', machine_id: 'node1', remote_root: '/home/op/sim',
+        remote_dir: '/home/op/sim/batch1', scheduler: 'lsf', total_points: 6,
+        submitted_at: '2026-11-22T00:00:00Z' }))
+    const jobFrame = readRunProgress(run)
+    assert.equal(jobFrame.source, 'job')
+    assert.equal(jobFrame.status, 'submitted')
+    assert.equal(jobFrame.total, 6)
+    assert.equal(jobFrame.completed, 0)
+    assert.equal(jobFrame.pending, 6)
+    assert.equal(jobFrame.updated_at, '2026-11-22T00:00:00Z')
+
+    // .worker_started outranks the job file (worker announced; first tick ~30 s out)
     await writeFile(path.join(run, '.worker_started'),
       JSON.stringify({ pid: 42, host: 'node5', started_at: '2026-11-09T00:00:00Z', total_points: 6 }))
     const started = readRunProgress(run)
@@ -235,5 +251,127 @@ test('progress: GET endpoints fence by cwd→workspace then answer payloads', as
   } finally {
     await rm(proj, { recursive: true, force: true })
     await rm(stray, { recursive: true, force: true })
+  }
+})
+
+// D-016: the remote live-progress endpoint. The ssh_* tool shell is mocked per
+// the installed dsh-ssh contract (structured values; same routing-by-substring
+// style as batch.test.mjs's makeCtx) — machine/dir/job come from the run dir's
+// .batch_job.json, never from client params.
+function sshTools({ hosts } = {}) {
+  const registry = hosts || [{ alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true }]
+  const calls = []
+  const ok = (value) => ({ isError: false, value })
+  const pollStdout = '__BJOB__\n777 RUN\n__META__\n1\n__DIRS__\n1\n__PROG__\n'
+    + JSON.stringify({ status: 'running', total_points: 2, completed: 1, succeeded: 1, failed: 0, compute_node: 'node3' })
+    + '\n__ERR__\n'
+  return {
+    calls,
+    tools: {
+      register: () => {},
+      get: (name) => (['ssh_list', 'ssh_exec'].includes(name) ? { name } : undefined),
+      execute: async (input) => {
+        const call = input.calls[0]
+        calls.push({ name: call.name, arguments: JSON.parse(call.arguments || '{}') })
+        const reply = (result) => ({ results: [{ callId: call.id, result }] })
+        if (call.name === 'ssh_list') return reply(ok({ hosts: registry }))
+        return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: pollStdout, stderr: '', durationMs: 3 }))
+      },
+    },
+  }
+}
+
+test('progress: GET /api/progress-remote answers remote truth, local fallback, fence and single-flight (D-016)', async () => {
+  const proj = await mkdtemp(path.join(tmpdir(), 'hams-prog-rem-'))
+  const stray = await mkdtemp(path.join(tmpdir(), 'hams-prog-rem-stray-'))
+  try {
+    const run = path.join(proj, 'RawResults', 'Sim0_20261122_batch1')
+    await mkdir(run, { recursive: true })
+    await writeFile(path.join(run, 'sweep_config.json'), JSON.stringify({ parameters: { SW: [0, 1] } }))
+    await writeFile(path.join(run, '.batch_job.json'), JSON.stringify({
+      job_id: '777', machine_id: 'node1', remote_root: '/home/op/sim',
+      remote_dir: '/home/op/sim/Sim0_20261122_batch1', scheduler: 'lsf',
+      total_points: 2, submitted_at: '2026-11-22T00:00:00Z' }))
+    const local = path.join(proj, 'sweep', 'Round1', 'top') // no job file
+    await mkdir(local, { recursive: true })
+    await writeFile(path.join(local, 'sweep_config.json'),
+      JSON.stringify({ parameters: { a: [1, 2, 3] } }))
+
+    const ssh = sshTools()
+    const call = await makeHandler([{ id: 'w1', path: proj, sessionIds: ['s1'], title: 'p' }], { tools: ssh.tools })
+    const q = (v) => encodeURIComponent(v)
+    resetRemoteCacheForTest()
+
+    // remote truth: state from bjobs + point_meta count, total falls back to the job file
+    const live = await call('/api/progress-remote?runDir=' + q(run) + '&sessionId=s1')
+    assert.equal(live.code, 200)
+    assert.equal(live.body.ok, true)
+    assert.equal(live.body.remote, true)
+    assert.equal(live.body.state, 'running')
+    assert.equal(live.body.job_state, 'running')
+    assert.equal(live.body.completed, 1)
+    assert.equal(live.body.total, 2)
+    assert.equal(live.body.compute_node, 'node3')
+    // machine/dir were resolved from the job file, not from client params
+    const exec = ssh.calls.filter((c) => c.name === 'ssh_exec')[0]
+    assert.equal(exec.arguments.alias, 'node1')
+    assert.ok(exec.arguments.command.includes('/home/op/sim/Sim0_20261122_batch1'))
+
+    // TTL window: an immediate repeat call serves the cached payload, no new exec
+    const execCount = ssh.calls.filter((c) => c.name === 'ssh_exec').length
+    const again = await call('/api/progress-remote?runDir=' + q(run) + '&sessionId=s1')
+    assert.equal(again.code, 200)
+    assert.equal(again.body.state, 'running')
+    assert.equal(ssh.calls.filter((c) => c.name === 'ssh_exec').length, execCount)
+
+    // single-flight: two concurrent calls after a cache reset share ONE exec
+    resetRemoteCacheForTest()
+    ssh.calls.length = 0
+    const pair = await Promise.all([
+      call('/api/progress-remote?runDir=' + q(run) + '&sessionId=s1'),
+      call('/api/progress-remote?runDir=' + q(run) + '&sessionId=s1'),
+    ])
+    assert.equal(pair[0].code, 200)
+    assert.equal(pair[1].code, 200)
+    assert.equal(ssh.calls.filter((c) => c.name === 'ssh_exec').length, 1)
+
+    // no job file → local semantics (identical to /api/progress)
+    const asLocal = await call('/api/progress-remote?runDir=' + q(local) + '&sessionId=s1')
+    assert.equal(asLocal.code, 200)
+    assert.equal(asLocal.body.remote, false)
+    assert.equal(asLocal.body.source, 'config')
+    assert.equal(asLocal.body.total, 3)
+
+    // fence: same rules as the local endpoints
+    assert.equal((await call('/api/progress-remote?runDir=' + q(run))).code, 400)
+    assert.equal((await call('/api/progress-remote?runDir=' + q(run) + '&sessionId=nope')).code, 400)
+    assert.equal((await call('/api/progress-remote?runDir=' + q(stray) + '&sessionId=s1')).code, 403)
+    assert.equal((await call('/api/progress-remote?sessionId=s1')).code, 400)
+  } finally {
+    await rm(proj, { recursive: true, force: true })
+    await rm(stray, { recursive: true, force: true })
+  }
+})
+
+test('progress: GET /api/progress-remote answers unreachable (keep-last-frame shape) when the host registry is empty', async () => {
+  const proj = await mkdtemp(path.join(tmpdir(), 'hams-prog-unreach-'))
+  try {
+    const run = path.join(proj, 'RawResults', 'Sim0_20261122_batch2')
+    await mkdir(run, { recursive: true })
+    await writeFile(path.join(run, '.batch_job.json'), JSON.stringify({
+      job_id: '778', machine_id: 'node1', remote_root: '/home/op/sim',
+      remote_dir: '/home/op/sim/Sim0_20261122_batch2', scheduler: 'lsf', total_points: 2 }))
+    const ssh = sshTools({ hosts: [] }) // ssh_list answers no hosts → resolveMachine throws
+    const call = await makeHandler([{ id: 'w1', path: proj, sessionIds: ['s1'], title: 'p' }], { tools: ssh.tools })
+    resetRemoteCacheForTest()
+
+    const r = await call('/api/progress-remote?runDir=' + encodeURIComponent(run) + '&sessionId=s1')
+    assert.equal(r.code, 200) // 200 + unreachable: the card keeps its last frame, never blanks
+    assert.equal(r.body.ok, true)
+    assert.equal(r.body.remote, true)
+    assert.equal(r.body.unreachable, true)
+    assert.ok(String(r.body.error).length > 0)
+  } finally {
+    await rm(proj, { recursive: true, force: true })
   }
 })
