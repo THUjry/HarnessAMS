@@ -819,32 +819,51 @@ window.__ModuleLoader__.load({
         if (!sessionId) return
         const enc = encodeURIComponent
         const progUrl = runDir ? API + (remote ? '/progress-remote' : '/progress') + '?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
+        // Remote mode also reads the LOCAL progress once per tick: the job-file
+        // frame (0/N submitted, no ssh) lands within milliseconds and holds the
+        // card until the remote truth arrives ~1–3 s later.
+        const localUrl = remote && runDir ? API + '/progress?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
         const aggUrl = projectDir ? API + '/progress-summary?projectDir=' + enc(projectDir) + '&sessionId=' + enc(sessionId)
           : runDir ? API + '/progress-summary?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
         if (!progUrl && !aggUrl) return
         let alive = true
         let last = ''
         let seq = 0 // out-of-order guard: a slow older response must not clobber a newer one
+        let remoteAnswered = false // once remote truth arrived, local frames stop overwriting it
+        const commit = (patch) => setData((prev) => {
+          const next = { prog: prev.prog, agg: prev.agg, remoteErr: null, ...patch }
+          const s = JSON.stringify([next.prog, next.agg, next.remoteErr])
+          if (s === last) return prev
+          last = s
+          return next
+        })
+        const on = (my, fn) => (v) => { if (alive && my === seq && v != null) fn(v) }
         const fetchOne = () => {
           const my = ++seq
-          return Promise.all([
+          if (remote) {
+            // Three independent chains: instant local frame → aggregate →
+            // remote truth (remote wins once it answers; an unreachable remote
+            // keeps the last frame plus a dim note — the card never goes blank
+            // mid-poll, D-016).
+            if (localUrl) fetchJson(localUrl).catch(() => null).then(on(my, (pl) => {
+              if (remoteAnswered || pl.unreachable) return
+              commit({ prog: normRemoteProg(pl) })
+            }))
+            if (aggUrl) fetchJson(aggUrl).catch(() => null).then(on(my, (a) => commit({ agg: a })))
+            fetchJson(progUrl).catch(() => null).then(on(my, (pr) => {
+              remoteAnswered = true
+              if (pr.unreachable) commit({ remoteErr: String(pr.error || '').slice(0, 200) })
+              else commit({ prog: normRemoteProg(pr), remoteErr: null })
+            }))
+            return
+          }
+          Promise.all([
             progUrl ? fetchJson(progUrl).catch(() => null) : Promise.resolve(null),
             aggUrl ? fetchJson(aggUrl).catch(() => null) : Promise.resolve(null),
-          ]).then(([pr, a]) => {
-            if (!alive || my !== seq || (!pr && !a)) return
-            // Unreachable remote: keep the last prog frame and surface a dim
-            // note (D-016 — the card never goes blank mid-poll).
-            const unreachable = !!(pr && pr.unreachable)
-            const err = unreachable ? String(pr.error || '').slice(0, 200) : null
-            const prog = unreachable ? null : normRemoteProg(pr)
-            setData((prev) => {
-              const next = { prog: unreachable ? prev.prog : prog, agg: a, remoteErr: err }
-              const s = JSON.stringify([next.prog, a, err])
-              if (s === last) return prev
-              last = s
-              return next
-            })
-          })
+          ]).then(on(my, ([p, a]) => {
+            if (!p && !a) return
+            commit({ prog: normRemoteProg(p), agg: a })
+          }))
         }
         if (!active) { fetchOne(); return () => { alive = false } }
         const timer = setInterval(() => { if (!document.hidden) fetchOne() }, intervalMs || 3000)
