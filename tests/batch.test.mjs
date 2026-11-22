@@ -75,9 +75,11 @@ function pollValue({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN
 // src/tools.ts (ssh_exec failures are values, not throws). Commands arrive
 // already wrapped by execRemote (timeout -s KILL ... -- sh -c "..."); routing
 // matches substrings inside the wrapper, exactly like the assertions below.
-function makeCtx({ poll = {}, archive = null, failUpload = false, existing = 0, ls = '' } = {}) {
+function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false, existing = 0, ls = '' } = {}) {
   const calls = []
   const ok = (value) => ({ isError: false, value })
+  let seqIdx = 0 // pollSeq cursor: successive __BJOB__ polls shift through the
+  // scripted states (last entry repeats) — the wait_sec loop re-polls
   return {
     calls,
     tools: {
@@ -100,7 +102,10 @@ function makeCtx({ poll = {}, archive = null, failUpload = false, existing = 0, 
         }
         assert.equal(a.alias, 'node1', `${view.name}: ssh_* calls target the alias`)
         const cmd = String(a.command || '')
-        if (cmd.includes('__BJOB__')) return reply(ok(pollValue(poll)))
+        if (cmd.includes('__BJOB__')) {
+          if (pollSeq) return reply(ok(pollValue(pollSeq[Math.min(seqIdx++, pollSeq.length - 1)])))
+          return reply(ok(pollValue(poll)))
+        }
         if (cmd.includes('sleep 1; bjobs')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: '777 RUN\n__STARTED__\n', stderr: '', durationMs: 3 }))
         if (cmd.includes('bsub -q')) {
           return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: 'Job <777> is submitted to queue <normal>.\n', stderr: '', durationMs: 3 }))
@@ -310,6 +315,64 @@ test('batch_poll reads the job file and reports completed', async () => {
     assert.equal(res.state, 'completed')
     assert.equal(res.completed, 2)
     assert.equal(res.job_id, '777')
+  } finally {
+    restoreEnv()
+  }
+})
+
+test('batch_poll wait_sec (D-016): a terminal first poll breaks immediately, no re-poll', async () => {
+  const run = makeRunDir()
+  try {
+    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
+      machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
+    }))
+    const ctx = makeCtx({ poll: { meta: 2, total: 2 } })
+    const res = await tool(ctx, 'batch_poll').execute({ run_dir: run, wait_sec: 30 }, {})
+    assert.equal(res.ok, true)
+    assert.equal(res.state, 'completed')
+    assert.equal(res.completed, 2)
+    assert.equal(res.scheduler, 'lsf') // payload shape unchanged by wait_sec
+    const polls = ctx.calls.filter((c) => c.name === 'ssh_exec' && String(c.arguments.command).includes('__BJOB__'))
+    assert.equal(polls.length, 1)
+  } finally {
+    restoreEnv()
+  }
+})
+
+test('batch_poll wait_sec (D-016): re-polls through a running batch until it settles', async () => {
+  const run = makeRunDir()
+  try {
+    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
+      machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
+    }))
+    // first poll: 1/2 running; the ~10 s gap is clamped to the 1 s deadline,
+    // so the second poll (scripted completed) runs ~1 s in and breaks the loop
+    const ctx = makeCtx({ pollSeq: [
+      { meta: 1, total: 2, status: 'running', bjobs: '777 RUN' },
+      { meta: 2, total: 2 },
+    ] })
+    const res = await tool(ctx, 'batch_poll').execute({ run_dir: run, wait_sec: 1 }, {})
+    assert.equal(res.ok, true)
+    assert.equal(res.state, 'completed') // the LAST payload wins
+    assert.equal(res.completed, 2)
+    const polls = ctx.calls.filter((c) => c.name === 'ssh_exec' && String(c.arguments.command).includes('__BJOB__'))
+    assert.equal(polls.length, 2)
+  } finally {
+    restoreEnv()
+  }
+})
+
+test('batch_poll wait_sec (D-016): deadline returns the last (non-terminal) payload', async () => {
+  const run = makeRunDir()
+  try {
+    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
+      machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
+    }))
+    const ctx = makeCtx({ pollSeq: [{ meta: 1, total: 2, status: 'running', bjobs: '777 RUN' }] })
+    const res = await tool(ctx, 'batch_poll').execute({ run_dir: run, wait_sec: 1 }, {})
+    assert.equal(res.ok, true)
+    assert.equal(res.state, 'running') // never settled within the deadline
+    assert.equal(res.completed, 1)
   } finally {
     restoreEnv()
   }

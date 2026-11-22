@@ -8,12 +8,17 @@ import path from 'node:path'
 import { readJsonIfExists, resolveDir } from '../py.js'
 import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
 import {
-  DEFAULT_INCLUDES, DEFAULT_REMOTE_PYTHON, buildDirectCommand, buildSubmitCommand, collectRunFiles, countFetched,
+  DEFAULT_INCLUDES, DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildDirectCommand, buildSubmitCommand,
+  collectRunFiles, countFetched,
   defaultRemoteScriptsDir, extractArchive, fetchCommand,
   listCommand, nextSimDir, parseJobId, parsePollOutput, parseRemoteList, pluginScripts,
   pollCommand, postSubmitCommand, readJob, remoteJoin,
   resolveRemoteDir, sanitizeRel, simScriptsDir, templateUploadPlan, writeJob,
 } from '../batch.js'
+
+// batch_poll wait_sec cadence (D-016): the gap between re-polls of a blocking
+// wait. 10 s matches the wait policy's preferred first-backoff step.
+const WAIT_GAP_MS = 10_000
 
 function totalFromConfig(runDir) {
   const cfg = readJsonIfExists(path.join(runDir, 'sweep_config.json'))
@@ -248,7 +253,8 @@ export function batchTools(ctx) {
       description: 'Poll a remote batch submitted by batch_submit: bjobs state plus the batch\'s own progress '
         + '(point_meta.json count, sweep_progress.json summary, errlog tail). The machine, directory and job id '
         + 'default to <run_dir>/.batch_job.json. A finished job that left the queue is reported as completed when '
-        + 'all point_meta.json files exist.',
+        + 'all point_meta.json files exist. Pass wait_sec for a bounded blocking wait — the in-flight call is the '
+        + 'window where the session progress card live-updates.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory holding .batch_job.json' },
         machine_id: { type: 'string', description: 'Override the dsh-ssh host alias from the job file' },
@@ -256,6 +262,9 @@ export function batchTools(ctx) {
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the LSF job id' },
         scheduler: { type: 'string', enum: ['lsf', 'direct'], description: 'lsf (default) checks bjobs; direct relies on the batch progress files' },
+        wait_sec: { type: 'integer', description: 'Bounded blocking wait: re-poll (~10 s apart) until a terminal state '
+          + '(completed/failed/partial) or this many seconds elapse (capped at 600), then return the last payload. '
+          + 'Default 0 = single snapshot, the original contract' },
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
@@ -268,17 +277,33 @@ export function batchTools(ctx) {
         if (!/^[\w.-]+$/.test(jobId)) throw new Error(`invalid job_id ${JSON.stringify(jobId)} (word/dot/dash only — it is joined into local paths)`)
         let scheduler = args.scheduler || job?.scheduler || 'lsf'
         if (scheduler === 'none') scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
-        const r = await execRemote(ctx, target.alias,
-          pollCommand({ remoteDir, jobId, scheduler }), { timeoutMs: 30_000 })
-        if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
-        const parsed = parsePollOutput(r.stdout, { total: job?.total_points })
+        // wait_sec (D-016): 0 keeps the single-snapshot contract; a positive
+        // value re-polls every WAIT_GAP_MS until a terminal state or the
+        // deadline, returning the LAST payload (shape unchanged). The blocking
+        // call is the window where the session card live-updates (the remote
+        // progress source polls at 5 s client-side).
+        const waitSec = Math.max(0, Math.min(Number(args.wait_sec) || 0, 600))
+        const deadline = Date.now() + waitSec * 1000
+        const command = pollCommand({ remoteDir, jobId, scheduler })
+        let parsed
+        let stdout = ''
+        for (;;) {
+          const r = await execRemote(ctx, target.alias, command, { timeoutMs: 30_000 })
+          if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
+          parsed = parsePollOutput(r.stdout, { total: job?.total_points })
+          stdout = r.stdout || ''
+          if (!waitSec || TERMINAL_POLL_STATES.has(parsed.state)) break
+          const remain = deadline - Date.now()
+          if (remain <= 0) break
+          await new Promise((res) => setTimeout(res, Math.min(WAIT_GAP_MS, remain)))
+        }
         return {
           ok: true,
           job_id: jobId,
           remote_dir: remoteDir,
           scheduler,
           ...parsed,
-          output: (r.stdout || '').trim().slice(0, 1500),
+          output: (stdout || '').trim().slice(0, 1500),
         }
       },
     },

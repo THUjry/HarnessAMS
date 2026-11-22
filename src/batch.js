@@ -239,6 +239,12 @@ export function postSubmitCommand(remoteDir, jobId) {
     + 'test -f errlog.txt && echo __ERRLOG__; test -f .worker_started && echo __STARTED__'
 }
 
+// Terminal poll states: once seen, no further polling helps — batch_poll's
+// wait_sec loop stops and the progress-card source freezes on the last payload.
+// 'partial' (queue DONE but points missing) is terminal for that submission;
+// 'unknown' keeps polling (often a queue hiccup).
+export const TERMINAL_POLL_STATES = new Set(['completed', 'failed', 'partial'])
+
 export function pollCommand({ remoteDir, jobId, scheduler }) {
   const bjob = scheduler === 'direct'
     ? 'echo __BJOB__; echo "(scheduler=direct)"'

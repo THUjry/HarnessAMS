@@ -73,7 +73,10 @@ index continues with `batch<M>+1` on the same day, a new day starts a new
    idempotent against connection replays (LSF marker + flock).
 3. **Monitor** — `batch_poll {run_dir}`: bjobs state plus the batch's own
    progress (point_meta.json count, sweep_progress.json summary, errlog
-   tail). **Timing trap:** for fast batches the progress file may lag or be
+   tail). Pass `wait_sec` (≤600) for a bounded blocking wait — one call
+   re-polls ~every 10 s until the batch settles and its session card
+   live-updates the whole time; the default `0` stays a single snapshot.
+   **Timing trap:** for fast batches the progress file may lag or be
    mid-write right after completion — judge completion by the per-point
    `point_meta.json` count (the poll's `completed` field counts exactly
    these), not by the progress file alone.
