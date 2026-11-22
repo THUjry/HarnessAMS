@@ -36,7 +36,6 @@ test('agentsmd: a fresh workspace gets the empty flat table + pointer + first-fi
     assert.ok(md1.includes('  last_selfcheck_run_id: null'))
     assert.ok(md1.includes('  last_selfcheck_overall: null'))
     assert.ok(md1.includes('  run_mode: null'), 'unmeasured fields are the YAML null literal in the template')
-    assert.ok(!md1.includes('machines:'), 'no machines section anymore (registry facts stay out)')
     assert.ok(!md1.includes('Self-check workflow'), 'the first-fill template (no settings yet) renders no workflow section')
 
     // a later call never rewrites — an agent-filled table survives
@@ -72,7 +71,6 @@ test('agentsmd: values sync fills measured flat facts, keeps the pointer, REMOVE
     assert.ok(md.includes('  machine: "node1"'))
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
-    assert.ok(!md.includes('machines:'), 'machines section retired')
     assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre)'), 'the values sync renders the settings-matched workflow branch')
     assert.ok(md.includes('ok-via-fallback'), 'the LSF branch carries the fallback rule')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block after the sync')

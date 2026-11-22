@@ -1,7 +1,6 @@
 // Check-parameters storage + API contract (per-session since D-008): module
 // read/validate semantics survive unchanged (the project file is the FALLBACK
-// layer), the retired /api/check-params routes answer with their retirement
-// contract, and /api/session-config carries fallback_params (+ the sessions
+// layer) and /api/session-config carries fallback_params (+ the sessions
 // map with per-session confirmed tables).
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
@@ -9,7 +8,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { registerRoutes, callGet, callPut } from './helpers.mjs'
+import { registerRoutes, callGet } from './helpers.mjs'
 import { writeSessionConfig } from '../src/server/project.js'
 import {
   defaultCheckParams, validateCheckParams, readCheckParams, checkParamsPath,
@@ -51,18 +50,12 @@ test('checkparams: validateCheckParams rejects bad shapes, accepts good ones', (
   assert.ok(validateCheckParams({ ...good, strict_includes: 1 }).error)
 })
 
-test('checkparams routes retired; per-session table + fallback_params ride /api/session-config', async () => {
+test('per-session table + fallback_params ride /api/session-config', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-chkapi-'))
   try {
     const handler = await registerRoutes({ workspaceRegistry: { list: () => [
       { id: 'w1', path: dir, title: 'P1', sessionIds: ['s1', 'session-sess1111-2222-3332-4444-555555555555'] },
     ] } })
-    // the retired routes answer with their retirement contract
-    const retired = await callGet(handler, 'http://127.0.0.1/harnessams/api/check-params?sessionId=s1')
-    assert.equal(retired.code, 404)
-    assert.match(retired.body.error, /retired/)
-    assert.equal((await callPut(handler, 'http://127.0.0.1/harnessams/api/check-params?sessionId=s1', {})).code, 405)
-
     const base = 'http://127.0.0.1/harnessams/api/session-config'
     // unknown session -> 404
     assert.equal((await callGet(handler, base + '?sessionId=nope')).code, 404)

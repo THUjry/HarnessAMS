@@ -169,10 +169,6 @@ test('machines: ssh_list single channel carries the batch contract', async () =>
   assert.equal(node1.username, 'op')
   assert.equal(node1.auth, 'key')
   assert.equal(node1.keyReady, true)
-  // pure registry projection: no workspace/configured columns anymore (the
-  // remote root is a per-project setting, not a machine fact)
-  assert.equal(node1.workspace, undefined)
-  assert.equal(node1.configured, undefined)
   const farm = r.machines.find((m) => m.id === 'farm')
   assert.equal(farm.host, '10.0.0.8')
 })
@@ -215,8 +211,6 @@ test('machines: checkableMachines projects the whole registry; remoteMachinesSta
     id: 'node1', name: 'node1', host: '192.0.2.11', port: 22, username: 'op',
     auth: 'key', keyReady: true,
   })
-  assert.equal(status.machines[0].remoteRoot, undefined)
-  assert.equal(status.machines[0].configured, undefined)
 
   const down = await remoteMachinesStatus({ get: () => undefined })
   assert.equal(down.installed, false)

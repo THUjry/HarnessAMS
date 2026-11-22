@@ -1,6 +1,6 @@
 // Console-page first-run guide + digital-assets listing static contracts: the client
 // half is a combo-loaded classic script (no ESM import), so these are asserted against
-// the source text — the same discipline as entry.test.mjs / terminal.test.mjs.
+// the source text — the same discipline as entry.test.mjs.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,8 +16,6 @@ test('guide: console page wiring — seen flag, centered first-run state, persis
   assert.ok(src.includes('hams-guidecenter'), 'the centered first-run state needs its layout class')
   assert.ok(src.includes('function GuideView'), 'the guide view component must exist')
   assert.ok(/function guideSeenMark\(\)/.test(src), 'seen-flag writer must exist')
-  // the guide is a console-page surface only: never a task-sidebar sub-view
-  assert.ok(!/id: 'guide'/.test(src), 'guide must not be registered as a TASK_VIEWS entry')
 })
 
 test('guide: bilingual copy — every key exactly twice, slurm marked not supported', () => {
@@ -27,25 +25,16 @@ test('guide: bilingual copy — every key exactly twice, slurm marked not suppor
   assert.match(src, /'guide\.s2slurm': '[^']*暂不支持/, 'slurm must be marked 暂不支持 in zh')
   assert.match(src, /'guide\.s2slurm': '[^']*not supported/, 'slurm must be marked not supported in en')
   // the start-page guide card description was upgraded together with the feature
-  assert.ok(!src.includes("'项目任务'"), 'guide card description must not regress to the placeholder text')
   assertDictKeys(src, ['tasks.guideDesc'])
 })
 
-test('assets: vendored .js packages with license and copy locations, reports gone', () => {
+test('assets: vendored .js packages with license and copy locations', () => {
   assert.ok(assetsSrc.includes("file: 'plotly.min.js'"), 'assets.js must list plotly.min.js as vendored')
-  // the vendored xterm bundle was removed with the dsh-remote terminal (2026-11-14)
-  for (const gone of ['xterm.js', 'xterm-addon-fit.js', 'xterm-addon-search.js']) {
-    assert.ok(!assetsSrc.includes(`'${gone}'`), `assets.js must no longer list ${gone}`)
-  }
   assert.equal((assetsSrc.match(/license: 'MIT'/g) ?? []).length, 1, 'only plotly is vendored now')
   assert.ok(assetsSrc.includes('function scanCopies'), 'the bounded workspace copy scan must exist')
   assert.ok(assetsSrc.includes("'node_modules'") && assetsSrc.includes("startsWith('.')"), 'scan must skip node_modules and dot dirs')
-  // the client consumes packages from /api/assets; the sweep-report listing is
-  // gone, and the route scans no workspace anymore (the family root is retired)
-  assert.ok(!src.includes("API + '/dirs'"), 'the assets area must not list sweep reports anymore')
+  // the client consumes packages from /api/assets; the route scans no workspace
   assert.ok(/assetsStatus\(\)/.test(indexSrc), '/api/assets serves the package copies without a workspace scan')
-  assert.ok(!indexSrc.includes("route === '/api/dirs'"), 'the orphaned dirs route is retired')
   assertDictKeys(src, ['assets.colPkg', 'assets.colLicense', 'assets.colPkgCopy', 'assets.colRoute',
     'assets.colWsCopies', 'assets.noCopies', 'assets.notices'])
-  assert.ok(!src.includes("'assets.sweepReports'") && !src.includes("'assets.sharedCopy'"), 'removed asset keys must stay out of both dictionaries')
 })

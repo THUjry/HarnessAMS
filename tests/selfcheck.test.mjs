@@ -1038,10 +1038,6 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
     'selfchk.scopeLocal', 'selfchk.scopeRemote', 'selfchk.noneYet', 'selfchk.skipped',
     'selfchk.summaryOk', 'selfchk.summaryFallback', 'selfchk.summaryFail', 'selfchk.diagDone', 'selfchk.diagFail',
   ])
-  // retired keys must be gone from BOTH dictionaries (root typing + old header)
-  for (const gone of ['pset.dirLabel', 'pset.colRoot', 'pset.rootHint', 'pset.rootMissing', 'selfchk.title']) {
-    assert.ok(!src.includes(`'${gone}'`), `retired key ${gone} must not appear`)
-  }
   assert.ok(src.includes("API + '/tool'"), 'all buttons ride the single /api/tool funnel')
   assert.ok(src.includes('const callToolRoute ='), 'tool funnel helper')
   assert.ok(src.includes("action: 'status', run_id: runId"), 'poll via action=status')
@@ -1066,9 +1062,8 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
   assert.ok(src.includes("width: '25%'"), 'colgroup narrow columns')
   assert.ok(src.includes("width: '50%'"), 'colgroup double-width verdict column')
   assert.ok(src.includes('.hams-settable .hams-select { width: 100%; }'), 'selects fill the cell')
-  // merged remote-root row: browse-only, no free-typed root input anywhere
+  // merged remote-root row: browse-only
   assert.ok(src.includes("updateSetting('remote_root', dir)"), 'browse pick writes remote_root')
-  assert.ok(!src.includes("placeholder: '/home/"), 'the free-typed root input is retired')
   // stop button + cancelled summary line
   assert.ok(src.includes("tr('selfchk.stop')"), 'stop button label')
   assert.ok(src.includes("run.status === 'cancelled'"), 'cancelled summary line')

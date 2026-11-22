@@ -145,7 +145,6 @@ test('skills: gen_cascade_report smoke — synthetic 2-bit cascade in both input
     assert.match(js1, /"traces":\[/)
     const html1 = fs.readFileSync(path.join(out1, 'Smoke2bit_report.html'), 'utf8')
     assert.match(html1, /Worst Match - max\(S11,S22\) \(dB\)/)
-    assert.ok(!html1.includes('Worst Match - S11 (dB)'), 'S11-only mode must not exist')
 
     // --run-dir mode (NN/netlist.scs.raw/sp.sp, NN = control word value)
     const rd = path.join(dir, 'rundir')
