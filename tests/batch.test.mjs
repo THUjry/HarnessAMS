@@ -188,6 +188,17 @@ test('path guards and poll parsing', () => {
   assert.equal(empty.state, 'completed')
   const running = parsePollOutput(pollValue({ meta: 1, total: 2, status: 'running' }).stdout, { total: 2 })
   assert.equal(running.state, 'running')
+  // Live-sampled 2026-11-22: a progress file written WITHOUT a trailing newline
+  // makes the shell splice `cat sweep_progress.json` straight into `echo __ERR__`
+  // (`}__ERR__`). The section split must tolerate the missing boundary newline
+  // — before the fix this shape silently parsed progress to null (succeeded 0).
+  const noNl = '__BJOB__\n777 RUN\n__META__\n1\n__DIRS__\n1\n__PROG__\n'
+    + '{"status": "running", "total_points": 2, "completed": 1, "succeeded": 1, "failed": 0,'
+    + ' "simulator": "fake", "compute_node": "node3"}__ERR__\n'
+  const spliced = parsePollOutput(noNl, { total: 2 })
+  assert.equal(spliced.succeeded, 1)
+  assert.equal(spliced.compute_node, 'node3')
+  assert.equal(spliced.errlog_tail, null)
 })
 
 test('submit/direct commands carry the replay idempotency guards', () => {

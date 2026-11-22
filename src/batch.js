@@ -257,7 +257,11 @@ export function pollCommand({ remoteDir, jobId, scheduler }) {
 }
 
 function section(text, name) {
-  const m = text.match(new RegExp(`__${name}__\\n?([\\s\\S]*?)(?=\\n__[A-Z]+__|$)`))
+  // The trailing marker may abut the payload without a newline (a progress
+  // file written without a trailing \n makes `cat sweep_progress.json; echo
+  // __ERR__` concatenate into `}__ERR__`) — the lookahead takes an optional
+  // \n so such sections still split instead of silently parsing to nothing.
+  const m = text.match(new RegExp(`__${name}__\\n?([\\s\\S]*?)(?=\\n?__[A-Z]+__|$)`))
   return m ? m[1].trim() : ''
 }
 
