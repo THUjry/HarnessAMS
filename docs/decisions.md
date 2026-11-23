@@ -1,10 +1,10 @@
 # Design Decisions
 
-Design decisions for the `dsh-harnessams` plugin and the HarnessAMS suite. **Ordered by importance, not chronology** (2026-11-23 ruling): the top entry is the suite's division of labor; everything else follows in the order a maintainer needs it. Entry IDs (`D-001`…`D-017`) are stable — external documents cite them. Superseded content folds into its successor entry; the day-by-day history lives in the root repo's `docs/` chronicle.
+Design decisions for the `dsh-harnessams` plugin and the HarnessAMS suite. **Ordered by importance, not chronology** (2026-11-23 ruling): the top entry is the suite's division of labor; everything else follows in the order a maintainer needs it. Entry IDs (`D-001`…`D-018`) are stable — external documents cite them. Superseded content folds into its successor entry; the day-by-day history lives in the root repo's `docs/` chronicle.
 
 Entry shape: Status / Context / Decision / Consequences (long Alternatives sections were dropped in the 2026-11-23 compression; the distilled trade-offs remain inside Decision/Consequences).
 
-## D-017 — Suite division of labor: SmartAnaSim is a pure standalone tool set; HarnessAMS owns the managed scan flow (2026-11-23)
+## D-018 — Suite division of labor: SmartAnaSim is a pure standalone tool set; HarnessAMS owns the managed scan flow (2026-11-23)
 
 - Status: Accepted (2026-11-23; supersedes D-013's "SmartAnaSim carries no bundled skills", D-016's three-tool card scope, and the sim-progress placement of the 2026-11-01 tool redistribution)
 - Context: the 2026-11-01 redistribution left scan execution split across packages (SmartAnaSim's local spectre_run_sweep vs the top plugin's remote batch_*) with the progress/report tools in the top plugin, while the requirement repo placed "run simulation" wholly with SmartAnaSim. User ruling 2026-11-23: two clean positions, scan methodology centralized.
@@ -37,24 +37,31 @@ Entry shape: Status / Context / Decision / Consequences (long Alternatives secti
 
 ## D-012 — gen_sweep_report is a pure report renderer; RawResults/SimResults/Figs layout; remote-first analysis (2026-11-21)
 
-- Status: Accepted (tool renamed `gen_sweep_report` 2026-11-23, D-017)
+- Status: Accepted (tool renamed `gen_sweep_report` 2026-11-23, D-018)
 - Context: sim_analysis did too much (collect/summarize/curves/report) and the Retry report's all-dashes table exposed the real issue — raw-data processing belongs to the model, so the tool only draws.
 - Decision: input = a model-written spec JSON `{project_dir?, title?, conclusions?, out?, rounds:[{id, title?, points, curves?, note?}]}` (points/curves inline or `{"$file"}` refs; project_dir derives when the spec sits in `<project>/SimResults/`; column names = the union across points; the cellVal param branch reads `p.params`). Output: report at the project root, data JS in `SimResults/`, one PNG per chart in `Figs/` (headless jsdom + bundled plotly + `Plotly.toImage(svg)` + resvg rasterization — the PNG path never settles in jsdom; deps ship prebuilt, export is fail-open). Registers into the CALLING session's dashboard (exec.agent.id). File layout both sides (user ruling "remote+local same name"): batch_submit auto-names `<remote_root>/RawResults/Sim*`; raw local data lands `<project>/RawResults/`; compact results go to `SimResults/` via ssh_download. **Remote-first analysis** = the put/exec/get triple over dsh-ssh (upload the SmartAnaSim parser scripts side by side or a self-written analyzer, exec with the cluster's full python path, download the compact JSON); the batch-sweep skill documents it as the default. Fork-404 fix rides along: the first-seen persist is awaited before the dashboard iframe mounts, with bounded retries.
 - Consequences: the Analysis/ era and the collect results.json contract ended for new flows; the model owns all data processing; every chart exists as a standalone PNG at generation time.
 
 ## D-011 — Bundled skills + the template*.scs family + the Sim run-dir convention (2026-11-21)
 
-- Status: Accepted (the report-redesign section was superseded by D-012; the skill ownership split was superseded by D-017)
+- Status: Accepted (the report-redesign section was superseded by D-012; the skill ownership split was superseded by D-018)
 - Context: the simulation-analysis wave — skills bundled into the plugin, the exact template.scs name relaxed, a Sim naming convention, a generic sweep report.
 - Decision: skills ride the official host registry — `ctx.skills.register` per packaged `skills/<name>/SKILL.md` (frontmatter name/description; catalog lines only, bodies load on demand through the host `skill` tool; `resourceBase` = the skill directory; fail-open; `inject` carries `skills`). template*.scs family: the file uploads under its OWN name and `sweep_config.netlist_template` must match it exactly (mismatch/undeclared/declared-but-missing fail at submit). Sim convention: `nextSimDir` (`Sim<N>_<YYYYMMDD>_batch<M>`; same index + batch+1 same day, else index+1 batch1); `batch_submit.remote_dir` optional — one `ls -1` picks the next free name under `<remote_root>/RawResults`; the progress layer recognizes `<project>/Sim*/` and `sweep/Sim*/` beside legacy `sweep/RoundN/top`. dca method: shunt-arm total from ideal formulas, switch Ron a DIRECT input (1/3..1/5 of the arm total), ZTC retired, ideal R/C with real sky130 switches, simulation authoritative over analytic predictions.
 - Consequences: skill catalog lines reach every session on an enabled plugin (wire-verified); the dca data pack ships under the skill with provenance notes.
 
 ## D-016 — Live progress cards: instant first frame + the remote poll endpoint (2026-11-22)
 
-- Status: Accepted (the three-tool card scope was superseded by D-017: batch_poll is the only carded tool)
+- Status: Accepted (the three-tool card scope was superseded by D-018: batch_poll is the only carded tool)
 - Context: the 2026-11-22 session-log investigation found remote batches never showed live progress — `/api/progress` reads only local files and a 1 s poll snapshot left the real run happening between tool calls. User rulings: a carded call must show content the MOMENT it is invoked (zero-ssh first frame); a batch finishing between polls still shows both frames.
 - Decision: `readRunProgress` ladder gains the `.batch_job.json` rung (progress → .worker_started → job → config) — a submitted-but-unmirrored run dir answers an instant 0/N submitted frame. `GET /api/progress-remote`: same session fence; machine/dir/job resolved server-side from the job file; runs the batch pollCommand through execRemote (10 s); failures answer `200 {unreachable}` so the card keeps its last frame; 4 s TTL single-flight per runDir bounds ssh pressure. Client: the batch_poll card fetches the remote source at the 5 s wait-policy cadence plus the local ladder each tick (normRemoteProg normalizes shapes). `batch_poll` gains `wait_sec` (default 0 = snapshot contract unchanged; re-poll ~10 s until terminal or ≤600 s, last payload wins) — the blocking call is the live-card window.
 - Consequences: fixture protocol notes for custom workers — must accept `--work-dir`, write progress atomically WITH a trailing newline (a missing `\n` splices the poll sections; section() now tolerates it, regression-tested). REMOTE_WAIT_POLICY and the skill Monitor sections carry the cadence rules.
+
+## D-017 — spectre_parse keeps its standalone .sp entry; sp.sp stays with the snp_common parser (2026-11-23)
+
+- Status: Accepted (recorded by a parallel session — AMS 938b8b4 + SAS c9bd7b3, unpushed; the TOOL wrapper itself was retired later the same day by D-018 — the entry and the delegation survive unchanged in `spectre_psf_parse.py`, documented by the smart-spectre skill's analysis-scripts page)
+- Context: a code-review proposal to merge the standalone `.sp` file entry (`--raw-dir` pointing directly at a file, outputs landing beside it) into the generic psfascii swept-curve parser.
+- Decision: keep the entry and the delegation to `snp_common.parse_psfascii`. Three reasons: (1) no new dependency — the entry rides the directory mode's existing delegation, the upload tree is unchanged (the worker already carries snp_common transitively); (2) sp.sp is format-special — the HEADER carries a port table (`PORT<k>:r` / `PORT<k>:num`; Spectre uppercase 0-based vs EMX lowercase 1-based) and TYPE holds S/Y/Z side by side, which the generic `_parse_swept` would flatten three-ways (signals ×3), drop the port renumbering (silently permuting matrices on out-of-order files) and turn hard errors into NaN fills; (3) the snp tools are guide-gated — a session that has not called snp_guide has no bare .sp reader, and snp_read's output contract (matrix long CSV + `_read.json`) is not the `<stem>_psf.json` Re/Im curve JSON.
+- Consequences: the generic parser mechanically CAN parse sp.sp — the risk is silent semantic corruption, not a crash, and merging would create a second sp parser in the tree. Directory mode already folds each point's sp.sp into its output; the ruling concerns the standalone-file entry only. Changing `spectre_psf_parse.py` must keep the delegation structure.
 
 ## D-010 — Browse-only remote root, self-check stop, the system-prompt waiting policy (2026-11-21)
 
