@@ -47,13 +47,14 @@ export function defaultSettings() {
 // sim_scripts_dir points at the SmartAnaSim scripts tree (the worker source for
 // batch_submit). In a dev checkout that is the sibling HarnessAMS-SmartAnaSim
 // package (PKG_ROOT is <plugin>/src, so the sibling sits TWO levels up); in an
-// installed layout the sibling dsh-harnessams-sim package — probe both, keep
-// the dev-shaped default when neither exists (hand-editable). Note path.join
-// folds '..' away, hence the explicit double parent.
+// installed layout the sibling dsh-harnessams-smart-ana-sim package (the real
+// npm name — an earlier "dsh-harnessams-sim" probe never matched) — probe both,
+// keep the dev-shaped default when neither exists (hand-editable). Note
+// path.join folds '..' away, hence the explicit double parent.
 function defaultSimScriptsDir() {
   const candidates = [
     path.join(PKG_ROOT, '..', '..', 'HarnessAMS-SmartAnaSim', 'scripts'),
-    path.join(PKG_ROOT, '..', '..', 'dsh-harnessams-sim', 'scripts'),
+    path.join(PKG_ROOT, '..', '..', 'dsh-harnessams-smart-ana-sim', 'scripts'),
   ]
   for (const c of candidates) {
     try { if (fs.statSync(c).isDirectory()) return path.resolve(c) } catch { /* probe next */ }
