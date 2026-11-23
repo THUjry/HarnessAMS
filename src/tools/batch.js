@@ -164,7 +164,9 @@ export function batchTools(ctx) {
             + 'and waits for it to finish' },
         job_name: { type: 'string', description: 'bsub -J name (default hams-<run dir name>)' },
         sync_scripts: { type: 'boolean', description: 'Upload scripts/ to the remote scripts root (default true; pass false after a successful sync)' },
-        overwrite: { type: 'boolean', description: 'Allow submitting into a remote directory that already has point_meta.json files' },
+        overwrite: { type: 'boolean', description: 'Allow submitting into a remote directory that already has point_meta.json files. '
+          + 'Stale replay markers (.hams_submitted / .hams_direct_done) are cleared first, so a batch that already ran here actually re-runs '
+          + '(without this, a completed direct/LSF dir short-circuits to its old result)' },
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
@@ -258,6 +260,7 @@ export function batchTools(ctx) {
             python: remotePython,
             workerPath: remoteWorker,
             workerArgs: args.worker_args || [],
+            overwrite: args.overwrite === true,
           })
           const ran = await execRemote(ctx, target.alias, command, { timeoutMs: 600_000 })
           const jobId = `direct-${Date.now()}`
@@ -300,6 +303,7 @@ export function batchTools(ctx) {
           python: remotePython,
           workerPath: remoteWorker,
           workerArgs: args.worker_args || [],
+          overwrite: args.overwrite === true,
         })
         const submitted = await execRemote(ctx, target.alias, command, { timeoutMs: 90_000 })
         if (!submitted.ok) {

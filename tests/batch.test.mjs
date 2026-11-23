@@ -219,6 +219,25 @@ test('submit/direct commands carry the replay idempotency guards', () => {
   assert.ok((direct.match(/\.hams_direct_done/g) ?? []).length >= 3, 'done marker checked twice + touched')
   assert.ok(direct.includes('flock 9'), 'direct also serializes replays behind a live run')
   assert.ok(direct.includes('&& touch .hams_direct_done'), 'marker written only on worker success')
+  assert.ok(!submit.includes('rm -f .hams_submitted'), 'plain submit never clears markers')
+
+  // overwrite=true (2026-11-23): a finished batch re-runs — stale markers are
+  // cleared under the lock, and the fresh markers carry a tag so a replay of
+  // the SAME overwrite call still short-circuits instead of double-running
+  const ow = buildSubmitCommand({
+    remoteDir: '/home/op/sim/batch1', python: 'python3',
+    workerPath: '/w/spectre_sweep_worker.py', workerArgs: [], overwrite: true,
+  })
+  assert.match(ow, /rm -f \.hams_submitted \.hams_direct_done/, 'stale markers cleared')
+  assert.match(ow, /grep -q "\^#hams-overwrite" \.hams_submitted/, 'a tagged fresh marker still short-circuits')
+  assert.match(ow, /#hams-overwrite\\n' "\$out"/, 'the marker this run writes is tagged')
+
+  const owDirect = buildDirectCommand({
+    remoteDir: '/home/op/sim/fore', python: 'python3',
+    workerPath: '/w/spectre_sweep_worker.py', workerArgs: [], overwrite: true,
+  })
+  assert.match(owDirect, /rm -f \.hams_submitted \.hams_direct_done/, 'direct clears both markers too')
+  assert.match(owDirect, /#hams-overwrite\\n' > \.hams_direct_done/, 'the done marker is tagged')
 })
 
 test('batch_submit uploads the worker scripts tree and run files, then records the job', async () => {

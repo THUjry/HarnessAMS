@@ -189,21 +189,37 @@ export function nextSimDir(names, today) {
 // its job id); flock serializes concurrent first attempts so two submissions
 // can never both miss the marker. The marker is written only when bsub exits 0,
 // so a failed submit stays retryable.
-export function buildSubmitCommand({ remoteDir, queue, jobName, python, workerPath, workerArgs }) {
+//
+// overwrite=true replaces a batch that already ran here (2026-11-23): the
+// stale replay markers (.hams_submitted / .hams_direct_done) are cleared under
+// the flock so the run actually re-runs, and the fresh marker this attempt
+// writes carries a "#hams-overwrite" tag — a REPLAY of the same overwrite call
+// sees the tag and still short-circuits instead of double-submitting. An
+// untagged marker is by definition stale under overwrite (it predates this
+// call). parseJobId/parsePollOutput ignore the extra tag line.
+export function buildSubmitCommand({ remoteDir, queue, jobName, python, workerPath, workerArgs, overwrite }) {
   const args = (workerArgs || []).map(String)
   if (!args.includes('--work-dir')) args.push('--work-dir', remoteDir)
+  const replay = 'if [ -f .hams_submitted ]; then cat .hams_submitted; exit 0; fi;'
+  const replaceStale = 'grep -q "^#hams-overwrite" .hams_submitted 2>/dev/null '
+    + '&& { cat .hams_submitted; exit 0; }; rm -f .hams_submitted .hams_direct_done;'
+  const preLock = overwrite ? ':' : replay
+  const inLock = overwrite ? replaceStale : replay
+  const mark = overwrite
+    ? 'printf \'%s\\n#hams-overwrite\\n\' "$out" | tee .hams_submitted;'
+    : 'printf \'%s\\n\' "$out" | tee .hams_submitted;'
   return [
     'cd', shq(remoteDir), '|| exit 9;',
-    'if [ -f .hams_submitted ]; then cat .hams_submitted; exit 0; fi;',
+    preLock,
     'exec 9>.hams_submit.lock; flock 9;',
-    'if [ -f .hams_submitted ]; then cat .hams_submitted; exit 0; fi;',
+    inLock,
     'out=$(bsub',
     '-q', shq(queue || 'normal'),
     '-J', shq(jobName || 'harnessams'),
     '-o', 'bsub.out', '-e', 'bsub.err',
     shq(python), shq(workerPath), ...args.map(shq),
     '2>&1); rc=$?;',
-    'if [ "$rc" -eq 0 ]; then printf \'%s\\n\' "$out" | tee .hams_submitted;',
+    `if [ "$rc" -eq 0 ]; then ${mark}`,
     'else printf \'%s\\n\' "$out" >&2; fi;',
     'exit "$rc"',
   ].join(' ')
@@ -216,16 +232,26 @@ export function buildSubmitCommand({ remoteDir, queue, jobName, python, workerPa
 // still-running first attempt holds the flock so a replay queues behind it
 // instead of double-running; a dead first attempt releases the lock (its
 // holder was killed), letting the replay rerun. The execRemote `timeout -s
-// KILL` wrapper bounds any lock wait.
-export function buildDirectCommand({ remoteDir, python, workerPath, workerArgs }) {
+// KILL` wrapper bounds any lock wait. overwrite=true uses the same
+// clear-and-tag scheme as the LSF submit (see there).
+export function buildDirectCommand({ remoteDir, python, workerPath, workerArgs, overwrite }) {
   const args = (workerArgs || []).map(String)
   if (!args.includes('--work-dir')) args.push('--work-dir', remoteDir)
+  const replay = 'if [ -f .hams_direct_done ]; then echo \'[hams] already completed (marker present)\'; exit 0; fi;'
+  const replaceStale = 'if [ -f .hams_direct_done ] && grep -q "^#hams-overwrite" .hams_direct_done 2>/dev/null; '
+    + 'then echo \'[hams] already completed (overwrite run)\'; exit 0; fi; '
+    + 'rm -f .hams_submitted .hams_direct_done;'
+  const preLock = overwrite ? ':' : replay
+  const inLock = overwrite ? replaceStale : replay
+  const done = overwrite
+    ? 'printf \'#hams-overwrite\\n\' > .hams_direct_done'
+    : 'touch .hams_direct_done'
   return [
     'cd', shq(remoteDir), '|| exit 9;',
-    'if [ -f .hams_direct_done ]; then echo \'[hams] already completed (marker present)\'; exit 0; fi;',
+    preLock,
     'exec 9>.hams_direct.lock; flock 9;',
-    'if [ -f .hams_direct_done ]; then echo \'[hams] already completed (marker present)\'; exit 0; fi;',
-    shq(python), shq(workerPath), ...args.map(shq), '&& touch .hams_direct_done',
+    inLock,
+    shq(python), shq(workerPath), ...args.map(shq), `&& ${done}`,
   ].join(' ')
 }
 
