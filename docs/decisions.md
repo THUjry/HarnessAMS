@@ -64,6 +64,7 @@ Design decisions for the `dsh-harnessams` plugin and the HarnessAMS suite, order
 - `server/selfcheckWorkflow.js` renders one of five feasible branches — local/spectre, local/golden, remote/LSF/spectre, remote/direct/spectre, remote/golden — each with a session-face bullet (run → status poll → stop), the chain bullet in tool-call order, the branch's fallback rule and a shared finalize bullet. Compute languages interpolate; they never fork the branch.
 - The block is English + ASCII; unknown settings normalize to defaults.
 - Rendered on VALUES builds only (the first-fill template renders none); both save paths (save_agentsmd and the finalize auto-sync) share one change point.
+- When the self-check chain changes (steps, tools, fallback semantics), the matching branch copy in `server/selfcheckWorkflow.js` changes in the same commit: those strings are what agents read in the project AGENTS.md, and a silent drift misleads them.
 
 ## D-010 — dca-design split into dca-cell-design + analysis-cascade-dca; the AsymATT generator absorbed; scrub rules for the skills tree
 
