@@ -355,6 +355,8 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
     assert.equal(poll.scheduler, 'local')
     assert.equal(poll.state, 'completed')
     assert.equal(poll.completed, 2)
+    assert.deepEqual(poll.fetched, []) // nothing to pull for a local run — and the payload says so
+    assert.match(poll.fetched_note, /already live in run_dir/)
     assert.equal(ctx.calls.length, 0, 'local poll reads files only')
 
     // a worker that dies at startup is a FAILED frame carrying its stderr — not

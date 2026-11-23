@@ -447,7 +447,9 @@ export function batchTools(ctx) {
             job_id: jobId,
             run_dir: runDir,
             scheduler: 'local',
-            fetched: [], // everything already lives in the run directory
+            fetched: [], // nothing to pull: everything already lives in the run directory
+            // ... and say so: an empty list reads as "no result files" otherwise
+            fetched_note: 'scheduler=local: no transfer — the result files already live in run_dir',
             ...frame,
           }
         }
