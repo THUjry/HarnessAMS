@@ -8,9 +8,10 @@
 // the slot register-inject hook), which must resolve to a registered
 // workspace, and every caller-supplied path must stay inside it.
 //
-// Paths may be remote-shaped POSIX strings (a mirror path only syncs progress
-// files after batch_fetch); anything not present on this host answers
-// { local: false } and the client silently omits the progress/aggregate block.
+// Paths may be remote-shaped POSIX strings (a mirror path only gains the
+// progress files after a terminal batch_poll pulls them down); anything not
+// present on this host answers { local: false } and the client silently omits
+// the progress/aggregate block.
 import fs from 'node:fs'
 import path from 'node:path'
 import { sessionProject } from './project.js'
@@ -113,7 +114,8 @@ export function progressSummaryPayload({ runDir, projectDir }) {
 // session-scoped route uses, and runDir/projectDir must stay inside that
 // project root. Remote-shaped POSIX strings fail containment on a Windows host
 // by construction (path.resolve parks them under the current drive, not the
-// workspace) — remote batches poll the local fetched paths after batch_fetch.
+// workspace) — remote batches poll the local mirror paths once a terminal
+// batch_poll has pulled the progress files down.
 export function progressFence(registry, params) {
   const sessionId = String(params.get('sessionId') ?? '').trim()
   const { project, reason } = sessionProject(registry, sessionId)

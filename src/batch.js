@@ -1,12 +1,12 @@
 // Generic remote batch channel: submit a worker through LSF (bsub), or run the
 // same worker directly on the remote login host (scheduler=direct, node-local
 // foreground). Both paths upload one run directory plus the suite's worker
-// scripts and record the same job file for poll/fetch.
+// scripts and record the same job file for batch_poll.
 //
 // This layer knows nothing about a simulator: it uploads a run directory plus
-// the suite's worker scripts, submits a worker script through bsub, polls the
-// LSF job and the batch's progress files, and fetches the produced files back
-// with tar. A simulator-specific flow is only a choice of worker + worker_args
+// the suite's worker scripts, submits a worker script through bsub, and polls
+// the LSF job plus the batch's progress files (a terminal poll pulls the light
+// result files straight down — no archive). A simulator-specific flow is only a choice of worker + worker_args
 // (for example spectre/spectre_sweep_worker.py --config sweep_config.json ...).
 //
 // Worker-script source: the batch tools live here but the simulator workers do
@@ -20,15 +20,8 @@
 // and its shared modules resolve remotely.
 import fs from 'node:fs'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { resolveWorkspacePaths } from './server/settings.js'
 import { shq } from './remote.js'
-
-const execFileAsync = promisify(execFile)
-
-export const DEFAULT_INCLUDES = ['point_meta.json', 'sweep_progress.json',
-  'errlog.txt', 'bsub.out', 'bsub.err']
 
 // Worker scripts root (see the header comment). `anchor` is any path inside
 // the project (a run directory); the project root is the nearest ancestor with
@@ -327,60 +320,22 @@ export function parsePollOutput(text, { total } = {}) {
     progress_status: progress?.status ?? null,
     compute_node: progress?.compute_node ?? null,
     errlog_tail: errlog || null,
+    points: trimPoints(progress?.points),
   }
 }
 
-function findConditions(includes) {
-  const conds = []
-  for (const raw of includes) {
-    const inc = String(raw).replace(/\\/g, '/').replace(/^\.\//, '')
-    if (!inc) continue
-    if (inc.includes('/')) conds.push(`-path ${shq('./' + inc)}`)
-    else conds.push(`-name ${shq(inc)}`)
-  }
-  return conds
-}
-
-export function fetchCommand({ remoteDir, includes }) {
-  const conds = findConditions(includes)
-  const expr = conds.length === 1 ? conds[0] : `\\( ${conds.join(' -o ')} \\)`
-  return `cd ${shq(remoteDir)} && find . -maxdepth 5 ${expr} -print | `
-    + 'tar czf .batch_fetch.tgz -T -; wc -c < .batch_fetch.tgz'
-}
-
-export function listCommand({ remoteDir, includes }) {
-  const conds = findConditions(includes)
-  const expr = conds.length === 1 ? conds[0] : `\\( ${conds.join(' -o ')} \\)`
-  return `cd ${shq(remoteDir)} && find . -maxdepth 5 ${expr} -print | sort | head -200`
-}
-
-export function parseRemoteList(text) {
-  return String(text ?? '').split(/\r?\n/)
-    .map((s) => s.trim())
-    .filter((s) => s.startsWith('./'))
-    .map((s) => s.slice(2))
-    .filter((s) => s && !s.startsWith('../') && !path.posix.isAbsolute(s))
-}
-
-export async function extractArchive(archive, runDir) {
-  // Run tar with cwd=runDir and a relative archive operand: an absolute
-  // "C:\..." operand is parsed as host:path by GNU tar (Git Bash PATH), while
-  // Windows bsdtar accepts the relative form equally.
-  await execFileAsync('tar', ['-xzf', path.basename(archive)], {
-    cwd: runDir, timeout: 180_000, windowsHide: true, encoding: 'utf8',
-  })
-}
-
-export function countFetched(runDir) {
-  let points = 0
-  let spFiles = 0
-  for (const ent of fs.readdirSync(runDir, { withFileTypes: true })) {
-    if (!ent.isDirectory() || !/^\d{2,}$/.test(ent.name)) continue
-    const pdir = path.join(runDir, ent.name)
-    if (fs.existsSync(path.join(pdir, 'point_meta.json'))) points += 1
-    if (fs.existsSync(path.join(pdir, 'netlist.scs.raw', 'sp.sp'))) spFiles += 1
-  }
-  return { points, sp_files: spFiles }
+// Per-point digest carried on every poll frame (2026-11-23: poll is the only
+// retrieval face — the model needs each point's params/status without pulling
+// the per-point meta files). Bounded to the worker's own 100-point cap.
+function trimPoints(points) {
+  if (!Array.isArray(points)) return null
+  return points.slice(0, 100).map((p) => (p && typeof p === 'object') ? {
+    index: p.index ?? null,
+    point_name: p.point_name ?? null,
+    status: p.status ?? null,
+    params: p.params ?? null,
+    error: p.error ?? null,
+  } : null)
 }
 
 export function jobFile(runDir) {

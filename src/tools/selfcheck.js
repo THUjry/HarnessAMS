@@ -5,7 +5,7 @@
 // passing `settings` writes the project's workspace_config.json settings
 // section first, so the agent controls the run configuration with the same
 // single write face the UI uses. Session identity follows the D-008 precedent
-// (exec.agent.id ≡ sessionId, as in gen-sweep-report) — no project guessing.
+// (exec.agent.id ≡ sessionId, as in gen_sweep_report) — no project guessing.
 import path from 'node:path'
 import { sessionProject } from '../server/project.js'
 import { readSettings, validateSettings, writeSettings } from '../server/settings.js'

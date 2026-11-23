@@ -909,7 +909,7 @@ async function remoteSpectreChain(run) {
 
   if (!good.ok) {
     skipStep(run, { section: 'remote', item: `remote parse + verify (${settings.compute_script_remote})`, settingColumn: 'compute_remote' }, 'batch failed')
-    skipStep(run, { section: 'remote', item: 'batch_fetch + local cross-check', settingColumn: 'compute_remote' }, 'batch failed')
+    skipStep(run, { section: 'remote', item: 'result download + local cross-check', settingColumn: 'compute_remote' }, 'batch failed')
     return
   }
   run._priv.usedScheduler = good.scheduler

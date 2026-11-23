@@ -12,13 +12,17 @@ import { readJsonIfExists, resolveDir } from '../py.js'
 import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
 import { readRunProgress, totalFromConfig } from '../progress_files.js'
 import {
-  DEFAULT_INCLUDES, DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildDirectCommand, buildSubmitCommand,
-  collectRunFiles, countFetched,
-  defaultRemoteScriptsDir, extractArchive, fetchCommand,
-  listCommand, nextSimDir, parseJobId, parsePollOutput, parseRemoteList, pluginScripts,
+  DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildDirectCommand, buildSubmitCommand,
+  collectRunFiles,
+  defaultRemoteScriptsDir, nextSimDir, parseJobId, parsePollOutput, pluginScripts,
   pollCommand, postSubmitCommand, readJob, remoteJoin,
   resolveRemoteDir, sanitizeRel, simScriptsDir, templateUploadPlan, writeJob,
 } from '../batch.js'
+
+// The fixed light-result set a terminal poll pulls straight down (2026-11-23:
+// poll absorbed fetch — no includes, no archive; raw psf/sp data stays remote
+// by design, deep analysis runs on the host that holds it).
+const AUTO_FETCH_FILES = ['sweep_progress.json', 'errlog.txt']
 
 // batch_poll wait_sec cadence (D-016): the gap between re-polls of a blocking
 // wait. 10 s matches the wait policy's preferred first-backoff step.
@@ -103,10 +107,11 @@ function submitLocal(args, runDir) {
 
 // One local poll frame from the run directory's own files (the shared ladder
 // in progress_files.js). No ssh: local runs write everything into run_dir.
+// The per-point digest mirrors the remote poll frames.
 function localPollFrame(runDir) {
   const p = readRunProgress(runDir)
   if (!p.local) {
-    return { state: 'unknown', job_state: 'local', completed: 0, total: null }
+    return { state: 'unknown', job_state: 'local', completed: 0, total: null, points: null }
   }
   const state = p.status === 'completed' ? 'completed'
     : p.status === 'failed' ? 'failed'
@@ -115,6 +120,10 @@ function localPollFrame(runDir) {
   try {
     errlog = fs.readFileSync(path.join(runDir, 'errlog.txt'), 'utf8').trim().split(/\r?\n/).slice(-5).join('\n') || null
   } catch { /* no errlog yet */ }
+  let points = null
+  try {
+    points = trimLocalPoints(JSON.parse(fs.readFileSync(path.join(runDir, 'sweep_progress.json'), 'utf8'))?.points)
+  } catch { /* not written yet */ }
   return {
     state,
     job_state: 'local',
@@ -127,7 +136,19 @@ function localPollFrame(runDir) {
     compute_node: p.compute_node,
     updated_at: p.updated_at,
     errlog_tail: errlog,
+    points,
   }
+}
+
+function trimLocalPoints(points) {
+  if (!Array.isArray(points)) return null
+  return points.slice(0, 100).map((q) => (q && typeof q === 'object') ? {
+    index: q.index ?? null,
+    point_name: q.point_name ?? null,
+    status: q.status ?? null,
+    params: q.params ?? null,
+    error: q.error ?? null,
+  } : null)
 }
 
 export function batchTools(ctx) {
@@ -357,11 +378,13 @@ export function batchTools(ctx) {
     {
       name: 'batch_poll',
       description: 'Poll a batch submitted by batch_submit: bjobs state plus the batch\'s own progress '
-        + '(point_meta.json count, sweep_progress.json summary, errlog tail). The machine, directory and job id '
-        + 'default to <run_dir>/.batch_job.json. A finished job that left the queue is reported as completed when '
-        + 'all point_meta.json files exist. A local submission (scheduler="local") is polled from the run '
-        + 'directory\'s own files, no ssh involved. Pass wait_sec for a bounded blocking wait — the in-flight call '
-        + 'is the window where the session progress card live-updates.',
+        + '(point_meta.json count, sweep_progress.json summary, errlog tail) and a per-point digest (index/name/'
+        + 'status/params). On a terminal state it auto-fetches the light result files (sweep_progress.json, '
+        + 'errlog.txt) straight into the run directory — no includes, no archive; raw psf/sp data stays remote '
+        + 'by design (analyze it there and pull back compact results). The machine, directory and job id default '
+        + 'to <run_dir>/.batch_job.json. A local submission (scheduler="local") is polled from the run directory\'s '
+        + 'own files, no ssh involved. Pass wait_sec for a bounded blocking wait — the in-flight call is the '
+        + 'window where the session progress card live-updates.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory holding .batch_job.json' },
         machine_id: { type: 'string', description: 'Override the dsh-ssh host alias from the job file' },
@@ -405,6 +428,7 @@ export function batchTools(ctx) {
             job_id: jobId,
             run_dir: runDir,
             scheduler: 'local',
+            fetched: [], // everything already lives in the run directory
             ...frame,
           }
         }
@@ -424,84 +448,29 @@ export function batchTools(ctx) {
           if (remain <= 0) break
           await new Promise((res) => setTimeout(res, Math.min(WAIT_GAP_MS, remain)))
         }
+        // Terminal state: absorb the old fetch — pull the light result files
+        // straight down per file (existence probed once, no archive).
+        const fetched = []
+        if (TERMINAL_POLL_STATES.has(parsed.state)) {
+          const probe = await execRemote(ctx, target.alias,
+            `cd ${shq(remoteDir)} && ls -1 ${AUTO_FETCH_FILES.map(shq).join(' ')} 2>/dev/null`,
+            { timeoutMs: 30_000 })
+          if (probe.ok) {
+            for (const name of String(probe.stdout || '').split(/\r?\n/).map((s) => s.trim())) {
+              if (!AUTO_FETCH_FILES.includes(name)) continue
+              const dl = await downloadFile(ctx, target.alias, remoteJoin(remoteDir, name), path.join(runDir, name))
+              if (dl.ok) fetched.push(name)
+            }
+          }
+        }
         return {
           ok: true,
           job_id: jobId,
           remote_dir: remoteDir,
           scheduler,
           ...parsed,
-          output: (stdout || '').trim().slice(0, 1500),
-        }
-      },
-    },
-    {
-      name: 'batch_fetch',
-      description: 'Fetch artifacts from a remote batch: tar-gzips the requested files on the remote host, '
-        + 'downloads the archive over dsh-ssh and extracts it into the local run directory (the archive is '
-        + 'kept as fetch_<job_id>.tgz). If tar is unavailable it falls back to a bounded per-file download. '
-        + 'Afterwards sim_progress / spectre_parse / snp_read can read the local run directory directly. '
-        + 'Raw fetches land in <project>/RawResults/<Sim*> (the D-012 convention, mirroring the remote layout); '
-        + 'prefer pulling only compact analysis results into <project>/SimResults (ssh_download) whenever '
-        + 'the raw psf is not needed locally.',
-      parameters: {
-        run_dir: { type: 'string', required: true, description: 'Local run directory to extract into '
-          + '(typically <project>/RawResults/<Sim*> — the mirrored remote batch name)' },
-        includes: { type: 'array', items: { type: 'string' },
-          description: 'Files to fetch: names (point_meta.json) or paths (*/netlist.scs.raw/sp.sp); '
-            + 'default point_meta.json, sweep_progress.json, errlog.txt, bsub.out, bsub.err' },
-        machine_id: { type: 'string', description: 'Override the dsh-ssh host alias from the job file' },
-        remote_root: { type: 'string', description: 'Override the fencing remote root (default: the job file\'s remote_root)' },
-        remote_dir: { type: 'string', description: 'Override the remote batch directory' },
-        job_id: { type: 'string', description: 'Override the LSF job id (also names the local archive)' },
-      },
-      async execute(args, exec) {
-        const runDir = resolveDir(args.run_dir)
-        const job = readJob(runDir)
-        const machineId = args.machine_id || job?.machine_id || undefined
-        const target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
-        const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
-        const jobId = args.job_id || job?.job_id || 'manual'
-        if (!/^[\w.-]+$/.test(jobId)) throw new Error(`invalid job_id ${JSON.stringify(jobId)} (word/dot/dash only — it names the local archive)`)
-        const includes = Array.isArray(args.includes) && args.includes.length
-          ? args.includes.map(String) : DEFAULT_INCLUDES
-
-        const packed = await execRemote(ctx, target.alias,
-          fetchCommand({ remoteDir, includes }), { timeoutMs: 120_000 })
-        if (!packed.ok) {
-          throw new Error(`remote packing failed: ${(packed.stderr || packed.stdout || packed.text).slice(0, 800)}`)
-        }
-        const archiveRemote = remoteJoin(remoteDir, '.batch_fetch.tgz')
-        const archiveLocal = path.join(runDir, `fetch_${jobId}.tgz`)
-        const dl = await downloadFile(ctx, target.alias, archiveRemote, archiveLocal)
-        if (!dl.ok) throw new Error(`archive download failed: ${dl.text.slice(0, 800)}`)
-
-        let mode = 'archive'
-        try {
-          await extractArchive(archiveLocal, runDir)
-        } catch (e) {
-          mode = 'per-file fallback'
-          const listed = await execRemote(ctx, target.alias,
-            listCommand({ remoteDir, includes }), { timeoutMs: 60_000 })
-          const rels = parseRemoteList(listed.stdout)
-          if (!rels.length) {
-            throw new Error(`archive extraction failed (${e.message}) and the remote listed no files`)
-          }
-          for (const rel of rels) {
-            const safe = sanitizeRel(rel)
-            const local = path.join(runDir, ...safe.split('/'))
-            const one = await downloadFile(ctx, target.alias, remoteJoin(remoteDir, safe), local)
-            if (!one.ok) throw new Error(`per-file download failed for ${safe}: ${one.text}`)
-          }
-        }
-        const fetched = countFetched(runDir)
-        return {
-          ok: true,
-          job_id: jobId,
-          remote_dir: remoteDir,
-          archive: archiveLocal,
-          mode,
-          includes,
           fetched,
+          output: (stdout || '').trim().slice(0, 1500),
         }
       },
     },

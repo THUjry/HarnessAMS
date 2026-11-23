@@ -12,8 +12,6 @@
 // here against the generated commands.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -22,7 +20,6 @@ import { makeTool } from '../src/tool.js'
 import { resolveMachine } from '../src/remote.js'
 import { buildDirectCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
 
-const execFileAsync = promisify(execFile)
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
 
 function tmp(prefix) {
@@ -97,6 +94,12 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
           return reply(ok({ ok: true, transferredBytes: 12, files: 1 }))
         }
         if (view.name === 'ssh_download') {
+          // terminal-poll auto-fetch: the light result files come with content
+          if (a.remotePath.endsWith('sweep_progress.json')) {
+            fs.writeFileSync(a.localPath, JSON.stringify({ status: 'completed', total_points: 2, completed: 2 }))
+          } else if (a.remotePath.endsWith('errlog.txt')) {
+            fs.writeFileSync(a.localPath, 'boom\n')
+          }
           if (archive) fs.copyFileSync(archive, a.localPath)
           return reply(ok({ ok: true, bytes: 512 }))
         }
@@ -111,8 +114,8 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
           return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: 'Job <777> is submitted to queue <normal>.\n', stderr: '', durationMs: 3 }))
         }
         if (cmd.includes('tar czf .batch_fetch.tgz')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: '512\n', stderr: '', durationMs: 3 }))
-        if (cmd.includes('| sort | head -200')) {
-          return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: './00/point_meta.json\n./00/netlist.scs.raw/sp.sp\n', stderr: '', durationMs: 3 }))
+        if (cmd.includes('ls -1') && cmd.includes('sweep_progress.json')) {
+          return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: 'sweep_progress.json\n', stderr: '', durationMs: 3 }))
         }
         if (cmd.includes('wc -l')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: `${existing}\n`, stderr: '', durationMs: 3 }))
         if (cmd.includes('ls -1') && cmd.includes('/home/op/sim')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: ls, stderr: '', durationMs: 3 }))
@@ -131,25 +134,6 @@ function makeRunDir({ template = 'template.scs', config } = {}) {
     sweep_mode: 'cross_product',
   }))
   return dir
-}
-
-async function makeArchive() {
-  const root = tmp('hams-remote-')
-  fs.mkdirSync(path.join(root, '00', 'netlist.scs.raw'), { recursive: true })
-  fs.writeFileSync(path.join(root, '00', 'point_meta.json'),
-    JSON.stringify({ status: 'success', signals: { m: 1 } }))
-  fs.writeFileSync(path.join(root, '00', 'netlist.scs.raw', 'sp.sp'),
-    '# Hz S RI R 50\n1.0e9 1 0 0 0\n')
-  fs.writeFileSync(path.join(root, 'sweep_progress.json'),
-    JSON.stringify({ status: 'completed', total_points: 2, completed: 2 }))
-  // Archive operand relative via cwd (GNU tar parses absolute "C:\..." operands
-  // as host:path; Windows bsdtar accepts both forms). -C absolute values are
-  // plain chdir targets and safe on both tars.
-  const archDir = tmp('hams-arch-')
-  const archive = path.join(archDir, 'fetch.tgz')
-  await execFileAsync('tar', ['-czf', 'fetch.tgz', '-C', root, '.'],
-    { cwd: archDir, timeout: 60_000 })
-  return archive
 }
 
 function tool(ctx, name) {
@@ -377,7 +361,7 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
   }
 })
 
-test('batch_poll reads the job file and reports completed', async () => {
+test('batch_poll reads the job file, reports completed and auto-fetches the result files', async () => {
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
@@ -389,6 +373,10 @@ test('batch_poll reads the job file and reports completed', async () => {
     assert.equal(res.state, 'completed')
     assert.equal(res.completed, 2)
     assert.equal(res.job_id, '777')
+    // terminal poll absorbed fetch: the light result files landed in run_dir
+    assert.deepEqual(res.fetched, ['sweep_progress.json'])
+    const prog = JSON.parse(fs.readFileSync(path.join(run, 'sweep_progress.json'), 'utf8'))
+    assert.equal(prog.status, 'completed')
   } finally {
     restoreEnv()
   }
@@ -447,31 +435,6 @@ test('batch_poll wait_sec (D-016): deadline returns the last (non-terminal) payl
     assert.equal(res.ok, true)
     assert.equal(res.state, 'running') // never settled within the deadline
     assert.equal(res.completed, 1)
-  } finally {
-    restoreEnv()
-  }
-})
-
-test('batch_fetch downloads the archive and extracts it into the run directory', async () => {
-  const run = makeRunDir()
-  const archive = await makeArchive()
-  try {
-    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
-      machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
-    }))
-    const ctx = makeCtx({ archive })
-    const res = await tool(ctx, 'batch_fetch').execute({
-      run_dir: run,
-      includes: ['*/point_meta.json', '*/netlist.scs.raw/sp.sp', 'sweep_progress.json'],
-    }, {})
-    assert.equal(res.ok, true, JSON.stringify(res))
-    assert.equal(res.mode, 'archive')
-    assert.equal(res.fetched.points, 1)
-    assert.equal(res.fetched.sp_files, 1)
-    assert.ok(fs.existsSync(path.join(run, '00', 'point_meta.json')))
-    assert.ok(fs.existsSync(path.join(run, '00', 'netlist.scs.raw', 'sp.sp')))
-    assert.ok(fs.existsSync(path.join(run, 'sweep_progress.json')))
-    assert.ok(fs.existsSync(path.join(run, 'fetch_777.tgz')))
   } finally {
     restoreEnv()
   }

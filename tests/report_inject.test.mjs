@@ -1,4 +1,4 @@
-// Tests for the gen-sweep-report tool (D-012, 2026-11-21): spec-driven report
+// Tests for the gen_sweep_report tool (D-012, 2026-11-21): spec-driven report
 // rendering, the new D-012 file layout (report at the project root, data JS in
 // SimResults/, PNGs in Figs/), the guarded single-session merge-write of
 // sessions.json (v2), and the full tool.execute(args, exec) flow — the calling
@@ -102,7 +102,7 @@ test('inject: registerReportIntoSession appends, selects, dedupes by path, prese
   }
 })
 
-test('gen-sweep-report e2e — spec renders at the project root, registers into the CALLING session, exports PNGs', async () => {
+test('gen_sweep_report e2e — spec renders at the project root, registers into the CALLING session, exports PNGs', async () => {
   const { ws, storeDir } = await makeWorkspace()
   try {
     const proj = path.join(ws, 'projX')
@@ -142,7 +142,7 @@ test('gen-sweep-report e2e — spec renders at the project root, registers into 
       ],
     }), 'utf8')
 
-    const tool = makeTool(genReportTools().find((d) => d.name === 'gen-sweep-report'))
+    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
     const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
     assert.equal(res.ok, true)
     assert.equal(res.registered, true)
@@ -217,13 +217,13 @@ test('gen-sweep-report e2e — spec renders at the project root, registers into 
   }
 })
 
-test('gen-sweep-report: spec errors are actionable; project root derives from a SimResults spec location', async () => {
+test('gen_sweep_report: spec errors are actionable; project root derives from a SimResults spec location', async () => {
   const { ws } = await makeWorkspace()
   try {
     const proj = path.join(ws, 'projY')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
-    const tool = makeTool(genReportTools().find((d) => d.name === 'gen-sweep-report'))
+    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
 
     // spec in <project>/SimResults/ → project root derived, no project_dir
     await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
@@ -262,13 +262,13 @@ test('gen-sweep-report: spec errors are actionable; project root derives from a 
   }
 })
 
-test('gen-sweep-report: PNG export fails open — no charts or a broken renderer never fails the report', async () => {
+test('gen_sweep_report: PNG export fails open — no charts or a broken renderer never fails the report', async () => {
   const { ws } = await makeWorkspace()
   try {
     const proj = path.join(ws, 'projZ')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
-    const tool = makeTool(genReportTools().find((d) => d.name === 'gen-sweep-report'))
+    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
 
     // a round with no metrics and no curves → zero charts → skipped, ok
     await writeFile(path.join(simres, 'spec.json'), JSON.stringify({

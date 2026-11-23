@@ -29,9 +29,9 @@ test('apply registers the /harnessams prefix route and the model tools', async (
   assert.equal(routes[0].path, '/harnessams')
   assert.equal(typeof routes[0].handler, 'function')
   assert.deepEqual(registered.sort(), [
-    'batch_fetch', 'batch_poll', 'batch_submit',
-    'gen-sweep-report', 'harnessams_selfcheck',
-    'safe_trash', 'sim_progress',
+    'batch_poll', 'batch_submit',
+    'gen_sweep_report', 'harnessams_selfcheck',
+    'safe_trash',
   ])
 })
 
@@ -65,7 +65,7 @@ test('apply injects the remote waiting policy as a system prompt section (fail-o
 
 test('every tool compiles to an object-rooted JSON Schema with typed properties', () => {
   const defs = toolDefinitions()
-  assert.equal(defs.length, 7)
+  assert.equal(defs.length, 5)
   for (const def of defs) {
     const tool = makeTool(def)
     assert.equal(tool.parameters.type, 'object', `${def.name} parameters root`)

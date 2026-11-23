@@ -20,10 +20,11 @@
 // by alias, zero gating); each project's remote root is its own setting
 // (workspace_config.json settings.remote_root — the family harnessams.json and
 // its remote_machines map are retired, 2026-11-19 D-009).
-// Model tools: harnessams_selfcheck (self-check + config), the generic remote
-// batch channel (batch_submit/batch_poll/batch_fetch; worker scripts come from
-// the project's workspace.sim_scripts_dir) and the simulator-agnostic
-// analysis/ops tools (gen-sweep-report/sim_progress/safe_trash).
+// Model tools: harnessams_selfcheck (self-check + config), the batch channel
+// (batch_submit with its local/direct/lsf schedulers + batch_poll with the
+// terminal auto-fetch; worker scripts come from the project's
+// workspace.sim_scripts_dir) and the simulator-agnostic report/ops tools
+// (gen_sweep_report / safe_trash).
 // The session tool cards read two extra read-only endpoints (/api/progress and
 // /api/progress-summary, server/progress.js) to draw the simulation progress
 // cards inside the conversation — no execution surface, pure file reads.
@@ -69,8 +70,8 @@ export function toolDefinitions(ctx = {}) {
   return [...selfcheckTools(ctx), ...batchTools(ctx), ...genReportTools(ctx), safeTrashTool()]
 }
 // Current tool surface: harnessams_selfcheck (self-check + project config),
-// batch_submit/batch_poll/batch_fetch (remote channel), gen-sweep-report /
-// sim_progress (pure JS report + progress window), safe_trash.
+// batch_submit (local/direct/lsf) / batch_poll (monitor + terminal
+// auto-fetch), gen_sweep_report (pure JS report renderer), safe_trash.
 
 export function apply(ctx) {
   ctx.effect(() => {

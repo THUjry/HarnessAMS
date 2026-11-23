@@ -1,12 +1,11 @@
-// gen-sweep-report (D-012, 2026-11-21): the ONLY analysis-surface tool — a
-// pure report renderer. Raw-data processing is the MODEL's job (remote
-// analysis by default; only compact results are pulled back), so this tool
-// consumes a model-written spec JSON (points/curves inline or via {"$file"}
-// references), renders the sweep dashboard at the project root with data JS
-// in SimResults/, exports one PNG per chart into Figs/ (headless jsdom+
-// plotly+resvg, fail-open), and registers the report into the CALLING
-// session's dashboard. sim_progress (the LOCAL progress-file window) moved
-// here unchanged from the retired sim_analysis.js.
+// gen_sweep_report (D-012, 2026-11-21; underscore name 2026-11-23): the ONLY
+// analysis-surface tool — a pure report renderer. Raw-data processing is the
+// MODEL's job (remote analysis by default; only compact results are pulled
+// back), so this tool consumes a model-written spec JSON (points/curves inline
+// or via {"$file"} references), renders the sweep dashboard at the project
+// root with data JS in SimResults/, exports one PNG per chart into Figs/
+// (headless jsdom+plotly+resvg, fail-open), and registers the report into the
+// CALLING session's dashboard.
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -187,7 +186,7 @@ function deriveProjectRoot(specFile, specObj) {
 export function genReportTools() {
   return [
     {
-      name: 'gen-sweep-report',
+      name: 'gen_sweep_report',
       description: 'Render the sweep-result HTML report from a model-written spec JSON and register it into the '
         + 'CALLING session\'s HarnessAMS dashboard. This tool ONLY draws: raw-data processing (psf parsing, metric '
         + 'extraction, dB conversion, batch aggregation) is yours — run it remotely by default and pull back only '
@@ -284,35 +283,6 @@ export function genReportTools() {
           }
         }
         return result
-      },
-    },
-    {
-      name: 'sim_progress',
-      description: 'Read a sweep batch\'s progress file (sweep_progress.json in the run directory; no simulation '
-        + 'is started). This is the LOCAL file window: use it directly for local runs; for a remote batch poll '
-        + 'batch_poll while it runs (it also sees the LSF queue state, which this file never knows) and call '
-        + 'this tool after batch_fetch brought the progress file back.',
-      parameters: {
-        run_dir: { type: 'string', required: true, description: 'Run directory holding sweep_progress.json' },
-      },
-      async execute(args) {
-        const runDir = resolveDir(args.run_dir)
-        const file = path.join(runDir, 'sweep_progress.json')
-        if (!fs.existsSync(file)) return { ok: false, error: `no progress file yet: ${file}` }
-        let prog
-        try { prog = readJsonBom(file) } catch { prog = null }
-        if (!prog) return { ok: false, error: `unreadable progress file: ${file}` }
-        return {
-          ok: true,
-          run_dir: runDir,
-          simulator: prog.simulator ?? null,
-          status: prog.status,
-          total: prog.total_points,
-          completed: prog.completed,
-          succeeded: prog.succeeded,
-          failed: prog.failed,
-          updated_at: prog.updated_at,
-        }
       },
     },
   ]
