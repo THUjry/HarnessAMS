@@ -22,7 +22,7 @@ test('guide: bilingual copy — every key exactly twice, slurm marked not suppor
   const keys = [...src.matchAll(/'(guide\.[a-zA-Z0-9.]+)':/g)].map((m) => m[1])
   assert.ok(keys.length >= 14, 'the guide key set must be present, found ' + keys.length)
   assertDictKeys(src, [...new Set(keys)])
-  assert.match(src, /'guide\.s2slurm': '[^']*暂不支持/, 'slurm must be marked 暂不支持 in zh')
+  assert.match(src, /'guide\.s2slurm': '[^']*\u6682\u4e0d\u652f\u6301/, 'slurm must be marked \u6682\u4e0d\u652f\u6301 in zh')
   assert.match(src, /'guide\.s2slurm': '[^']*not supported/, 'slurm must be marked not supported in en')
   // the start-page guide card description was upgraded together with the feature
   assertDictKeys(src, ['tasks.guideDesc'])

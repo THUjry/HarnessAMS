@@ -2214,7 +2214,7 @@ window.__ModuleLoader__.load({
             reports.length
               ? reports.map((r) => h('option', { key: r.id, value: r.id }, txt(r.name)))
               : h('option', { value: '' }, tr('dash.noReports'))),
-          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.addTitle'), onClick: () => setDialogOpen(true) }, '＋'),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.addTitle'), onClick: () => setDialogOpen(true) }, '\uFF0B'),
           h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻'),
           h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.remove'), disabled: !current, onClick: removeCurrent }, '×'),
           current && h('a', { className: 'hams-btn hams-btn-sm', title: tr('dash.openTab'), href: dashUrl, target: '_blank', rel: 'noopener' }, '↗')),
