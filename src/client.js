@@ -999,7 +999,11 @@ window.__ModuleLoader__.load({
         els.push(h(CardKv, { key: 'kv', items: [
           { k: tr('card.label.succeeded'), v: d.succeeded },
           { k: tr('card.label.failed'), v: d.failed },
-          { k: tr('card.label.pending'), v: d.total != null ? Math.max((Number(d.total) || 0) - (Number(d.completed) || 0), 0) : null },
+          // A failed frame must not count its losses twice: the payload's own
+          // pending wins when it carries one (the local poll frames do — a
+          // startup death is failed:N/pending:0); the remote payload has none
+          // and falls back to total - completed.
+          { k: tr('card.label.pending'), v: d.pending ?? (d.total != null ? Math.max((Number(d.total) || 0) - (Number(d.completed) || 0), 0) : null) },
           { k: tr('card.label.jobState'), v: d.job_state },
           { k: tr('card.label.node'), v: d.compute_node },
           { k: tr('card.label.remoteDir'), v: d.remote_dir || d.run_dir },

@@ -133,6 +133,9 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   assert.ok(src.includes("API + '/progress-summary"), 'cards must poll the progress-summary endpoint')
   assert.ok(src.includes('normRemoteProg'), 'remote payloads must normalize to the prog shape')
   assert.ok(src.includes('remoteErr'), 'unreachable remotes must surface a note, not a blank card')
+  // A failed frame must not show its losses twice (failed:N AND pending:total):
+  // the result view takes the payload's own pending when it carries one.
+  assert.ok(src.includes('v: d.pending ?? ('), 'result card prefers the payload pending')
   // A key typo never renders (silent generic-card fallback), so the three heavy
   // tool names are pinned against the model-facing tool surface verbatim (the
   // D-007 scope ruling shrank the list from eight).
