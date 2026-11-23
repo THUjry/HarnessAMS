@@ -400,6 +400,20 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
     assert.equal(override.ok, true, JSON.stringify(override))
     const overrideJob = JSON.parse(fs.readFileSync(override.job_file, 'utf8'))
     assert.equal(overrideJob.worker, path.join(otherRoot, 'spectre', 'spectre_sweep_worker.py'))
+
+    // no python on PATH: the submit rejects cleanly (an unlistened spawn 'error'
+    // is an uncaught exception in the host) and leaves no job file to poll
+    const savedPath = process.env.PATH
+    process.env.PATH = tmp('hams-local-nopath-')
+    try {
+      const noPythonRun = makeRunDir()
+      await assert.rejects(
+        () => tool(ctx, 'batch_submit').execute({ run_dir: noPythonRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' }, {}),
+        /cannot start the local worker/)
+      assert.ok(!fs.existsSync(path.join(noPythonRun, '.batch_job.json')))
+    } finally {
+      process.env.PATH = savedPath
+    }
     assert.equal(ctx.calls.length, 0, 'none of the local paths touches an ssh tool')
   } finally {
     restoreEnv()

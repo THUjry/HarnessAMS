@@ -38,7 +38,7 @@ function underRoot(root, candidate) {
 // (wait_sec for the blocking wait; the session card live-updates off the same
 // files). The worker carries its own global budget, so a forgotten run still
 // terminates by itself.
-function submitLocal(args, runDir) {
+async function submitLocal(args, runDir) {
   const rawWorker = String(args.worker)
   if (rawWorker.startsWith('/') || /^[A-Za-z]:[\\/]/.test(rawWorker)) {
     throw new Error('scheduler=local needs a scripts-root-relative worker (e.g. "spectre/spectre_sweep_worker.py"), not an absolute path')
@@ -74,6 +74,15 @@ function submitLocal(args, runDir) {
     fs.closeSync(out)
     fs.closeSync(err)
   }
+  // A process that cannot even be spawned (no python on PATH) reports through
+  // an asynchronous 'error' event — without a listener that event is an
+  // uncaught exception in the host. Settle it here and fail the submit before
+  // any job file exists for a poll to read.
+  const spawnError = await new Promise((resolve) => {
+    child.once('error', resolve)
+    child.once('spawn', () => resolve(null))
+  })
+  if (spawnError) throw new Error(`cannot start the local worker (needs python on PATH): ${spawnError.message}`)
   child.unref()
   const job = {
     machine_id: null,
