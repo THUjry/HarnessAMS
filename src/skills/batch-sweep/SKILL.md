@@ -2,14 +2,13 @@
 name: batch-sweep
 description: >
   Generic parameter-sweep methodology: batch_submit with its three schedulers
-  (local background workers, ssh foreground on a node, LSF queue) whose
-  meaning follows the project's working environment (cluster_env, the
-  in-cluster/out-of-cluster dichotomy), batch_poll monitoring with wait_sec
-  and the terminal auto-fetch, multi-node submission with machine_id and
-  bsub -m (lsf_node), Sim run-directory naming, remote-first analysis, and
-  the gen_sweep_report spec flow. Spectre netlist and config rules live in
-  the smart-spectre skill. Trigger on batch simulation, sweep submission,
-  monitoring or the sweep report.
+  (local workers, ssh, LSF; semantics set by the project's cluster_env
+  working environment), batch_poll monitoring with wait_sec and terminal
+  auto-fetch, multi-node submission (machine_id, bsub -m lsf_node),
+  run-directory naming, remote-first analysis, and the gen_sweep_report
+  spec flow. Spectre netlist/config rules live in the smart-spectre
+  skill. Trigger on batch simulation, sweep submission, monitoring or
+  reports.
 ---
 
 # batch-sweep — the managed scan flow (HarnessAMS suite)
