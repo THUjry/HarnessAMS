@@ -3,7 +3,7 @@
 // environment checks). Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, rm, statfs } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { batchOf, firstCall } from './helpers.mjs'
@@ -405,8 +405,21 @@ test('checks: runLocalChecks rows — no sky130, Node/Python carry absolute path
     assert.match(disk.result, /GiB/)
     const wr = results.find((r) => r.item === 'Workspace writable')
     assert.ok(wr.ok, wr.detail)
+    // These rows ARE the harnessams_selfcheck action=env tool result: the tool
+    // registry rejects any own key holding undefined as "not lossless JSON",
+    // so a clean disk must carry no `warn` key at all.
+    for (const row of results) {
+      for (const [k, v] of Object.entries(row)) assert.notEqual(v, undefined, `${row.item}: key ${k} holds undefined`)
+    }
+    assert.equal(Object.hasOwn(disk, 'warn'), freeRatio(dir) < 0.1)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
+
+// free/total of the volume holding `dir` — decides whether the disk row may carry `warn`
+async function freeRatio(dir) {
+  const st = await statfs(dir)
+  return (Number(st.bavail) * Number(st.bsize)) / (Number(st.blocks) * Number(st.bsize))
+}
 
 test('session-config: single-session merge-write never clobbers siblings; prune + null-delete + corrupt degrade', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-sess-'))

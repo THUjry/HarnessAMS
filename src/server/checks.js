@@ -60,9 +60,13 @@ export async function runLocalChecks(rootPath) {
     const total = Number(st.blocks) * Number(st.bsize)
     const free = Number(st.bavail) * Number(st.bsize)
     if (!total) throw new Error('statfs returned 0')
-    return { result: `${(total / 2 ** 30).toFixed(1)} GiB total, ${(free / 2 ** 30).toFixed(1)} GiB free`
-             + ` (${(100 * (total - free) / total).toFixed(0)}% used)`,
-             warn: free / total < 0.1 ? 'free space < 10%' : undefined }
+    const row = { result: `${(total / 2 ** 30).toFixed(1)} GiB total, ${(free / 2 ** 30).toFixed(1)} GiB free`
+      + ` (${(100 * (total - free) / total).toFixed(0)}% used)` }
+    // `warn` only when it applies: an own key holding undefined fails the tool
+    // registry's lossless-JSON check, so the env rows must stay JSON-clean
+    // (they are the harnessams_selfcheck action=env tool result).
+    if (free / total < 0.1) row.warn = 'free space < 10%'
+    return row
   })
   await t('Workspace writable', async () => {
     const probe = path.join(root, '.write_probe')
