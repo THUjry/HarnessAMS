@@ -14,142 +14,16 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { sessionProject } from './project.js'
+import { readRunProgress, projectRootOf } from '../progress_files.js'
+
+// The single-run ladder readers live in ../progress_files.js (shared with the
+// batch tools' local poll branch); re-exported here for the existing consumers.
+export { readRunProgress, projectRootOf } from '../progress_files.js'
 
 const MAX_BATCHES = 64
 
-// Tolerant JSON read: strip a UTF-8 BOM before parsing. The worker writes these
-// files atomically without a BOM, but hand-copied fixtures may carry one.
-function readJsonTolerant(file) {
-  try {
-    const text = fs.readFileSync(file, 'utf8')
-    return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text)
-  } catch {
-    return null
-  }
-}
-
 function statDir(p) {
   return fs.statSync(p, { throwIfNoEntry: false })
-}
-
-// Planned point count from sweep_config.json — the same cross-product rule as
-// tools/batch.js totalFromConfig, kept local so the server layer never imports
-// the tools layer.
-function totalFromConfig(runDir) {
-  const cfg = readJsonTolerant(path.join(runDir, 'sweep_config.json'))
-  const params = cfg?.parameters
-  if (!params || typeof params !== 'object') return null
-  const lists = Object.values(params).filter(Array.isArray)
-  if (!lists.length) return null
-  if (cfg.sweep_mode === 'zip') return lists[0]?.length ?? null
-  return lists.reduce((n, l) => n * l.length, 1)
-}
-
-// Project root from a run-dir string ("<root>/sweep/RoundN/top" or the Sim
-// convention "<root>[.../sweep|/RawResults]/Sim<N>_<date>_batch<M>"), null when
-// the shape does not match. String-level like the retired sim_analysis.js
-// deriveProjectDir did, so POSIX remote paths derive identically (existence is
-// checked separately).
-export function projectRootOf(p) {
-  const norm = String(p ?? '').replace(/\\/g, '/').replace(/\/+$/, '')
-  const m = /(.+)\/sweep\/Round[^/]+\/top$/.exec(norm)
-  if (m) return m[1]
-  const s = /(.+)\/Sim\d+_\d{8}_batch\d+$/.exec(norm)
-  if (s) {
-    let cut = s[1]
-    for (const base of ['/sweep', '/RawResults']) {
-      if (cut.endsWith(base)) cut = cut.slice(0, -base.length)
-    }
-    return cut || null
-  }
-  return null
-}
-
-// One run directory, normalized for the card. Source ladder: sweep_progress.json
-// (live counters, may lack `simulator` in pre-2026-10 files) → .worker_started
-// (worker announced total_points, first progress tick still ~30 s out) →
-// .batch_job.json (a REMOTE batch was submitted for this run dir — the immediate
-// 0/N first frame for the batch_poll card while everything still lives on the
-// remote host, D-016) → sweep_config.json (assembled but never run) → nothing
-// readable.
-export function readRunProgress(runDir) {
-  const dir = String(runDir ?? '').trim()
-  const st = dir ? statDir(dir) : undefined
-  if (!st?.isDirectory()) return { local: false, run_dir: dir || null }
-  const prog = readJsonTolerant(path.join(dir, 'sweep_progress.json'))
-  if (prog && typeof prog === 'object') {
-    const total = Number(prog.total_points) || 0
-    const completed = Number(prog.completed) || 0
-    return {
-      local: true,
-      run_dir: dir,
-      source: 'progress',
-      status: prog.status ?? null,
-      total,
-      completed,
-      succeeded: Number(prog.succeeded) || 0,
-      failed: Number(prog.failed) || 0,
-      pending: Math.max(total - completed, 0),
-      simulator: prog.simulator ?? null,
-      compute_node: prog.compute_node ?? null,
-      updated_at: prog.updated_at ?? null,
-    }
-  }
-  const started = readJsonTolerant(path.join(dir, '.worker_started'))
-  if (started) {
-    const total = Number(started.total_points) || totalFromConfig(dir)
-    return {
-      local: true,
-      run_dir: dir,
-      source: 'worker_started',
-      status: 'running',
-      total: total ?? null,
-      completed: 0,
-      succeeded: 0,
-      failed: 0,
-      pending: total ?? null,
-      simulator: null,
-      compute_node: started?.host ?? null,
-      updated_at: started?.started_at ?? null,
-    }
-  }
-  // Remote batch, nothing mirrored locally yet: the job file batch_submit wrote
-  // carries total_points + submitted_at — an immediate 0/N submitted frame with
-  // zero ssh cost. A fetched sweep_progress.json (level 1) outranks this, so a
-  // mirror never regresses to "submitted".
-  const job = readJsonTolerant(path.join(dir, '.batch_job.json'))
-  if (job) {
-    const total = Number(job.total_points) || totalFromConfig(dir) || null
-    return {
-      local: true,
-      run_dir: dir,
-      source: 'job',
-      status: 'submitted',
-      total,
-      completed: 0,
-      succeeded: 0,
-      failed: 0,
-      pending: total ?? null,
-      simulator: null,
-      compute_node: null,
-      updated_at: job.submitted_at ?? null,
-    }
-  }
-  const cfgTotal = totalFromConfig(dir)
-  return {
-    local: true,
-    run_dir: dir,
-    source: 'config',
-    status: cfgTotal ? 'pending' : null,
-    total: cfgTotal ?? null,
-    completed: 0,
-    succeeded: 0,
-    failed: 0,
-    pending: cfgTotal ?? null,
-    simulator: null,
-    compute_node: null,
-    updated_at: null,
-  }
 }
 
 // Cross-batch summary over <project>/sweep/Round*/top plus the Sim-convention

@@ -311,6 +311,53 @@ test('batch_submit scheduler=direct runs the worker directly on the host (no bsu
   }
 })
 
+test('scheduler=local: detached worker + local poll, zero ssh', async () => {
+  // a runnable fake worker under a private scripts root (the shared fixture
+  // tree is a stub whose upload manifest is pinned by another test)
+  const scriptsRoot = tmp('hams-local-')
+  fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), [
+    'import json, os, sys',
+    'wd = sys.argv[sys.argv.index("--work-dir") + 1]',
+    'prog = {"status": "completed", "total_points": 2, "completed": 2, "succeeded": 2, "failed": 0,',
+    '        "simulator": "spectre", "compute_node": "local", "points": [], "updated_at": "2026-11-23T00:00:00Z"}',
+    'tmp = os.path.join(wd, "sweep_progress.json.tmp")',
+    'with open(tmp, "w") as f: json.dump(prog, f)',
+    'os.replace(tmp, os.path.join(wd, "sweep_progress.json"))',
+  ].join('\n'))
+  process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
+  const run = makeRunDir()
+  try {
+    const ctx = makeCtx()
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run,
+      worker: 'spectre/spectre_sweep_worker.py',
+      scheduler: 'local',
+    }, {})
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.scheduler, 'local')
+    assert.equal(res.state, 'running')
+    assert.equal(typeof res.pid, 'number')
+    assert.equal(ctx.calls.length, 0, 'local submit touches no ssh tool')
+
+    const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
+    assert.equal(job.scheduler, 'local')
+    assert.equal(job.total_points, 2)
+    assert.ok(fs.existsSync(path.join(run, '.batch_local.out')))
+    assert.ok(fs.existsSync(path.join(run, '.batch_local.err')))
+
+    // wait_sec re-polls the local ladder until the worker's progress lands
+    const poll = await tool(ctx, 'batch_poll').execute({ run_dir: run, wait_sec: 3 }, {})
+    assert.equal(poll.ok, true)
+    assert.equal(poll.scheduler, 'local')
+    assert.equal(poll.state, 'completed')
+    assert.equal(poll.completed, 2)
+    assert.equal(ctx.calls.length, 0, 'local poll reads files only')
+  } finally {
+    restoreEnv()
+  }
+})
+
 test('batch_poll reads the job file and reports completed', async () => {
   const run = makeRunDir()
   try {
@@ -429,12 +476,12 @@ test('batch tools reject escaped paths and unresolvable machines', async () => {
       remote_scripts_dir: '/tmp/elsewhere', sync_scripts: true,
     }, {}), /remote_scripts_dir must be under the remote workspace/)
 
-    // machine_id is now a required dsh-ssh alias (no mirror-session fallback);
-    // the schema layer rejects the call before execute() ever runs
+    // machine_id is required for every remote scheduler (local is the only
+    // one that omits it); the rejection now comes from machine resolution
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1',
       worker: 'spectre/spectre_sweep_worker.py',
-    }, {}), /missing required property "machine_id"/)
+    }, {}), /machine_id \(a dsh-ssh alias\) is required/)
 
     await assert.rejects(() => resolveMachine(makeCtx(), 'ghost', REMOTE_ROOT), /no such dsh-ssh host: ghost/)
 

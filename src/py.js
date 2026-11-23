@@ -29,6 +29,9 @@ export function scriptPath(relPath) {
 export async function runPython(scriptRel, args, timeoutMs = 900_000, options = {}) {
   const abs = scriptPath(scriptRel)
   if (!fs.existsSync(abs)) throw new Error(`pipeline script missing: ${abs}`)
+  // options.env MERGES into the child env (a full replacement would drop PATH
+  // and PYTHONUTF8) — the same shape as the SmartAnaSim copy.
+  const { env: extraEnv, ...rest } = options
   return execFileAsync('python', [abs, ...args], {
     timeout: timeoutMs,
     maxBuffer: 32 * 1024 * 1024,
@@ -37,8 +40,8 @@ export async function runPython(scriptRel, args, timeoutMs = 900_000, options = 
     // Python < 3.15 encodes piped stdout by locale (cp936 on zh-CN Windows)
     // while we decode utf-8 — force UTF-8 mode so Chinese paths in tool
     // output (e.g. "[report] ... -> <path>") survive the round trip.
-    env: { ...process.env, PYTHONUTF8: '1' },
-    ...options,
+    env: { ...process.env, PYTHONUTF8: '1', ...extraEnv },
+    ...rest,
   })
 }
 
