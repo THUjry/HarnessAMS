@@ -342,6 +342,24 @@ test('progress: GET /api/progress-remote answers remote truth, local fallback, f
     assert.equal(asLocal.body.source, 'config')
     assert.equal(asLocal.body.total, 3)
 
+    // a scheduler=local job file is NOT a remote batch: the run directory is
+    // the truth — local semantics straight from the ladder, zero ssh (otherwise
+    // the endpoint answered `unreachable` and the card froze on its first frame)
+    const localJob = path.join(proj, 'RawResults', 'Sim1_20261122_batch1')
+    await mkdir(localJob, { recursive: true })
+    await writeFile(path.join(localJob, 'sweep_config.json'),
+      JSON.stringify({ parameters: { a: [1, 2] } }))
+    await writeFile(path.join(localJob, '.batch_job.json'),
+      JSON.stringify({ job_id: 'local-1', scheduler: 'local', pid: process.pid, total_points: 2 }))
+    ssh.calls.length = 0
+    const asLocalJob = await call('/api/progress-remote?runDir=' + q(localJob) + '&sessionId=s1')
+    assert.equal(asLocalJob.code, 200)
+    assert.equal(asLocalJob.body.remote, false)
+    assert.equal(asLocalJob.body.unreachable, undefined)
+    assert.equal(asLocalJob.body.source, 'job')
+    assert.equal(asLocalJob.body.status, 'submitted')
+    assert.equal(ssh.calls.length, 0, 'a local job costs no ssh call')
+
     // fence: same rules as the local endpoints
     assert.equal((await call('/api/progress-remote?runDir=' + q(run))).code, 400)
     assert.equal((await call('/api/progress-remote?runDir=' + q(run) + '&sessionId=nope')).code, 400)

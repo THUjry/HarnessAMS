@@ -47,9 +47,13 @@ async function pollRemoteJob(ctx, runDir, job) {
 export async function progressRemotePayload(ctx, runDir) {
   const dir = String(runDir ?? '').trim()
   const job = dir ? readJob(dir) : null
-  if (!job) {
-    // Not a submitted batch (local sweep / plain directory): local semantics,
-    // identical to /api/progress — the client normalizes both shapes alike.
+  if (!job || job.scheduler === 'local') {
+    // Not a submitted batch (local sweep / plain directory), or a scheduler=local
+    // one — the run directory IS the truth on this host: local semantics,
+    // identical to /api/progress (the client normalizes both shapes alike).
+    // Without the local branch the endpoint tried to resolve a remote machine
+    // off a job file that has none, answered `unreachable`, and the card froze
+    // on its first frame (2026-11-23 instance check).
     return { remote: false, ...readRunProgress(dir) }
   }
   const key = path.resolve(dir)
