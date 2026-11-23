@@ -42,8 +42,8 @@ name under `remote_root` automatically when `remote_dir` is omitted — same
 `Sim` index continues with `batch<M>+1` on the same day, a new day starts a
 new `Sim<N>+1`. Pass `remote_dir` explicitly only to reuse a specific
 location. Raw simulation data lives under `RawResults/` (remote
-`<remote_root>/RawResults/Sim*` is the batch_submit default; a raw local
-fetch lands in `<project>/RawResults/`), processed compact results in
+`<remote_root>/RawResults/Sim*` is the batch_submit default; local runs
+live under `<project>/RawResults/`), processed compact results in
 `<project>/SimResults/`, report figures in `<project>/Figs/`, and the HTML
 report at the project root.
 
@@ -59,14 +59,21 @@ report at the project root.
    "spectre/spectre_sweep_worker.py", worker_args: ["--config",
    "sweep_config.json", "--max-parallel", "8"], scheduler: "local"|"direct"|"lsf"}`.
    Remote submits upload the run directory plus the whole worker scripts
-   tree and write `.batch_job.json` in the local run directory.
+   tree and write `.batch_job.json` in the local run directory (local
+   submits write the same file after spawning the worker on this host).
+   `sim_scripts_dir` set to an existing directory replaces the worker
+   scripts root (custom or test worker tree).
    `overwrite: true` replaces a batch that already ran in the target
    directory (stale replay markers are cleared first — without it a
    finished dir short-circuits to its old result).
 3. **Monitor** — `batch_poll {run_dir, wait_sec}`: bjobs state plus the
    batch's own progress; `wait_sec` (≤600) holds the call and re-polls
    ~every 10 s until the batch settles — the in-flight call is the window
-   where the session progress card live-updates. **Timing trap:** judge
+   where the session progress card live-updates. For `scheduler="local"`
+   the frame comes from the run directory itself and knows whether the
+   worker is still alive: one that died reads `failed` with its stderr tail
+   in `errlog_tail` — fix the cause and resubmit, do not keep polling.
+   **Timing trap:** judge
    completion by the per-point meta count (the poll's `completed` counts
    exactly those), not by the progress file alone — it may lag or be
    mid-write right after the run ends. The result carries a per-point

@@ -58,11 +58,11 @@ A sweep always starts with the same assembly step; only the execution channel di
 | direct | `batch_submit(scheduler="direct")` | the SSH target host itself, foreground | ssh_upload + `ssh_exec` (no LSF; marker+flock replay guard) |
 | lsf | `batch_submit(scheduler="lsf")` (default) | the SSH target host's cluster via the LSF queue | ssh_upload + `bsub`/`bjobs` (marker read-back idempotency) |
 
-`machine_id` (a dsh-ssh alias) and the fencing `remote_root` are required for the remote modes only. The worker scripts upload tree for both remote modes is the project's `sim_scripts_dir` (`workspace_config.json` workspace section; by default the sibling SmartAnaSim package's `scripts/`; env `HARNESSAMS_SIM_SCRIPTS_DIR` overrides).
+`machine_id` (a dsh-ssh alias) and the fencing `remote_root` are required for the remote modes only. The worker scripts upload tree for both remote modes is the project's `sim_scripts_dir` (`workspace_config.json` workspace section; by default the sibling SmartAnaSim package's `scripts/`; env `HARNESSAMS_SIM_SCRIPTS_DIR` overrides). A `sim_scripts_dir` argument to `batch_submit` that names an existing directory replaces that root for any scheduler (a custom or test worker tree); any other value only anchors the project walk-up.
 
 ### Mode 1 — local (the DSH host runs Spectre itself)
 
-Spectre must be installed on the DSH host. The submit spawns the worker as a detached background process (stdio to `.batch_local.out`/`.err` in the run directory, `--work-dir` appended) and returns immediately; the worker carries its own global budget, so a forgotten run still terminates by itself.
+Spectre must be installed on the DSH host. The submit spawns the worker as a detached background process (stdio to `.batch_local.out`/`.err` in the run directory, `--work-dir` appended) and returns immediately; the worker carries its own global budget, so a forgotten run still terminates by itself. The poll reads the run directory and checks the worker's pid: a worker that died (bad arguments, a crash) reads `failed` with its stderr tail in `errlog_tail` instead of `running` until `wait_sec` runs out, and a spawn that cannot start (no python on PATH) rejects the submit.
 
 spectre_assemble(project_dir=...)                     # design_params.json -> template*.scs + sweep_config.json (+ checks)
 batch_submit(run_dir=..., worker="spectre/spectre_sweep_worker.py", scheduler="local")
