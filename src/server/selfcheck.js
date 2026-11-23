@@ -4,11 +4,13 @@
 // the simulation itself but verifying machine,
 // connection, environment, permissions, tools and compute end to end:
 //
-//   simulator=spectre  full simulation path: spectre_assemble -> run_sweep ->
-//                      spectre_parse -> pointwise verify (local), or
-//                      batch_submit/poll -> remote parse+verify -> fetch +
-//                      cross-check (remote; an LSF failure is diagnosed and
-//                      retried once with scheduler=direct).
+//   simulator=spectre  full simulation path: spectre_assemble -> batch_submit
+//                      (scheduler=local background workers) -> batch_poll ->
+//                      the standalone parser run directly -> pointwise verify
+//                      (local), or batch_submit/poll (remote LSF/direct) ->
+//                      remote parse+verify -> psf CSV download + cross-check
+//                      (an LSF failure is diagnosed and retried once with
+//                      scheduler=direct).
 //   simulator=none     no simulation: the bundled golden dataset (src/selfcheck/
 //                      golden, analytic RC AC responses in psfascii form) replays
 //                      parse + compute locally, or upload -> remote compute ->
@@ -28,14 +30,18 @@
 // parallel) and once more at the end for anything still uncovered.
 //
 // Tool calls go through the registered tool surface (ctx.tools.execute via
-// callTool) — SmartAnaSim's spectre_* tools, this plugin's batch_* tools and
-// @linxin666/dsh-ssh's ssh_* — but verdicts are read from DISK ARTIFACTS
-// (sweep_progress.json / psf_index.json / .batch_job.json) wherever possible:
-// the pipeline's serialization of model-tool results is a launch-class TODO and
-// artifacts are the ground truth anyway (self-check spirit).
+// callTool) — SmartAnaSim's spectre_assemble, this plugin's batch_* tools and
+// @linxin666/dsh-ssh's ssh_*; data processing is script-face (2026-11-23): the
+// parse step runs spectre_psf_parse.py from the project's sim_scripts_dir
+// directly. Verdicts are read from DISK ARTIFACTS (sweep_progress.json /
+// psf_index.json / .batch_job.json) wherever possible: the pipeline's
+// serialization of model-tool results is a launch-class TODO and artifacts are
+// the ground truth anyway (self-check spirit).
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { runPython } from '../py.js'
@@ -47,6 +53,7 @@ import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
 import { fetchMachines } from './machines.js'
 
 const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..') // src/
+const execFileAsync = promisify(execFile)
 export const SELFCHECK_ASSETS = path.join(PKG_ROOT, 'selfcheck')
 export const GOLDEN_DIR = path.join(SELFCHECK_ASSETS, 'golden')
 export const VERIFY_ASSETS = [
@@ -54,12 +61,24 @@ export const VERIFY_ASSETS = [
   path.join(PKG_ROOT, 'scripts', 'selfcheck', 'selfcheck_verify.mjs'),
 ]
 
+// The standalone parser under the project's sim_scripts_dir (the SmartAnaSim
+// scripts tree). Data processing is script-face since 2026-11-23 — the parse
+// step runs it directly, the same way the smart-spectre skill documents.
+export function parserScriptPath(anchor) {
+  const p = path.join(simScriptsDir(anchor), 'spectre', 'spectre_psf_parse.py')
+  if (!fs.existsSync(p)) {
+    throw new Error(`spectre_psf_parse.py not found under the project sim_scripts_dir: ${p} `
+      + '(set workspace.sim_scripts_dir in the project\'s .harnessams/workspace_config.json '
+      + 'to the SmartAnaSim scripts directory)')
+  }
+  return p
+}
+
 export const TOPOS = ['lpf', 'hpf']
 export const TOLERANCE = 0.01
 const TOTAL_BUDGET_MS = 30 * 60_000
 const POLL_INTERVAL_MS = 5_000
 const POLL_BUDGET_MS = 10 * 60_000
-const FETCH_INCLUDES = ['point_meta.json', 'sweep_progress.json', 'errlog.txt', 'psf/*_psf.csv']
 
 // In-memory run registry (id -> run). Bounded; the authoritative record is the
 // per-run selfcheck_run.json under <project>/.harnessams/selfcheck/<id>/, so a
@@ -475,29 +494,41 @@ async function orchestrate(run) {
   const mode = settings.run_mode
   const sim = settings.simulator
   try {
-    // C1 — SmartAnaSim tool registration
-    const required = sim === 'spectre'
-      ? ['spectre_assemble', 'spectre_run_sweep', 'spectre_parse']
-      : ['spectre_parse']
-    const registered = required.filter((n) => ctx.tools?.get?.(n))
-    const missing = required.filter((n) => !ctx.tools?.get?.(n))
-    const c1 = addStep(run, { item: 'SmartAnaSim tool registration', settingColumn: 'simulator' })
-    c1.ms = 1
-    if (missing.length) {
-      c1.ok = false
-      c1.result = `missing: ${missing.join(', ')}`
-      c1.detail = 'The SmartAnaSim plugin registers the spectre_* tools — install/enable it '
-        + '(and check its Config family switches), then retry.'
+    // C1 — tool face readiness: spectre needs spectre_assemble (SmartAnaSim)
+    // plus this plugin's batch channel; simulator=none runs no tools at all,
+    // so its gate is the standalone parser under the scripts root
+    let toolsOk = true
+    if (sim === 'spectre') {
+      const required = ['spectre_assemble', 'batch_submit', 'batch_poll']
+      const missing = required.filter((n) => !ctx.tools?.get?.(n))
+      const c1 = addStep(run, { item: 'Tool registration check', settingColumn: 'simulator' })
+      c1.ms = 1
+      if (missing.length) {
+        toolsOk = false
+        c1.ok = false
+        c1.result = `missing: ${missing.join(', ')}`
+        c1.detail = 'spectre_assemble registers with the SmartAnaSim plugin; batch_submit/batch_poll '
+          + 'live in this one — install/enable the plugins (and check the SmartAnaSim Config family '
+          + 'switches), then retry.'
+      } else {
+        c1.ok = true
+        c1.result = `${required.join(', ')} registered`
+      }
     } else {
-      c1.ok = true
-      c1.result = `${required.join(', ')} registered`
-      if (sim === 'none') {
-        const optional = ['spectre_assemble', 'spectre_run_sweep'].filter((n) => !ctx.tools?.get?.(n))
-        if (optional.length) c1.warn = `not registered (unused in simulator=none): ${optional.join(', ')}`
+      const c1 = addStep(run, { item: 'Parser script check', settingColumn: 'simulator' })
+      c1.ms = 1
+      try {
+        const p = parserScriptPath(run._priv.project.path)
+        c1.ok = true
+        c1.result = `spectre_psf_parse.py under sim_scripts_dir (${path.basename(path.dirname(p))}/)`
+      } catch (e) {
+        toolsOk = false
+        c1.ok = false
+        c1.result = 'parser not found'
+        c1.detail = String(e?.message ?? e)
       }
     }
     void persistRun(run)
-    const toolsOk = !missing.length
 
     // C2 — settings validation snapshot (the route already enforced the remote
     // prerequisites; record what this run resolved to)
@@ -609,16 +640,16 @@ function skipRestForUnprepared(run, mode, sim, reason) {
   const section = mode === 'remote' ? 'remote' : 'local'
   if (mode === 'local') {
     if (sim === 'spectre') {
-      skipStep(run, { item: 'spectre_run_sweep LPF (9 pts)', settingColumn: 'simulator' }, reason)
-      skipStep(run, { item: 'spectre_run_sweep HPF (9 pts)', settingColumn: 'simulator' }, reason)
+      skipStep(run, { item: 'batch_submit local LPF (9 pts)', settingColumn: 'run_mode' }, reason)
+      skipStep(run, { item: 'batch_submit local HPF (9 pts)', settingColumn: 'run_mode' }, reason)
     }
-    skipStep(run, { item: sim === 'spectre' ? 'spectre_parse (LPF+HPF)' : 'spectre_parse (golden)', settingColumn: 'simulator' }, reason)
+    skipStep(run, { item: sim === 'spectre' ? 'spectre_psf_parse.py (LPF+HPF)' : 'spectre_psf_parse.py (golden)', settingColumn: 'simulator' }, reason)
     skipStep(run, { item: `pointwise verify (${run._priv.settings.compute_script_local}, LPF+HPF)`, settingColumn: 'compute_local' }, reason)
   } else if (sim === 'spectre') {
     skipStep(run, { section, item: 'batch_submit (LPF+HPF)', settingColumn: 'scheduler' }, reason)
     skipStep(run, { section, item: 'batch_poll → completed', settingColumn: 'scheduler' }, reason)
     skipStep(run, { section, item: `remote parse + verify (${run._priv.settings.compute_script_remote})`, settingColumn: 'compute_remote' }, reason)
-    skipStep(run, { section, item: 'batch_fetch + local cross-check', settingColumn: 'compute_remote' }, reason)
+    skipStep(run, { section, item: 'result download + local cross-check', settingColumn: 'compute_remote' }, reason)
   } else {
     skipStep(run, { section, item: 'golden upload (ssh_upload)', settingColumn: 'machine' }, reason)
     skipStep(run, { section, item: `remote parse + verify (${run._priv.settings.compute_script_remote})`, settingColumn: 'compute_remote' }, reason)
@@ -636,38 +667,60 @@ async function localChain(run, sim) {
     const sweepSteps = []
     for (const topo of TOPOS) {
       checkBudget(run)
-      const step = await timedStep(run, { item: `spectre_run_sweep ${topo.toUpperCase()} (9 pts)`, settingColumn: 'simulator' }, async () => {
-        const r = await callTool(ctx, 'spectre_run_sweep',
-          { run_dir: path.join(run.runDir, topo), timeout_sec: 600 },
-          { timeoutMs: 660_000, signal: run._priv.cancel.controller.signal })
-        const prog = await fsp.readFile(path.join(run.runDir, topo, 'sweep_progress.json'), 'utf8')
+      const runDir = path.join(run.runDir, topo)
+      const step = await timedStep(run, { item: `batch_submit local ${topo.toUpperCase()} (9 pts)`, settingColumn: 'run_mode' }, async (stepRef) => {
+        const sub = await callTool(ctx, 'batch_submit',
+          { run_dir: runDir, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' },
+          { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
+        if (sub.isError) {
+          return { ok: false, result: 'submit failed', detail: String(sub.text || '').slice(0, 400) }
+        }
+        // poll the local ladder until the worker settles (cancellation lands
+        // within one poll interval; live progress updates the step row)
+        let state = null
+        let last = null
+        const budget = Date.now() + POLL_BUDGET_MS
+        while (Date.now() < budget) {
+          checkCancelled(run)
+          last = await callTool(ctx, 'batch_poll', { run_dir: runDir },
+            { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
+          const parsed = extractStateJson(last.text)
+          state = parsed?.state ?? null
+          if (stepRef) {
+            stepRef.result = `local ${topo}: ${state ?? 'unknown'}`
+              + (parsed?.completed != null ? ` (${parsed.completed}/${parsed?.total ?? '?'})` : '')
+            void persistRun(run)
+          }
+          if (state === 'completed' || state === 'failed' || last.isError) break
+          await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
+        }
+        const prog = await fsp.readFile(path.join(runDir, 'sweep_progress.json'), 'utf8')
           .then((t) => JSON.parse(t)).catch(() => null)
         const total = Number(prog?.total_points) || 0
         const succ = Number(prog?.succeeded) || 0
-        const ok = !r.isError && prog?.status === 'completed' && total === 9 && succ === total
-        const cmd = await fsp.readFile(path.join(run.runDir, topo, '00', 'point_meta.json'), 'utf8')
+        const ok = !last?.isError && prog?.status === 'completed' && total === 9 && succ === total
+        const cmd = await fsp.readFile(path.join(runDir, '00', 'point_meta.json'), 'utf8')
           .then((t) => JSON.parse(t)?.command).catch(() => null)
         return {
           ok,
           result: prog ? `${succ}/${total} success (${prog.status})` : 'no sweep_progress.json',
           detail: [cmd ? `spectre: ${String(cmd).split(/\s+/).slice(0, 3).join(' ')}` : '',
-            (r.text || '').split(/\r?\n/).filter((l) => l.startsWith('[sweep]')).slice(-3).join('\n')]
+            (last?.text || '').split(/\r?\n/).filter((l) => l.startsWith('"[sweep]') || l.includes('[sweep]')).slice(-3).join('\n')]
             .filter(Boolean).join('\n').slice(0, 800),
         }
       })
       sweepSteps.push(step)
     }
     const swept = sweepSteps.every((s) => s.ok === true)
-    const parseStep = await runParseStep(run, swept, 'spectre_parse (LPF+HPF)')
+    const parseStep = await runParseStep(run, swept, 'spectre_psf_parse.py (LPF+HPF)')
     await runVerifyStep(run, parseStep.ok === true)
   } else {
-    const parseStep = await runParseStep(run, true, 'spectre_parse (golden)')
+    const parseStep = await runParseStep(run, true, 'spectre_psf_parse.py (golden)')
     await runVerifyStep(run, parseStep.ok === true)
   }
 }
 
 async function runParseStep(run, prerequisiteOk, label) {
-  const { ctx } = run._priv
   if (!prerequisiteOk) {
     const s = addStep(run, { item: label, settingColumn: 'simulator' })
     s.ok = null; s.skipReason = 'sweep failed'; s.ms = 1
@@ -677,16 +730,34 @@ async function runParseStep(run, prerequisiteOk, label) {
   return timedStep(run, { item: label, settingColumn: 'simulator' }, async () => {
     const details = []
     let ok = true
+    let parser
+    try {
+      parser = parserScriptPath(run._priv.project.path)
+    } catch (e) {
+      return { ok: false, result: 'parser not found', detail: String(e?.message ?? e) }
+    }
     for (const topo of TOPOS) {
       const dir = path.join(run.runDir, topo)
-      const r = await callTool(ctx, 'spectre_parse', { work_dir: dir, format: 'csv' },
-        { timeoutMs: 620_000, signal: run._priv.cancel.controller.signal })
+      // script-face parsing (2026-11-23): run the standalone parser directly —
+      // data processing is not tool-shaped anymore
+      try {
+        await execFileAsync('python', [parser, '--work-dir', dir, '--format', 'csv'], {
+          timeout: 600_000, windowsHide: true, encoding: 'utf8',
+          env: { ...process.env, PYTHONUTF8: '1' },
+          signal: run._priv.cancel.controller.signal,
+        })
+      } catch (e) {
+        ok = false
+        const out = [e?.stdout, e?.stderr].filter(Boolean).join('\n').slice(-300)
+        details.push(`${topo}: parser failed — ${out || String(e?.message ?? e)}`)
+        continue
+      }
       const index = await fsp.readFile(path.join(dir, 'psf', 'psf_index.json'), 'utf8')
         .then((t) => JSON.parse(t)).catch(() => null)
       const points = Array.isArray(index?.points) ? index.points.length : 0
       const signals = index?.points?.[0]?.signals ?? []
       const haveSignals = signals.includes('ac_freq') && signals.includes('ac_vout')
-      if (r.isError || points !== 9 || !haveSignals) ok = false
+      if (points !== 9 || !haveSignals) ok = false
       details.push(`${topo}: ${points} pts parsed${haveSignals ? '' : ' (missing ac_freq/ac_vout)'}`)
     }
     return { ok, result: details.join(' · '), detail: details.join('\n') }
@@ -882,13 +953,16 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
   })
 
   if (verifyStep.ok !== true) {
-    skipStep(run, { section: 'remote', item: parserFromScriptsDir ? 'batch_fetch + local cross-check' : 'artifact download + local cross-check', settingColumn: 'compute_remote' }, 'remote verify failed')
+    skipStep(run, { section: 'remote', item: parserFromScriptsDir ? 'psf CSV download + local cross-check' : 'artifact download + local cross-check', settingColumn: 'compute_remote' }, 'remote verify failed')
     return
   }
 
-  // R4 / RN3 — fetch artifacts + local cross-check in the selected LOCAL language
+  // R4 / RN3 — download the compact results the remote parse produced (point
+  // metas for the params + the psf CSVs the verifier compares), then local
+  // cross-check in the selected LOCAL language (plain per-file ssh_download:
+  // the light result files never need an archive)
   await timedStep(run, {
-    section: 'remote', item: parserFromScriptsDir ? 'batch_fetch + local cross-check' : 'artifact download + local cross-check',
+    section: 'remote', item: parserFromScriptsDir ? 'result download + local cross-check' : 'artifact download + local cross-check',
     settingColumn: 'compute_remote',
   }, async () => {
     checkBudget(run)
@@ -897,30 +971,23 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
     let ok = true
     for (const topo of TOPOS) {
       const staging = path.join(run.runDir, 'remote', topo)
-      if (parserFromScriptsDir) {
-        const r = await callTool(ctx, 'batch_fetch',
-          { run_dir: staging, machine_id: settings.machine_id, includes: FETCH_INCLUDES },
-          { timeoutMs: 300_000, signal: run._priv.cancel.controller.signal })
-        if (r.isError) {
-          ok = false
-          parts.push(`${topo}: fetch failed — ${String(r.text).slice(0, 200)}`)
-          continue
-        }
-      } else {
-        // golden/direct mode: plain ssh_download of the psf CSVs the remote parse produced
-        const dir = remoteJoin(run._priv.remoteBase, run.id, topo)
-        await fsp.mkdir(path.join(staging, 'psf'), { recursive: true })
-        let got = 0
-        for (let i = 0; i < 9; i++) {
-          const name = `${String(i).padStart(2, '0')}_psf.csv`
-          const dl = await downloadFile(ctx, alias, remoteJoin(dir, 'psf', name), path.join(staging, 'psf', name))
+      const dir = parserFromScriptsDir
+        ? remoteDirFor(run, topo, run._priv.usedScheduler ?? settings.scheduler)
+        : remoteJoin(run._priv.remoteBase, run.id, topo)
+      let got = 0
+      for (let i = 0; i < 9; i++) {
+        const name = String(i).padStart(2, '0')
+        for (const rel of [`${name}/point_meta.json`, `psf/${name}_psf.csv`]) {
+          const local = path.join(staging, ...rel.split('/'))
+          await fsp.mkdir(path.dirname(local), { recursive: true })
+          const dl = await downloadFile(ctx, alias, remoteJoin(dir, rel), local)
           if (dl.ok) got += 1
         }
-        if (got !== 9) {
-          ok = false
-          parts.push(`${topo}: downloaded ${got}/9 psf CSVs`)
-          continue
-        }
+      }
+      if (got !== 18) {
+        ok = false
+        parts.push(`${topo}: downloaded ${got}/18 result files (metas + psf CSVs)`)
+        continue
       }
       const localJson = await runVerifyLocal(localLang, topo, staging)
       const remoteJson = run._priv.remoteVerify?.[topo] ?? null

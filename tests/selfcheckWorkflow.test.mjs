@@ -15,10 +15,10 @@ test('workflow: local spectre branch — session face + local chain, no remote c
   const t = workflowSection(S())
   assert.ok(t.includes('### Self-check workflow (local / spectre)'))
   assert.ok(t.includes('harnessams_selfcheck'), 'session-face lead present')
-  assert.ok(t.includes('spectre_run_sweep LPF (9 pts)'))
-  assert.ok(t.includes('spectre_parse (LPF+HPF)'))
+  assert.ok(t.includes('batch_submit local LPF (9 pts'))
+  assert.ok(t.includes('spectre_psf_parse.py run directly'))
   assert.ok(t.includes('pointwise verify (python'), 'compute language interpolated')
-  assert.ok(!t.includes('batch_submit'), 'local mode never touches the remote channel')
+  assert.ok(!t.includes('ssh_'), 'local mode never touches the remote channel')
   assert.ok(t.includes('Finalize:'), 'finalize bullet present')
 })
 
@@ -26,8 +26,8 @@ test('workflow: local golden branch (simulator=none)', () => {
   const t = workflowSection(S({ simulator: 'none' }))
   assert.ok(t.includes('### Self-check workflow (local / golden)'))
   assert.ok(t.includes('golden dataset load'))
-  assert.ok(t.includes('spectre_parse (golden)'))
-  assert.ok(!t.includes('spectre_run_sweep'), 'no live sweeps in the golden replay')
+  assert.ok(t.includes('spectre_psf_parse.py run directly'))
+  assert.ok(!t.includes('batch_submit'), 'no live sweeps in the golden replay')
 })
 
 test('workflow: remote LSF branch — batch chain + immediate-diagnosis fallback', () => {
@@ -36,7 +36,7 @@ test('workflow: remote LSF branch — batch chain + immediate-diagnosis fallback
   assert.ok(t.includes('batch_submit (LSF'))
   assert.ok(t.includes('batch_poll'))
   assert.ok(t.includes('ssh_exec'))
-  assert.ok(t.includes('batch_fetch'))
+  assert.ok(t.includes('ssh_download of the point metas + psf CSVs'))
   assert.ok(t.includes('ok-via-fallback'))
   assert.ok(t.includes('retries once with scheduler=direct'))
 })

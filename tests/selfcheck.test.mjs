@@ -8,10 +8,13 @@
 //     every ssh_exec command (wrapped in `timeout -s KILL ... sh -c "…"`)
 //     is bash -n validated here, same as server.test.mjs;
 //   - runs the REAL batch_* tools (makeTool(toolDefinitions(ctx))) so submit/
-//     poll/fetch logic is exercised for real against the mocked remote;
-//   - fakes the SmartAnaSim spectre_* boundary: assemble runs the real bundled
-//     gen script, run_sweep copies the golden point trees + progress, parse
-//     synthesizes the psf CSVs the real parser would emit;
+//     poll logic is exercised for real against the mocked remote; local
+//     submissions (scheduler=local) are intercepted to lay down the worker's
+//     output + job file, which the REAL batch_poll local branch then reads;
+//   - fakes the SmartAnaSim boundary at assemble only (real bundled gen
+//     script); parsing is script-face since 2026-11-23 — the parse step runs
+//     the fixture parser written into the dummy scripts root, which emits the
+//     analytic psf CSVs the real parser would produce;
 //   - leaves the verify step REAL (python via runPython / js via import), so
 //     the compute channels are tested with actual numbers.
 import test from 'node:test'
@@ -142,28 +145,6 @@ function makeHarness({ scenario = {} }) {
       const { stdout } = await execFileAsync('python', [gen, '--out', path.resolve(args.out_dir)], { timeout: 60_000 })
       return { ok: true, output: stdout.trim(), project_dir: args.project_dir, simulator: 'spectre' }
     },
-    spectre_run_sweep: async (args) => {
-      if (scenario.hangTool === 'spectre_run_sweep') await new Promise((res) => { hangResolve = res })
-      const topo = path.basename(path.resolve(args.run_dir))
-      fs.cpSync(path.join(GOLDEN_DIR, topo), args.run_dir, { recursive: true })
-      fs.writeFileSync(path.join(args.run_dir, 'sweep_progress.json'),
-        JSON.stringify({ work_dir: args.run_dir, status: 'completed', total_points: 9,
-          completed: 9, succeeded: 9, failed: 0, running: 0 }) + '\n', 'utf8')
-      return { ok: true, output: '[sweep] done: 9 success / 0 partial / 0 failed in 1.0s', run_dir: args.run_dir, simulator: 'spectre' }
-    },
-    spectre_parse: async (args) => {
-      if (scenario.parseFail) throw new Error('parse failed (mock)')
-      const workDir = path.resolve(args.work_dir)
-      const topo = path.basename(workDir)
-      await writeVerifyFixture(workDir, topo, { corrupt: scenario.parseCorrupt === true })
-      const points = Array.from({ length: 9 }, (_, i) => ({
-        point: String(i).padStart(2, '0'), signals: ['ac_freq', 'ac_vout'],
-      }))
-      fs.writeFileSync(path.join(workDir, 'psf', 'psf_index.json'),
-        JSON.stringify({ work_dir: workDir, points, errors: [] }) + '\n', 'utf8')
-      return { ok: true, out_dir: path.join(workDir, 'psf'),
-        summary: { work_dir: workDir, points }, output: '[psf] 9/9 point(s) parsed' }
-    },
   }
 
   // ssh_exec behavior script: commands arrive wrapped by execRemote; routing
@@ -206,16 +187,6 @@ function makeHarness({ scenario = {} }) {
       return { success: true, exitCode: 0, timedOut: false, stdout: `[selfcheck] ${JSON.stringify(remoteVerifyJson(topo))}\n`, stderr: '', durationMs: 3 }
     }
     if (command.includes('wc -l')) return { success: true, exitCode: 0, timedOut: false, stdout: '0\n', stderr: '', durationMs: 3 }
-    if (command.includes('tar czf')) return { success: true, exitCode: 0, timedOut: false, stdout: '1024\n', stderr: '', durationMs: 3 } // fetch pack (archive itself is garbage → extraction falls back)
-    if (command.includes('head -200')) {
-      // per-file fallback listing: point metas + psf CSVs
-      const lines = []
-      for (let i = 0; i < 9; i++) {
-        const n = String(i).padStart(2, '0')
-        lines.push(`./${n}/point_meta.json`, `./psf/${n}_psf.csv`)
-      }
-      return { success: true, exitCode: 0, timedOut: false, stdout: lines.join('\n') + '\n', stderr: '', durationMs: 3 }
-    }
     return { success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 3 }
   }
 
@@ -301,6 +272,23 @@ function makeHarness({ scenario = {} }) {
         } catch (e) {
           return reply({ isError: true, value: { text: String(e?.message ?? e) } })
         }
+      }
+      if (name === 'batch_submit' && args.scheduler === 'local') {
+        // local submissions never leave this host: lay down the worker's
+        // output + job file exactly as the real tool's detached run would, so
+        // the REAL batch_poll local branch reads them — the ssh mock stays idle
+        const runDir = path.resolve(args.run_dir)
+        const topo = path.basename(runDir)
+        fs.cpSync(path.join(GOLDEN_DIR, topo), runDir, { recursive: true })
+        fs.writeFileSync(path.join(runDir, 'sweep_progress.json'),
+          JSON.stringify({ work_dir: runDir, status: 'completed', total_points: 9,
+            completed: 9, succeeded: 9, failed: 0, running: 0, points: [] }) + '\n', 'utf8')
+        fs.writeFileSync(path.join(runDir, '.batch_job.json'),
+          JSON.stringify({ scheduler: 'local', job_id: 'local-test', pid: null,
+            worker: 'spectre/spectre_sweep_worker.py',
+            submitted_at: new Date().toISOString(), total_points: 9 }) + '\n', 'utf8')
+        return reply({ isError: false, value: { text: JSON.stringify({
+          ok: true, job_id: 'local-test', state: 'running', scheduler: 'local', run_dir: runDir }) } })
       }
       if (batchTools.has(name)) {
         try {
@@ -400,11 +388,48 @@ async function startFlow({ scenario = {}, settings = {} }) {
   const tmp = await tmpDir()
   const projectPath = path.join(tmp, 'project')
   await fsp.mkdir(projectPath, { recursive: true })
-  // worker scripts root for the batch tools (dummy tree; upload is mocked)
+  // worker scripts root for the batch tools (dummy tree; upload is mocked).
+  // The parser entry is FUNCTIONAL: the self-check's parse step runs it
+  // directly (script-face since 2026-11-23), and it emits exactly the
+  // analytic psf CSVs + psf_index.json the real SmartAnaSim parser would.
   const scriptsRoot = path.join(tmp, 'scripts')
   fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
   fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), '# dummy worker\n')
-  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_psf_parse.py'), '# dummy parser\n')
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_psf_parse.py'), [
+    'import json, math, os, sys',
+    'wd = sys.argv[sys.argv.index("--work-dir") + 1]',
+    'R = ["1k", "2k", "5k"]; C = ["1n", "2n", "5n"]',
+    'def si(t):',
+    '    t = t.lower()',
+    '    for suf, fac in [("k", 1e3), ("m", 1e-3), ("u", 1e-6), ("n", 1e-9), ("p", 1e-12), ("f", 1e-15)]:',
+    '        if t.endswith(suf): return float(t[:-len(suf)]) * fac',
+    '    return float(t)',
+    'n = round(math.log10(1e8 / 1e3) * 50) + 1',
+    'freqs = [1e3 * 10 ** (i / 50) for i in range(n)]',
+    'topo = os.path.basename(os.path.normpath(wd))',
+    'os.makedirs(os.path.join(wd, "psf"), exist_ok=True)',
+    'index = {"work_dir": wd, "points": [], "errors": []}',
+    'for i in range(9):',
+    '    name = "%02d" % i',
+    '    r = si(R[i // 3]); c = si(C[i % 3])',
+    '    fc = 1 / (2 * math.pi * r * c)',
+    '    rows = ["point,signal,index,sweep_value,re,im"]',
+    '    for idx, f in enumerate(freqs):',
+    '        x = f / fc',
+    '        re, im = (1 / (1 + x * x), -x / (1 + x * x)) if topo == "lpf" else (x * x / (1 + x * x), x / (1 + x * x))',
+    '        rows.append("%s,ac_freq,%d,,%s," % (name, idx, f))',
+    '        rows.append("%s,ac_vout,%d,,%s,%s" % (name, idx, re, im))',
+    '    with open(os.path.join(wd, "psf", name + "_psf.csv"), "w") as fh:',
+    '        fh.write("\\n".join(rows) + "\\n")',
+    '    os.makedirs(os.path.join(wd, name), exist_ok=True)',
+    '    with open(os.path.join(wd, name, "point_meta.json"), "w") as fh:',
+    '        json.dump({"point_index": i, "point_name": name, "simulator": "spectre",',
+    '                   "params": {"r_val": R[i // 3], "c_val": C[i % 3]}, "status": "success"}, fh)',
+    '    index["points"].append({"point": name, "signals": ["ac_freq", "ac_vout"]})',
+    'with open(os.path.join(wd, "psf", "psf_index.json"), "w") as fh:',
+    '    json.dump(index, fh)',
+    'print("[psf] 9/9 point(s) parsed")',
+  ].join('\n') + '\n')
   const prevScripts = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
   process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
 
@@ -728,8 +753,8 @@ test('flow: simulator=none + local (python compute)', async () => {
     assert.equal(run.summary.remote, 'skipped')
     const items = run.steps.map((s) => [s.item, s.ok])
     assert.deepEqual(items.map((x) => x[0]), [
-      'SmartAnaSim tool registration', 'Settings validation', 'golden dataset load',
-      'spectre_parse (golden)', 'pointwise verify (python, LPF+HPF)',
+      'Parser script check', 'Settings validation', 'golden dataset load',
+      'spectre_psf_parse.py (golden)', 'pointwise verify (python, LPF+HPF)',
     ])
     assert.ok(items.every(([, ok]) => ok === true), JSON.stringify(items))
     // local-only: not a single rw_* call happened
@@ -761,16 +786,22 @@ test('flow: simulator=spectre + local', async () => {
     assert.equal(run.summary.ok, true)
     const byCol = {}
     for (const s of run.steps) byCol[s.item] = s
+    assert.equal(byCol['Tool registration check'].ok, true)
     assert.equal(byCol['spectre_assemble (RC tb)'].ok, true)
-    assert.equal(byCol['spectre_run_sweep LPF (9 pts)'].ok, true)
-    assert.equal(byCol['spectre_run_sweep HPF (9 pts)'].ok, true)
-    assert.equal(byCol['spectre_parse (LPF+HPF)'].ok, true)
+    assert.equal(byCol['batch_submit local LPF (9 pts)'].ok, true)
+    assert.equal(byCol['batch_submit local HPF (9 pts)'].ok, true)
+    assert.equal(byCol['spectre_psf_parse.py (LPF+HPF)'].ok, true)
     assert.equal(byCol['pointwise verify (python, LPF+HPF)'].ok, true)
     assert.match(byCol['pointwise verify (python, LPF+HPF)'].result, /9 pts/)
     // the assemble step really ran the bundled gen script through the tool shell
     const asm = f.ctx.__execLog.find((x) => x.name === 'spectre_assemble')
     assert.ok(asm, 'spectre_assemble was not called through ctx.tools')
     assert.ok(asm.arguments.project_dir.endsWith(path.join('project')))
+    // local chain: submit + poll both went through the tool shell, and not a
+    // single ssh_* call happened
+    assert.ok(f.ctx.__execLog.some((x) => x.name === 'batch_submit' && x.arguments.scheduler === 'local'))
+    assert.ok(f.ctx.__execLog.some((x) => x.name === 'batch_poll'))
+    assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0)
   } finally { f.restoreAll() }
 })
 
