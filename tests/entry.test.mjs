@@ -139,7 +139,7 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   const m = /const SIM_CARD_TOOLS = \[([^\]]+)\]/.exec(src)
   assert.ok(m, 'SIM_CARD_TOOLS list must exist')
   const cardTools = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean)
-  assert.deepEqual(cardTools.sort(), ['batch_poll', 'sim_progress', 'spectre_run_sweep'])
+  assert.deepEqual(cardTools.sort(), ['batch_poll'])
   assert.ok(src.includes('hams-toolview'), 'card display toggle must persist via localStorage')
   assert.ok(src.includes('TOOLVIEW_EVENT'), 'mounted cards must flip without a reload')
   assert.ok(src.includes('DisplaySettingsSection'), 'console page must host the display toggle')

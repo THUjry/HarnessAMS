@@ -12,7 +12,7 @@
 //   tier 3: right-sidebar tab — the first-level strip is exactly two entries,
 //           the project overview (project-scoped so same-project session switches
 //           never refresh it) and THIS session's own panel with its Dashboard
-//           (local HTML reports: browse-to-add / dropdown / reload; gen-sweep-report
+//           (local HTML reports: browse-to-add / dropdown / reload; gen_sweep_report
 //           registers into the calling session) and Checks sub-views. A first-
 //           seen FORKED session (log-marker verdict from the server) starts from
 //           a copy of the previously active session's config — deliberately
@@ -66,16 +66,16 @@ window.__ModuleLoader__.load({
         'guide.back': '返回',
         'guide.done': '开始使用',
         'guide.s1t': '工作方式：本地还是远程',
-        'guide.s1': '本地 — spectre 本地闭环（装配 → 检查 → 仿真 → 解析 → 报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置；本页「机器」卡展示各别名，远端根路径是各项目自己的设置（项目总览设置表「远端根路径」行）。',
+        'guide.s1': '本地 — spectre 本地闭环（SmartAnaSim 装配/检查＋batch_submit 本机后台扫批＋脚本解析＋报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置；本页「机器」卡展示各别名，远端根路径是各项目自己的设置（项目总览设置表「远端根路径」行）。',
         'guide.s2t': '提交作业方式',
-        'guide.s2': '直接提交 — 仿真在本机前台运行（spectre 本地扫掠）。batch — 经 dsh-ssh 提交 LSF 队列（batch_submit / batch_poll / batch_fetch，按机器别名直发）。',
+        'guide.s2': '统一走 batch_submit：本地 — worker 在本机后台运行（scheduler="local"）；batch — 经 dsh-ssh 提交到目标机（scheduler="lsf" 进 LSF 队列、"direct" 目标机前台）。进度与取回用 batch_poll（完成时自动拉回 sweep_progress.json 与 errlog.txt）。',
         'guide.s2slurm': 'slurm —— 暂不支持。',
         'guide.s3t': '工作区位置',
         'guide.s3': '配置＝各工作区自己的 .harnessams/workspace_config.json 单文件（运行设置含远端根路径、脚本目录、plotly、回收站）。远程 — 路径即远端真实路径（dsh-ssh 按别名直达，无本地镜像）。',
         'guide.s4t': '仿真插件套件',
-        'guide.s4': '套件合计 13 个工具：SmartAnaSim 6（spectre 装配/扫掠/解析＋sNp 读取/提取，sNp 两件经 snp_guide 按需激活）＋HarnessAMS 7（batch 提交/轮询/取回＋分析/进度/回收站＋harnessams_selfcheck 自检）。除 sNp 外默认全注册；使用引导仅由 HarnessAMS 提供。',
+        'guide.s4': '套件合计 9 个工具：SmartAnaSim 4（spectre_assemble 装配/检查＋sNp 读取/提取，sNp 两件经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析脚本）＋HarnessAMS 5（batch_submit 三模式提交、batch_poll 轮询/取回、gen_sweep_report 报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」HTML 报告查看器（gen-sweep-report 生成报告即自动登记进本会话，也可浏览添加已有报告；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」HTML 报告查看器（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
         'hosts.ok': 'dsh-ssh：{n} 台主机',
         'hosts.missing': 'dsh-ssh 不可用',
@@ -210,13 +210,11 @@ window.__ModuleLoader__.load({
         'selfchk.diagDone': '已创建诊断会话 {id} — 请到左侧会话树查看。',
         'selfchk.diagFail': '创建诊断会话失败：{err}',
         'guide.s6t': '仿真进度卡片',
-        'guide.s6': '会话里三个重仿真工具调用（batch_poll 远程批轮询、sim_progress 仿真进度、spectre_run_sweep 扫批）渲染为专属进度卡片：调用瞬间即显示 0/N 首帧，运行中自动刷新（远程批直读远端进度，本地扫批读进度文件），并汇总已完成几批、多少个仿真、待完成多少；其余仿真工具调用回退为原始 JSON 显示。不需要时可在控制台页「显示设置」关闭（默认开启）。',
+        'guide.s6': '会话里的 batch_poll 调用渲染为专属进度卡片：调用瞬间即显示 0/N 首帧，运行中自动刷新（远程批直读远端进度，本机扫批读本地进度文件；wait_sec 阻塞等待期间全程刷新），并汇总已完成几批、多少个仿真、待完成多少；其余工具调用回退为原始 JSON 显示。不需要时可在控制台页「显示设置」关闭（默认开启）。',
         'set.title': '显示设置',
         'set.toolview': '会话内仿真进度卡片',
         'set.toolviewHint': '关闭后这些工具调用回退为原始 JSON 显示。浏览器本地偏好，对本机所有会话生效。',
-        'card.title.batch_poll': '远程批轮询',
-        'card.title.sim_progress': '仿真进度',
-        'card.title.spectre_run_sweep': 'Spectre 扫批',
+        'card.title.batch_poll': '批量进度',
         'card.preparing': '等待参数…',
         'card.waitProgress': '等待首个进度文件（启动后约 30 秒出现）…',
         'card.remoteUnreachable': '远端暂不可达，保留上次进度…',
@@ -261,16 +259,16 @@ window.__ModuleLoader__.load({
         'guide.back': 'Back',
         'guide.done': 'Get started',
         'guide.s1t': 'Working mode: local or remote',
-        'guide.s1': 'Local — the spectre loop runs on this machine (assemble → check → simulate → parse → report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured in the dsh-ssh plugin; this page\'s “Machines” card lists the aliases, and each remote root is a per-project setting (the “Remote root” row of the project overview settings table).',
+        'guide.s1': 'Local — the spectre loop runs on this machine (SmartAnaSim assembly/checks + batch_submit local background sweeps + script parsing + report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured in the dsh-ssh plugin; this page\'s “Machines” card lists the aliases, and each remote root is a per-project setting (the “Remote root” row of the project overview settings table).',
         'guide.s2t': 'Job submission',
-        'guide.s2': 'Direct — the simulation runs on this machine in the foreground (local spectre sweeps). batch — submit to an LSF queue over dsh-ssh (batch_submit / batch_poll / batch_fetch, sent straight to the machine alias).',
+        'guide.s2': 'Everything goes through batch_submit: local — the worker runs in the background on this machine (scheduler="local"); batch — submitted to the target host over dsh-ssh (scheduler="lsf" into the LSF queue, "direct" foreground on the host). Monitor and retrieve with batch_poll (a finished batch pulls sweep_progress.json and errlog.txt back automatically).',
         'guide.s2slurm': 'slurm — not supported yet.',
         'guide.s3t': 'Workspace location',
         'guide.s3': 'Config = each workspace\'s own single file .harnessams/workspace_config.json (run settings incl. the remote root, script dir, plotly, trash). Remote — paths are the real remote paths (dsh-ssh goes by alias, no local mirror).',
         'guide.s4t': 'Simulation plugin suites',
-        'guide.s4': 'The suite registers 13 tools in total: SmartAnaSim 6 (spectre assemble/sweep/parse + sNp read/extract — the two sNp tools activate on demand via snp_guide) and HarnessAMS 7 (batch submit/poll/fetch + analysis/progress/trash + the harnessams_selfcheck self-check). All except sNp are registered by default — guidance is provided by HarnessAMS only.',
+        'guide.s4': 'The suite registers 9 tools in total: SmartAnaSim 4 (spectre_assemble + sNp read/extract — the two sNp tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser scripts) and HarnessAMS 5 (batch_submit with its three schedulers, batch_poll monitoring/retrieval, gen_sweep_report, safe_trash and the harnessams_selfcheck self-check). All except sNp are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, an HTML report viewer (gen-sweep-report registers generated reports into the calling session automatically; existing reports can be browsed in; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, an HTML report viewer (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
         'hosts.ok': 'dsh-ssh: {n} host(s)',
         'hosts.missing': 'dsh-ssh not available',
@@ -405,18 +403,16 @@ window.__ModuleLoader__.load({
         'selfchk.diagDone': 'Diagnosis session {id} created — see the session tree.',
         'selfchk.diagFail': 'Failed to create a diagnosis session: {err}',
         'guide.s6t': 'Simulation progress cards',
-        'guide.s6': 'The three heavy simulation tool calls in a conversation (batch_poll, sim_progress, '
-          + 'spectre_run_sweep) render as dedicated progress cards: a 0/N first frame appears the moment the '
-          + 'call starts, live refresh while it runs (remote batches read the remote progress, local sweeps the '
-          + 'progress file) plus the cross-batch aggregate; every other tool call falls back to the raw JSON '
-          + 'view. Toggle them off in the console page display settings (on by default).',
+        'guide.s6': 'batch_poll calls in a conversation render as dedicated progress cards: a 0/N first frame '
+          + 'appears the moment the call starts, live refresh while it runs (remote batches read the remote '
+          + 'progress, local scheduler="local" sweeps the local progress file; a wait_sec blocking poll refreshes '
+          + 'throughout) plus the cross-batch aggregate; every other tool call falls back to the raw JSON view. '
+          + 'Toggle it off in the console page display settings (on by default).',
         'set.title': 'Display settings',
         'set.toolview': 'Simulation progress cards in conversations',
         'set.toolviewHint': 'When off, these tool calls fall back to the raw JSON view. Browser-local preference, '
           + 'applies to every session on this machine.',
-        'card.title.batch_poll': 'Remote batch poll',
-        'card.title.sim_progress': 'Simulation progress',
-        'card.title.spectre_run_sweep': 'Spectre sweep',
+        'card.title.batch_poll': 'Batch progress',
         'card.preparing': 'Waiting for arguments…',
         'card.waitProgress': 'Waiting for the first progress file (appears ~30 s after start)…',
         'card.remoteUnreachable': 'remote unreachable — showing last known progress…',
@@ -755,17 +751,17 @@ window.__ModuleLoader__.load({
     // ---------- session tool cards (DSH tool.call.toolview slot) ----------
     // DSH renders a generic JSON card per tool call; the tool.call.toolview slot
     // lets a plugin register custom renderers keyed by the exact wire tool name
-    // (a typo never renders — the generic card stays). D-016 scope ruling: cards
-    // cover ONLY the three heavy simulation tools (batch_poll, sim_progress,
-    // spectre_run_sweep); the lighter calls (submit/fetch/assemble/parse/report)
-    // stay on the DSH generic card. SmartAnaSim ships no client half and keyed
-    // matching is by name across plugins, so the top-level plugin renders both
-    // families. Local sweeps poll /api/progress live while their tool call
-    // blocks; the batch_poll card polls /api/progress-remote (the batch's own
-    // counters on the remote host, D-016) — first frame is the local 0/N
-    // submitted from the job file, so the card never shows a dead placeholder.
-    // Result cards add the cross-batch aggregate from /api/progress-summary.
-    const SIM_CARD_TOOLS = ['batch_poll', 'sim_progress', 'spectre_run_sweep']
+    // (a typo never renders — the generic card stays). 2026-11-23 scope: cards
+    // cover ONLY batch_poll — the single monitoring face of the batch channel
+    // (a local scheduler=local submission is polled through the same run
+    // directory, so the card covers local scans too); every other call,
+    // batch_submit included, stays on the DSH generic card.
+    // While the poll call blocks (wait_sec), the card reads /api/progress-remote
+    // (the batch's own counters on the remote host, D-016) after an instant
+    // local 0/N first frame from the job file — it never shows a dead
+    // placeholder. Result cards add the cross-batch aggregate from
+    // /api/progress-summary.
+    const SIM_CARD_TOOLS = ['batch_poll']
 
     // Display toggle (default on): a browser-local preference, NOT project settings —
     // cards render in every session (remote projects included) and remote projects
@@ -930,9 +926,9 @@ window.__ModuleLoader__.load({
       try { const v = JSON.parse(text); if (v && typeof v === 'object') data = v } catch { /* raw only */ }
       return { text, data }
     }
-    // (runDir, projectDir) candidates for the progress endpoints. All three
-    // carded tools take run_dir as a required argument, so the start phase can
-    // fetch before any result exists.
+    // (runDir, projectDir) candidates for the progress endpoints. The carded
+    // tool takes run_dir as a required argument, so the start phase can fetch
+    // before any result exists.
     function cardRoots(args, data) {
       const a = args || {}
       const r = data || {}
@@ -947,8 +943,6 @@ window.__ModuleLoader__.load({
       const d = result && result.data
       if (!d) return null
       if (toolName === 'batch_poll') return d.state
-      if (toolName === 'sim_progress') return d.status
-      if (toolName === 'spectre_run_sweep') return (live.prog && live.prog.local && live.prog.status) || (d.ok ? 'completed' : 'failed')
       return d.ok ? 'completed' : 'failed'
     }
 
@@ -999,34 +993,25 @@ window.__ModuleLoader__.load({
         els.push(h('div', { key: 'raw', className: 'hams-dim' }, '—'))
         return els
       }
-      if (toolName === 'batch_poll' || toolName === 'sim_progress') {
+      if (toolName === 'batch_poll') {
         if (d.ok === false && d.error) els.push(h('div', { key: 'perr', className: 'hams-bad' }, txt(String(d.error).slice(0, 400))))
-        if (d.total) els.push(h(CardBar, { key: 'bar', p: { total: d.total, completed: d.completed, status: d.state || d.status } }))
+        if (d.total) els.push(h(CardBar, { key: 'bar', p: { total: d.total, completed: d.completed, status: d.state } }))
         els.push(h(CardKv, { key: 'kv', items: [
           { k: tr('card.label.succeeded'), v: d.succeeded },
           { k: tr('card.label.failed'), v: d.failed },
           { k: tr('card.label.pending'), v: d.total != null ? Math.max((Number(d.total) || 0) - (Number(d.completed) || 0), 0) : null },
           { k: tr('card.label.jobState'), v: d.job_state },
           { k: tr('card.label.node'), v: d.compute_node },
-          { k: tr('card.label.remoteDir'), v: d.remote_dir },
+          { k: tr('card.label.remoteDir'), v: d.remote_dir || d.run_dir },
           { k: tr('card.label.updated'), v: d.updated_at },
         ] }))
-        if (d.errlog_tail) els.push(h(ClampText, { key: 'err', text: String(d.errlog_tail), className: 'hams-warn' }))
-        return els
-      }
-      if (toolName === 'spectre_run_sweep') {
-        if (p && p.total) els.push(h(CardBar, { key: 'bar', p }))
-        if (p && p.source === 'progress') {
-          els.push(h(CardKv, { key: 'kv', items: [
-            { k: tr('card.label.succeeded'), v: p.succeeded },
-            { k: tr('card.label.failed'), v: p.failed },
-            { k: tr('card.label.node'), v: p.compute_node },
-            { k: tr('card.label.updated'), v: p.updated_at },
-          ] }))
+        if (Array.isArray(d.points) && d.points.length) {
+          els.push(h(ClampText, {
+            key: 'pts', className: 'hams-dim',
+            text: d.points.map((q) => `${q.index ?? '-'} ${q.status ?? '-'} ${JSON.stringify(q.params ?? {})}`).join('\n'),
+          }))
         }
-        const doneLine = String(d.output || '').split('\n').map((l) => l.trim()).filter((l) => l.indexOf('[sweep] done:') === 0).pop()
-        if (doneLine) els.push(h('div', { key: 'done', className: 'hams-dim' }, txt(doneLine)))
-        els.push(h(CardKv, { key: 'dir', items: [{ k: tr('card.label.runDir'), v: d.run_dir }] }))
+        if (d.errlog_tail) els.push(h(ClampText, { key: 'err', text: String(d.errlog_tail), className: 'hams-warn' }))
         return els
       }
       els.push(h('div', { key: 'raw', className: 'hams-dim' }, '—'))
@@ -1081,10 +1066,10 @@ window.__ModuleLoader__.load({
       const args = cardArgsOf(props)
       const result = phase === 'result' && props.block ? cardResultOf(props) : null
       const roots = cardRoots(args, result ? result.data : null)
-      // batch_poll is the remote-batch window: the remote progress source at
-      // the 5 s policy cadence (the local 0/N first frame arrives on the very
-      // first fetch — the job file needs no ssh). The other two tools stay on
-      // the local file source at 3 s.
+      // batch_poll is the monitoring window: the remote progress source at
+      // the 5 s policy cadence (the instant local 0/N first frame comes from
+      // the job file, no ssh); a local submission reads the run directory's
+      // own files at the same cadence.
       const remote = toolName === 'batch_poll'
       const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir,
         sessionId: props.sessionId, active: phase === 'start', remote, intervalMs: remote ? 5000 : 3000 })
@@ -2014,7 +1999,7 @@ window.__ModuleLoader__.load({
       }, [sessionId])
 
       // The Dashboard sub-view stays live while visible (auto-refresh):
-      // gen-sweep-report appends to the calling session's entry behind
+      // gen_sweep_report appends to the calling session's entry behind
       // the sidebar's back, so poll the store every 10 s while the sub-view is
       // open and the tab visible; persist-in-flight ticks are skipped so a
       // just-applied optimistic update is never flashed over by a stale entry,
@@ -2049,7 +2034,7 @@ window.__ModuleLoader__.load({
 
       // persistConfig(mutator) re-bases the change on the LATEST server entry
       // before the single-session PUT: the store has a second writer
-      // (gen-sweep-report's registration writes this session's entry behind
+      // (gen_sweep_report's registration writes this session's entry behind
       // the sidebar's back), so sending the mount-time snapshot would clobber
       // injected reports — the rebase shrinks the clobber window to
       // milliseconds. Returns the server-confirmed entry, or null on failure
@@ -2151,7 +2136,7 @@ window.__ModuleLoader__.load({
     // Auto-refresh: the sub-view polls the store (parent
     // effect) and this component polls the current report's /api/report-stat —
     // a regenerated document (mtime/size change) reloads through the nonce,
-    // so an externally re-run gen-sweep-report shows up without a manual ↻.
+    // so an externally re-run gen_sweep_report shows up without a manual ↻.
     function SessionDashboard({ sessionId, config, updateConfig }) {
       const [nonce, setNonce] = useState(0)
       const [dialogOpen, setDialogOpen] = useState(false)
