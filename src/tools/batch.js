@@ -24,7 +24,7 @@ import {
 // by design, deep analysis runs on the host that holds it).
 const AUTO_FETCH_FILES = ['sweep_progress.json', 'errlog.txt']
 
-// batch_poll wait_sec cadence (D-016): the gap between re-polls of a blocking
+// batch_poll wait_sec cadence (D-007): the gap between re-polls of a blocking
 // wait. 10 s matches the wait policy's preferred first-backoff step.
 const WAIT_GAP_MS = 10_000
 
@@ -167,7 +167,7 @@ export function batchTools(ctx) {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
         remote_dir: { type: 'string', description: 'Remote batch directory: absolute, or relative to remote_root. '
           + 'Omit to auto-generate the next Sim<N>_<YYYYMMDD>_batch<M> directory under <remote_root>/RawResults '
-          + '(the D-012 raw-simulation-data convention; mirror the same name locally under <project>/RawResults). '
+          + '(the D-005 raw-simulation-data convention; mirror the same name locally under <project>/RawResults). '
           + 'Unused for scheduler="local"' },
         remote_root: { type: 'string', description: 'Absolute remote root that fences remote_dir — the project\'s '
           + 'workspace_config.json settings.remote_root (shown in the AGENTS.md config table). Required unless scheduler="local"' },
@@ -199,7 +199,7 @@ export function batchTools(ctx) {
           remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)
         } else {
           // Auto Sim<N>_<YYYYMMDD>_batch<M> under <remote_root>/RawResults
-          // (D-012, 2026-11-21): list once and pick the next free name per the
+          // (D-005, 2026-11-21): list once and pick the next free name per the
           // convention. The root itself is probed strictly; a missing
           // RawResults/ subdir is fine (empty list → Sim0_..._batch1, uploads
           // create it); the point_meta probe below still guards collisions.
@@ -404,7 +404,7 @@ export function batchTools(ctx) {
         if (!/^[\w.-]+$/.test(jobId)) throw new Error(`invalid job_id ${JSON.stringify(jobId)} (word/dot/dash only — it is joined into local paths)`)
         let scheduler = args.scheduler || job?.scheduler || 'lsf'
         if (scheduler === 'none') scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
-        // wait_sec (D-016): 0 keeps the single-snapshot contract; a positive
+        // wait_sec (D-007): 0 keeps the single-snapshot contract; a positive
         // value re-polls every WAIT_GAP_MS until a terminal state or the
         // deadline, returning the LAST payload (shape unchanged). The blocking
         // call is the window where the session card live-updates (the remote

@@ -1,10 +1,10 @@
-// harnessams_selfcheck — the ONE self-check/config tool (2026-11-19 D-009 wave).
+// harnessams_selfcheck — the ONE self-check/config tool (2026-11-19 D-003 wave).
 // The Overview's four buttons are thin parameterizations of this tool (they go
 // through POST /api/tool, which calls this def's execute directly with the
 // session's project injected), and a conversational agent can call it in-chat:
 // passing `settings` writes the project's workspace_config.json settings
 // section first, so the agent controls the run configuration with the same
-// single write face the UI uses. Session identity follows the D-008 precedent
+// single write face the UI uses. Session identity follows the D-004 precedent
 // (exec.agent.id ≡ sessionId, as in gen_sweep_report) — no project guessing.
 import path from 'node:path'
 import { sessionProject } from '../server/project.js'

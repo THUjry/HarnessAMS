@@ -128,14 +128,14 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   assert.ok(src.includes("slots.inject('tool.call.toolview'"), 'must inject the tool card slot')
   // The endpoints hang off the /harnessams/api prefix (API constant) — pin the
   // composed forms so an '/api/api/…' double-prefix regression cannot come back.
-  // D-016: the batch_poll card swaps the single-run source for the remote poll.
+  // D-007: the batch_poll card swaps the single-run source for the remote poll.
   assert.ok(src.includes("API + (remote ? '/progress-remote' : '/progress')"), 'cards must pick the local/remote progress endpoint')
   assert.ok(src.includes("API + '/progress-summary"), 'cards must poll the progress-summary endpoint')
   assert.ok(src.includes('normRemoteProg'), 'remote payloads must normalize to the prog shape')
   assert.ok(src.includes('remoteErr'), 'unreachable remotes must surface a note, not a blank card')
   // A key typo never renders (silent generic-card fallback), so the three heavy
   // tool names are pinned against the model-facing tool surface verbatim (the
-  // D-016 scope ruling shrank the list from eight).
+  // D-007 scope ruling shrank the list from eight).
   const m = /const SIM_CARD_TOOLS = \[([^\]]+)\]/.exec(src)
   assert.ok(m, 'SIM_CARD_TOOLS list must exist')
   const cardTools = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean)
@@ -149,7 +149,7 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
 test('client half: single tab — two-entry strip (project overview + this session)', async () => {
   const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   // ONE tab remains, and its first-level strip is exactly TWO entries since the
-  // task retirement (D-008, 2026-11-19) — the project overview (default) and
+  // task retirement (D-004, 2026-11-19) — the project overview (default) and
   // the current session's own capsule.
   assert.ok(src.includes('function ProjectOverviewView'), 'project overview view component')
   assert.ok(src.includes("config.display === 'overview' && h(ProjectOverviewView"), 'overview renders as the strip selection')
@@ -160,7 +160,7 @@ test('client half: single tab — two-entry strip (project overview + this sessi
   assert.ok(src.includes('const sidebarOpenState'), 'open-state tracking')
   assert.ok(src.includes('right.openTab(TAB_KIND)'), 'reopen targets the HarnessAMS tab')
   assert.ok(src.includes('overviewMemory'), 'same-project remount cache stays')
-  // The check sub-view keeps its contract (per-session since D-008)
+  // The check sub-view keeps its contract (per-session since D-004)
   assert.ok(/id: 'check', labelKey: 'tasks\.viewCheck'/.test(src), 'TASK_VIEWS must carry the check view')
   assert.ok(src.includes("API + '/session-config"), 'check sub-view reads through the session-config API')
   assert.ok(src.includes('fallback_params'), 'unconfirmed table shows the fallback source')
@@ -186,7 +186,7 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   // dropdown options follow the theme (hover-only-readable bug)
   assert.ok(src.includes('.hams-select { color-scheme: light dark; }'), 'select color-scheme')
   assert.ok(src.includes('.hams-select option { background: canvas; color: canvasText; }'), 'option colors')
-  // per-session CONFIG with fork-split first-seen (D-008): a forked session
+  // per-session CONFIG with fork-split first-seen (D-004): a forked session
   // deep-copies the previously active session's CURRENT config (deliberately
   // branch-point-independent); a brand-new session starts empty; every change
   // merge-PUTs through sessions.json (v2)
@@ -196,7 +196,7 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   assert.ok(src.includes('function cloneSessionConfig'), 'deep copy (fork inherits the whole config)')
   assert.ok(src.includes('adoptWith(!!d?.fork, sessions)'), 'the server fork verdict drives the split')
   assert.ok(src.includes('const lastActiveSessionId = { id: null }'), 'last-active session memory')
-  assert.ok(src.includes('function putSessionConfig(sessionId, { retries = 4 } = {})'), 'merge-PUT persistence (bounded-retry form, D-012)')
+  assert.ok(src.includes('function putSessionConfig(sessionId, { retries = 4 } = {})'), 'merge-PUT persistence (bounded-retry form, D-005)')
   assert.ok(src.includes("API + '/session-config?sessionId='"), 'session-config API wired')
   // default-open: initialized project + untouched host layout tabs
   assert.ok(src.includes('sessionSidebarUntouched(sessionId)'), 'untouched-layout gate')
@@ -204,7 +204,7 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   assert.ok(src.includes('autoOpenedFor'), 'once per page lifetime')
 })
 
-test('client half: fork adopt awaits session persistence before mounting an inherited report (D-012 fix)', async () => {
+test('client half: fork adopt awaits session persistence before mounting an inherited report (D-005 fix)', async () => {
   const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
   // The 2026-11-21 fork bug: adoptWith setConfig'd a config whose dashboard_
   // selected mounts the /dash iframe while the fork's sessions.json entry was

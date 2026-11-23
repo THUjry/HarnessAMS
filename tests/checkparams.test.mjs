@@ -1,4 +1,4 @@
-// Check-parameters storage + API contract (per-session since D-008): module
+// Check-parameters storage + API contract (per-session since D-004): module
 // read/validate semantics survive unchanged (the project file is the FALLBACK
 // layer) and /api/session-config carries fallback_params (+ the sessions
 // map with per-session confirmed tables).

@@ -1,4 +1,4 @@
-// gen_sweep_report (D-012, 2026-11-21; underscore name 2026-11-23): the ONLY
+// gen_sweep_report (D-005, 2026-11-21; underscore name 2026-11-23): the ONLY
 // analysis-surface tool — a pure report renderer. Raw-data processing is the
 // MODEL's job (remote analysis by default; only compact results are pulled
 // back), so this tool consumes a model-written spec JSON (points/curves inline
@@ -14,7 +14,7 @@ import { readJsonBom, chartSpecs, curveMids, genReportFromSpec } from '../report
 import { exportFigs } from '../figs_export.js'
 
 // --- report auto-registration target: the calling session's HarnessAMS ----
-// dashboard. Since the task retirement (2026-11-19, D-008) each DSH session
+// dashboard. Since the task retirement (2026-11-19, D-004) each DSH session
 // carries its own report list in <workspace>/.harnessams/sessions.json; the
 // calling session is identified EXACTLY through the tool execution context
 // (exec.agent.id IS the SessionId — probe-verified, see probe-taskmerge-20261119).
@@ -264,7 +264,7 @@ export function genReportTools() {
         }
 
         // Auto-registration into the CALLING session's dashboard (identity =
-        // exec.agent.id, which IS the SessionId — D-008). The report is already
+        // exec.agent.id, which IS the SessionId — D-004). The report is already
         // on disk, so a failure here is reported, never thrown.
         const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
         if (!sid) {

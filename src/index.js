@@ -2,7 +2,7 @@
 // three-tier client UI (see client.js for the UI itself):
 //   tier 1 (global console page) — machines (the dsh-ssh host registry), digital assets;
 //   tier 2 (project = DSH workspace) — session-to-workspace mapping + the per-session
-//            config store at <workspace>/.harnessams/sessions.json (D-008);
+//            config store at <workspace>/.harnessams/sessions.json (D-004);
 //   tier 3 (session sidebar) — the Overview project settings / self-check surface:
 //            the four buttons and the settings table all land on ONE tool,
 //            harnessams_selfcheck (tools/selfcheck.js), through POST /api/tool —
@@ -19,7 +19,7 @@
 // Remote connectivity is delegated entirely to @linxin666/dsh-ssh (ssh_* tools
 // by alias, zero gating); each project's remote root is its own setting
 // (workspace_config.json settings.remote_root — the family harnessams.json and
-// its remote_machines map are retired, 2026-11-19 D-009).
+// its remote_machines map are retired, 2026-11-19 D-003).
 // Model tools: harnessams_selfcheck (self-check + config), the batch channel
 // (batch_submit with its local/direct/lsf schedulers + batch_poll with the
 // terminal auto-fetch; worker scripts come from the project's
@@ -341,7 +341,7 @@ async function handle(req, res, ctx) {
     return
   }
   if (route === '/api/progress-remote') {
-    // Remote live progress for the batch_poll card (D-016): polls the batch's
+    // Remote live progress for the batch_poll card (D-007): polls the batch's
     // own progress files on the remote host through the dsh-ssh exec funnel.
     // Same workspace fence as the local endpoints; the machine and remote dir
     // are resolved server-side from the run dir's .batch_job.json (written by

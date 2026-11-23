@@ -6,7 +6,7 @@
 //           assets (vendored .js packages with licenses + package/workspace copy
 //           locations), disk usage;
 //   tier 2: project = DSH workspace (a local folder) — every SESSION is a work
-//           unit (the task concept was retired 2026-11-19, decisions.md D-008):
+//           unit (the task concept was retired 2026-11-19, decisions.md D-004):
 //           each session carries its own dashboard reports and confirmed check
 //           params in <workspace>/.harnessams/sessions.json;
 //   tier 3: right-sidebar tab — the first-level strip is exactly two entries,
@@ -757,7 +757,7 @@ window.__ModuleLoader__.load({
     // directory, so the card covers local scans too); every other call,
     // batch_submit included, stays on the DSH generic card.
     // While the poll call blocks (wait_sec), the card reads /api/progress-remote
-    // (the batch's own counters on the remote host, D-016) after an instant
+    // (the batch's own counters on the remote host, D-007) after an instant
     // local 0/N first frame from the job file — it never shows a dead
     // placeholder. Result cards add the cross-batch aggregate from
     // /api/progress-summary.
@@ -800,7 +800,7 @@ window.__ModuleLoader__.load({
 
     // Progress data for one card: /api/progress (single run) + /api/progress-summary
     // (cross-batch aggregate); the batch_poll card swaps the single-run source for
-    // /api/progress-remote (D-016, the remote batch's live counters) at the 5 s
+    // /api/progress-remote (D-007, the remote batch's live counters) at the 5 s
     // cadence the wait policy prescribes. While the tool call is in flight
     // (active) poll with the visibility pause/resume discipline shared by the
     // sidebar polls; settled cards fetch once on mount (one fetch per scroll-back
@@ -840,7 +840,7 @@ window.__ModuleLoader__.load({
             // Three independent chains: instant local frame → aggregate →
             // remote truth (remote wins once it answers; an unreachable remote
             // keeps the last frame plus a dim note — the card never goes blank
-            // mid-poll, D-016).
+            // mid-poll, D-007).
             if (localUrl) fetchJson(localUrl).catch(() => null).then(on(my, (pl) => {
               if (remoteAnswered || pl.unreachable) return
               commit({ prog: normRemoteProg(pl) })
@@ -970,7 +970,7 @@ window.__ModuleLoader__.load({
       // While the tool call blocks (a local sweep, or a batch_poll holding a
       // wait): live bar from the progress source — local file or remote poll,
       // both normalized to the same shape. An unreachable remote keeps the last
-      // frame plus a dim note (D-016: a visible card at every moment, never a
+      // frame plus a dim note (D-007: a visible card at every moment, never a
       // dead placeholder).
       if (phase === 'start') {
         if (live.remoteErr) els.push(h('div', { key: 'rerr', className: 'hams-dim' }, tr('card.remoteUnreachable')))
@@ -1228,7 +1228,7 @@ window.__ModuleLoader__.load({
     }
 
     // First-level strip + session config state, PER SESSION (decisions.md
-    // D-008, 2026-11-19): each DSH session is a work unit carrying its own
+    // D-004, 2026-11-19): each DSH session is a work unit carrying its own
     // config — which view the body shows ('overview' | 'session'), its
     // dashboard reports and confirmed check params — PERSISTED to
     // <workspace>/.harnessams/sessions.json (a reload must NOT lose it).
@@ -1263,7 +1263,7 @@ window.__ModuleLoader__.load({
       return sessionConfigState.get(sessionId)
     }
     // Copy source for a first-seen FORK (deliberately branch-point-independent,
-    // D-008): the last-ACTIVE session of this page lifetime when there is one,
+    // D-004): the last-ACTIVE session of this page lifetime when there is one,
     // else the store's most recently written entry (sessions.json insertion
     // order doubles as recency — the fork source is almost always the last
     // writer). Never the session itself.
@@ -1283,7 +1283,7 @@ window.__ModuleLoader__.load({
     // (persisted / gave up) with bounded retries: a FORK session may not be in
     // the host's workspace registry yet, so its first PUT can 404 transiently —
     // swallowing that silently used to leave fork-adopted reports unresolvable
-    // by /dash until a manual refresh (D-012 fix). Fire-and-forget callers may
+    // by /dash until a manual refresh (D-005 fix). Fire-and-forget callers may
     // ignore the promise.
     function putSessionConfig(sessionId, { retries = 4 } = {}) {
       if (!sessionId) return Promise.resolve(false)
@@ -1915,7 +1915,7 @@ window.__ModuleLoader__.load({
       // Per-session config: reload on session switch. A FIRST-SEEN session asks
       // the server for its fork verdict (computed only while the entry is
       // missing): fork => deep-copy the previously active session's CURRENT
-      // config (branch-point-independent by design, D-008); otherwise start
+      // config (branch-point-independent by design, D-004); otherwise start
       // empty. Either way the entry is persisted right away — the write doubles
       // as the tombstone that stops fork re-detection. After the adopt, this
       // session becomes the "previously active" for the next first-seen one.
@@ -1927,7 +1927,7 @@ window.__ModuleLoader__.load({
           const source = first ? forkCopySource(sessionsMap, sessionId) : null
           const adopted = cloneSessionConfig(sessionConfigOf(sessionId, fork, source))
           if (first) {
-            // D-012 fork-404 fix: an adopted config that selects a report mounts
+            // D-005 fork-404 fix: an adopted config that selects a report mounts
             // the dashboard iframe the moment setConfig lands — the PUT that
             // persists this session's entry must reach sessions.json BEFORE
             // that mount, or /dash/<sid>/<rid> answers the not-found error
@@ -2291,7 +2291,7 @@ window.__ModuleLoader__.load({
 
     // Check-parameters sub-view (session panel): editable table of the
     // assembly-layer check thresholds/switches stored in THIS session's
-    // sessions.json entry (per-session since D-008). The initial table is the
+    // sessions.json entry (per-session since D-004). The initial table is the
     // session's confirmed copy, or the project-file∪built-in fallback while
     // unconfirmed (the source line under the title says which is in effect).
     // The six R/C/L numbers are strings while drafting; the confirm button

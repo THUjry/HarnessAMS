@@ -1,5 +1,5 @@
 // Remote live progress for the batch_poll session card (client.js useSimProgress,
-// D-016): reads the batch's own progress files ON THE REMOTE HOST through the
+// D-007): reads the batch's own progress files ON THE REMOTE HOST through the
 // dsh-ssh exec funnel — the same pollCommand one-shot the batch_poll tool runs,
 // minus the queue-id ceremony. Everything the poll needs (machine alias, remote
 // dir, job id, total_points fallback) comes from the run dir's .batch_job.json
@@ -12,7 +12,7 @@
 // exec channel per TTL window — comfortably under the ~10-channel MaxSessions
 // budget of one shared connection. Failures resolve to { unreachable: true }
 // (HTTP 200) so the card keeps its last frame plus a dim note instead of going
-// blank — the D-016 rule: a visible card at every moment, placeholder never.
+// blank — the D-007 rule: a visible card at every moment, placeholder never.
 import path from 'node:path'
 import { readRunProgress } from './progress.js'
 import { readJob, pollCommand, parsePollOutput, resolveRemoteDir } from '../batch.js'

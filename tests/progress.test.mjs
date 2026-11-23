@@ -25,7 +25,7 @@ test('progress: projectRootOf derives the root from run-dir shapes', () => {
   assert.equal(projectRootOf('/proj/sweep/top'), null)
   assert.equal(projectRootOf(''), null)
   assert.equal(projectRootOf(null), null)
-  // D-012: <root>/RawResults/Sim* strips the RawResults base like sweep/
+  // D-005: <root>/RawResults/Sim* strips the RawResults base like sweep/
   assert.equal(projectRootOf('/home/u/proj/RawResults/Sim0_20261121_batch1'), '/home/u/proj')
   assert.equal(projectRootOf('D:\\w\\proj\\RawResults\\Sim3_20261121_batch2'), 'D:/w/proj')
   assert.equal(projectRootOf('/home/u/proj/RawResults/run1'), null) // still needs the Sim shape
@@ -56,7 +56,7 @@ test('progress: readRunProgress walks the progress → worker_started → config
 
     // .batch_job.json (a remote batch was submitted; everything still lives on
     // the remote host) outranks the config — the immediate 0/N submitted frame
-    // the batch_poll card shows on its very first fetch (D-016)
+    // the batch_poll card shows on its very first fetch (D-007)
     await writeFile(path.join(run, '.batch_job.json'),
       JSON.stringify({ job_id: '777', machine_id: 'node1', remote_root: '/home/op/sim',
         remote_dir: '/home/op/sim/batch1', scheduler: 'lsf', total_points: 6,
@@ -153,7 +153,7 @@ test('progress: summarizeProject aggregates sweep/Round*/top with totals', async
   }
 })
 
-test('progress: summarizeProject scans <project>/RawResults/Sim* (D-012 layout), deduped against the root', async () => {
+test('progress: summarizeProject scans <project>/RawResults/Sim* (D-005 layout), deduped against the root', async () => {
   const proj = await mkdtemp(path.join(tmpdir(), 'hams-rawres-'))
   try {
     const mkSim = async (base, name, files = {}) => {
@@ -254,7 +254,7 @@ test('progress: GET endpoints fence by cwd→workspace then answer payloads', as
   }
 })
 
-// D-016: the remote live-progress endpoint. The ssh_* tool shell is mocked per
+// D-007: the remote live-progress endpoint. The ssh_* tool shell is mocked per
 // the installed dsh-ssh contract (structured values; same routing-by-substring
 // style as batch.test.mjs's makeCtx) — machine/dir/job come from the run dir's
 // .batch_job.json, never from client params.
@@ -281,7 +281,7 @@ function sshTools({ hosts } = {}) {
   }
 }
 
-test('progress: GET /api/progress-remote answers remote truth, local fallback, fence and single-flight (D-016)', async () => {
+test('progress: GET /api/progress-remote answers remote truth, local fallback, fence and single-flight (D-007)', async () => {
   const proj = await mkdtemp(path.join(tmpdir(), 'hams-prog-rem-'))
   const stray = await mkdtemp(path.join(tmpdir(), 'hams-prog-rem-stray-'))
   try {

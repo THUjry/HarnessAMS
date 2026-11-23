@@ -382,7 +382,7 @@ test('batch_poll reads the job file, reports completed and auto-fetches the resu
   }
 })
 
-test('batch_poll wait_sec (D-016): a terminal first poll breaks immediately, no re-poll', async () => {
+test('batch_poll wait_sec (D-007): a terminal first poll breaks immediately, no re-poll', async () => {
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
@@ -401,7 +401,7 @@ test('batch_poll wait_sec (D-016): a terminal first poll breaks immediately, no 
   }
 })
 
-test('batch_poll wait_sec (D-016): re-polls through a running batch until it settles', async () => {
+test('batch_poll wait_sec (D-007): re-polls through a running batch until it settles', async () => {
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
@@ -424,7 +424,7 @@ test('batch_poll wait_sec (D-016): re-polls through a running batch until it set
   }
 })
 
-test('batch_poll wait_sec (D-016): deadline returns the last (non-terminal) payload', async () => {
+test('batch_poll wait_sec (D-007): deadline returns the last (non-terminal) payload', async () => {
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
@@ -529,7 +529,7 @@ test('batch_submit auto-names the remote dir Sim<N>_<date>_batch<M> when remote_
       worker: 'spectre/spectre_sweep_worker.py',
     }, {})
     // Sim1 is the highest index but dated yesterday -> new index, batch1; the
-    // auto-name lands under <remote_root>/RawResults (D-012 layout)
+    // auto-name lands under <remote_root>/RawResults (D-005 layout)
     const today = new Date()
     const pad = (n) => String(n).padStart(2, '0')
     const stamp = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`

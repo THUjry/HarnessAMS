@@ -1,4 +1,4 @@
-// Per-project workspace config — the SINGLE config file (2026-11-19 D-009 wave):
+// Per-project workspace config — the SINGLE config file (2026-11-19 D-003 wave):
 // <workspace>/.harnessams/workspace_config.json. It replaces both the retired
 // project_settings.json and the retired family harnessams.json, and carries two
 // sections:
@@ -11,7 +11,7 @@
 //     scheduler / simulator / compute scripts). The remote root now lives HERE
 //     (settings.remote_root), not in a family map — the project is the single
 //     authority, so UI / config file / AGENTS.md can never disagree.
-// Per-session check params are NOT here (D-008: sessions.json carries the
+// Per-session check params are NOT here (D-004: sessions.json carries the
 // confirmed table; checkparams.js reads the project fallback file).
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'

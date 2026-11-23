@@ -2,7 +2,7 @@
 // ctx.workspaceRegistry (a project is nothing more than a DSH workspace, i.e. a
 // local folder; HarnessAMS keeps no workspace concept of its own), and the
 // per-session config store at <workspace>/.harnessams/sessions.json. The task
-// concept was retired (2026-11-19, decisions.md D-008): each DSH session IS the
+// concept was retired (2026-11-19, decisions.md D-004): each DSH session IS the
 // work unit and carries its own dashboard reports + confirmed check params.
 // The legacy tasks.json file (and its v1 sessions.json shape) is deliberately
 // left on disk but never read — a v1 store parses as empty (clean break).
