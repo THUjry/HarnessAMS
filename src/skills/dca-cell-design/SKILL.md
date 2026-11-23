@@ -3,16 +3,18 @@ name: dca-cell-design
 description: >
   Design digital-controlled attenuator (DCA/ATT) cells in sky130: arm-total
   dimension calculation with direct switch-Ron input (T-type, SimpleT, Pi
-  architectures) and Spectre verification sweeps through the smart-spectre
-  workflow. Triggers on "design ATT", "attenuator design", "DCA cell",
-  "step attenuator", "ATT cell", "attenuator sweep".
+  architectures) and Spectre verification sweeps through the batch-sweep
+  workflow (spectre netlist rules in smart-spectre). Triggers on "design
+  ATT", "attenuator design", "DCA cell", "step attenuator", "ATT cell",
+  "attenuator sweep".
 ---
 
 # dca-cell-design — ATT Cell Design (sky130, ideal RC, direct Ron)
 
 Unit-cell design flow: dimension calculation (three architectures), cluster
-verification sweeps (smart-spectre workflow) and the cell design report
-(`gen-sweep-report`). Cascade analysis and reporting live in the
+verification sweeps (the batch-sweep workflow; spectre template/config rules
+in the **smart-spectre** skill) and the cell design report
+(`gen_sweep_report`). Cascade analysis and reporting live in the
 **analysis-cascade-dca** skill.
 
 **Design method:** the arm total resistance comes from the ideal network
@@ -205,15 +207,15 @@ document any accepted penalty in `bestPoints.json` designNotes.
 ## Mandatory Process Rules
 
 1. **Sub-circuit verification first.** Simulate each new sub-component
-   (switch Ron/Coff, shunt arm) before the top-level cell; read Z11 through
-   `spectre_parse` (Ron = Re(z11), Coff = −1/(2πf·Im(z11)) at the band
+   (switch Ron/Coff, shunt arm) before the top-level cell; read Z11 from the
+   parsed curves (Ron = Re(z11), Coff = −1/(2πf·Im(z11)) at the band
    midpoint).
 2. **5×5 local sweep for sub-circuit verification.** Sizing quantization is
    unavoidable — verify a 5×5 local sweep around the calculated point
    (e.g. W × nf, ±2 discrete steps each) in the SAME batch.
 3. **Always generate the report.** After every batch: parse (remote by
-   default — see smart-spectre step 5), then build the spec and call
-   `gen-sweep-report {spec}` — one round per `Sim*_<date>_batch*` run of the
+   default — see batch-sweep step 4), then build the spec and call
+   `gen_sweep_report {spec}` — one round per `Sim*_<date>_batch*` run of the
    project joins the batch dropdown.
 4. **Switch geometry moves as one unit.** The flattened model card name,
    `l/w/nf` and `nrd/nrs` change together (see sky130_examples).
@@ -238,17 +240,17 @@ document any accepted penalty in `bestPoints.json` designNotes.
 3. Create the run directory: copy the architecture template in as
    `template.scs` (fill the calculator values first), write
    `sweep_config.json` (`SW: [0,1]`, `cpf` candidates, ≤100 points).
-4. Submit: `batch_submit {run_dir, machine_id, remote_root, worker:
-   "spectre/spectre_sweep_worker.py", worker_args: ["--config",
-   "sweep_config.json", "--max-parallel", "8"]}` — omit `remote_dir` for the
-   next auto `Sim<N>_<YYYYMMDD>_batch<M>` under `RawResults/` (local Spectre:
-   `spectre_run_sweep`).
-5. Poll: `batch_poll {run_dir}` (completion by the point_meta count).
-6. Fetch: `batch_fetch {run_dir, includes: [..., "*/netlist.scs.raw/sp.sp"]}`.
-7. Parse: `spectre_parse {work_dir: <run_dir>}` (freq + s11..sNN curves).
-8. Report: analyze (remote-first), write the spec into `SimResults/`, then
-   `gen-sweep-report {spec}`.
-9. **Cp scan batch** (Rule 5) — pick the phase optimum, re-run 7–8.
+4. Submit: `batch_submit {run_dir, worker: "spectre/spectre_sweep_worker.py",
+   worker_args: ["--config", "sweep_config.json", "--max-parallel", "8"],
+   scheduler: "lsf"|"direct", machine_id, remote_root}` — omit `remote_dir`
+   for the next auto `Sim<N>_<YYYYMMDD>_batch<M>` under `RawResults/`
+   (Spectre on this host: `scheduler: "local"` instead, no machine/root).
+5. Poll: `batch_poll {run_dir, wait_sec}` — completion by the point count;
+   a terminal poll auto-fetches sweep_progress.json + errlog.txt (the raw
+   sp.sp curves stay remote; analyze them there per batch-sweep step 4).
+6. Report: analyze (remote-first), write the spec into `SimResults/`, then
+   `gen_sweep_report {spec}`.
+9. **Cp scan batch** (Rule 5) — pick the phase optimum, re-run 5–6.
 10. **Final temperature sweep (mandatory).** All parameters fixed, sweep
     `temperature: [0,20,40,60,80,100]` × `SW: [0,1]` = 12 points; the final
     report view shows the 6 temperature curves.
@@ -261,16 +263,18 @@ document any accepted penalty in `bestPoints.json` designNotes.
 Optional large-signal characterization of the **reference state** (T-type,
 SimpleT and Pi: SW=0 — do NOT infer it from the netlist). Copy the template
 as `template_thorough.scs`, replace the `sp` analysis with the `sweeppss`
-block and follow smart-spectre §4 (pin sweep −20..+30 dBm, `dbm=pin` on
-PORT0, `pin` kept in the parameters line — both pitfalls documented there).
-Extract Pout = |V_OUT|²/(2·Rport) from the `spectre_parse` curves,
-small-signal gain from the first 10 low-power points, IP1dB at the 1 dB
-gain-drop crossing (interpolated; nearest-neighbour frequency lookup).
+block and follow the smart-spectre skill's PSS companion page (pin sweep
+−20..+30 dBm, `dbm=pin` on PORT0, `pin` kept in the parameters line — both
+pitfalls documented there). Extract Pout = |V_OUT|²/(2·Rport) from the
+parsed curves, small-signal gain from the first 10 low-power points, IP1dB
+at the 1 dB gain-drop crossing (interpolated; nearest-neighbour frequency
+lookup).
 
 ## Cascade Analysis
 
 Assembling and analysing a cascade is the **analysis-cascade-dca** skill's
-job (assembly mechanics in smart-spectre §Cascade Netlist Assembly). Write
+job (assembly mechanics in the smart-spectre skill's cascade companion
+page). Write
 `cascade_cells.json` next to the results (per cell: `name`, `architecture`,
 `target_att_db`, `control_bit`, `bestPoints_params`) — that file feeds the
 cascade report.
@@ -307,12 +311,14 @@ band-dependent metrics over the DC~30 GHz characterization band.
 
 ## Dependencies
 
-- **smart-spectre** — sweep workflow, template rules, cascade assembly, PSS
-  pitfalls.
+- **batch-sweep** — the submit/poll/report workflow (schedulers, Sim naming,
+  remote-first analysis, the spec flow).
+- **smart-spectre** — spectre template/config rules, the parser CLIs, cascade
+  assembly, PSS pitfalls.
 - **analysis-cascade-dca** — cascade analysis and the cascade design report.
-- Plugin tools: `spectre_assemble` / `spectre_run_sweep` / `spectre_parse`
-  (SmartAnaSim), `batch_*` / `gen-sweep-report` / `sim_progress` (HarnessAMS),
-  `snp_guide` → `snp_read` / `snp_extract` (SmartAnaSim).
+- Plugin tools: `spectre_assemble` / `snp_guide` -> `snp_read` / `snp_extract`
+  (SmartAnaSim), `batch_submit` / `batch_poll` / `gen_sweep_report`
+  (HarnessAMS).
 
 ## References & Copyright
 

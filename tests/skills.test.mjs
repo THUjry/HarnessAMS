@@ -13,7 +13,7 @@ import { bundledSkills, readSkillManifest, registerSkills } from '../src/skills.
 test('skills: the packaged skills register with catalog metadata and a directory resourceBase', () => {
   const reg = []
   const names = registerSkills({ skills: { register: (s) => reg.push(s) } })
-  assert.deepEqual(names, ['analysis-cascade-dca', 'dca-cell-design', 'smart-spectre'])
+  assert.deepEqual(names, ['analysis-cascade-dca', 'batch-sweep', 'dca-cell-design'])
   assert.equal(reg.length, 3)
   for (const s of reg) {
     assert.match(s.name, /^[a-z0-9]+(?:-[a-z0-9]+)*$/) // the kebab-case grammar

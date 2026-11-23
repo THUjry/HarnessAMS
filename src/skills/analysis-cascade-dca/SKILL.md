@@ -103,7 +103,7 @@ python gen_cascade_report.py --run-dir <run_dir> [--cells <cascade_cells.json>] 
 
 The script is self-contained (bundles the psfascii parser, pure stdlib); run
 it from anywhere with absolute paths. Plotly loads from the CDN in the
-generated HTML (the plugin's `gen-sweep-report` uses a local plotly asset
+generated HTML (the plugin's `gen_sweep_report` uses a local plotly asset
 instead — this generator trades that for zero dependencies).
 
 ## Report structure (generated HTML)
@@ -234,7 +234,8 @@ analysis must respect. A schematic-extracted netlist (e.g. the ADE XL style at
 `/prj/.../ATT_cell_tb/adexl/.../Cascade/netlist/input.scs`) uses a **3-level
 hierarchy** (testbench → cascade subcircuit → cell subcircuits), which is the
 reference for understanding how the cascade netlist maps to the analysis. The
-hand-written `template.scs` (smart-spectre §Cascade Netlist Assembly) flattens
+hand-written `template.scs` (the smart-spectre skill's cascade companion
+page) flattens
 this into 2 levels, but the control-bit mapping follows the same rules.
 
 ### 3-level hierarchy (schematic-extraction reference)
@@ -397,5 +398,5 @@ regenerate.
 ## Constraints
 - **Do NOT modify the dca-cell-design skill** — single-cell ATT design is out
   of scope; this skill only *analyses* cascade results. Single-cell design
-  workflows belong to **dca-cell-design**; sweep/template mechanics live in
-  **smart-spectre**.
+  workflows belong to **dca-cell-design**; sweep mechanics live in
+  **batch-sweep**, template rules in **smart-spectre**.
