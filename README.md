@@ -7,7 +7,7 @@
 | Plugin | npm package | row id | Responsibility | Stage | Status |
 |---|---|---|---|---|---|
 | HarnessAMS (top) | `dsh-harnessams` | `harnessams-top` | Sidebar UI + orchestration: global console page (machines read-only, digital assets), project = DSH workspace, right-sidebar strip = project overview + session (per-session dashboard + check params; staged project settings/self-check with the working-environment 0/1 toggle + AGENTS.md config-table sync + dsh-ssh remote-dir picker); the managed scan channel (`batch_submit` with its local/ssh/lsf schedulers, semantics set by the project's `cluster_env` working environment, D-002 — worker tree from the project's `sim_scripts_dir`; `batch_poll` monitoring with the terminal auto-fetch and a per-point digest), the simulator-agnostic report/ops tools (`gen_sweep_report`/`safe_trash`; D-006: spec-driven pure report renderer + headless per-chart PNG export + the RawResults/SimResults/Figs/report-at-root layout), the `harnessams_selfcheck` tool — 5 tools — plus three bundled skills (`batch-sweep` the generic scan methodology, `dca-cell-design`, `analysis-cascade-dca`) registered into the host skill catalog (`src/skills/`) | stage 1 | implemented (this repo, `src/`) |
-| HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation, pure tool set usable standalone (D-001): Spectre sweep-input assembly (template generation + configuration checks, hard PDK isolation) and S-parameter reading/extraction, plus the directly runnable sweep worker / analysis scripts under `scripts/` and the bundled `smart-spectre` configuration skill | stage 1 | implemented (separate repo) |
+| HarnessAMS-SmartAnaSim | `dsh-harnessams-smart-ana-sim` | `harnessams-smart-ana-sim` | Simulation, pure tool set usable standalone (D-001): Spectre sweep-input assembly (template generation + configuration checks, hard PDK isolation), S-parameter reading/extraction, and the Virtuoso schematic interaction tools (`gen_vsch_import` / `gen_vsch_export`: ready-to-run command/SKILL-text assembly for the netlist <-> OA round trip), plus the directly runnable sweep worker / analysis scripts under `scripts/` and the bundled `smart-spectre` configuration skill | stage 1 | implemented (separate repo) |
 | HarnessAMS-SmartPostLayout | (repo in stage 2) | `harnessams-smart-post-layout` | One-click post-layout simulation | stage 2 | not started |
 | HarnessAMS-aligner | (repo in stage 3) | `harnessams-aligner` | Multi-level alignment | stage 3 | not started |
 
@@ -106,6 +106,25 @@ batch_poll(run_dir=..., wait_sec=600)  # bjobs state + point count; "No job foun
                                        # live-updates through the whole wait
 gen_sweep_report(spec=...)             # analysis ran remotely (put/exec/get); local parsing only when debugging
 
+
+## Schematic round-trip workflow (charter)
+
+The programmatic statement of the Virtuoso schematic round trip (2026-11-23). Division of labor: **agent-orchestrated where flexibility is needed, tool-constrained where strictness is needed** — and lightweight CLI first, heavyweight processes (Virtuoso/ocean) only where they are irreplaceable (the SKILL writeback carrier).
+
+| Phase | Who / what | What happens |
+|---|---|---|
+| 1 | human + `gen_vsch_export` | Draw the schematic and hand the cell path over; export the Spectre netlist headlessly (ocean scheme). For a process never run before in the workspace: run one minimal no-parameter simulation first and hand its run_dir/log over — that configures the required model sections and simulation setup (afterwards learnable from past projects). |
+| 2 | agent | Build the testbench and tune at the NETLIST level (SmartAnaSim's assembly + workers); get results. |
+| 3 | tool | Display results as HTML (`gen_sweep_report`). |
+| 4 | SKILL text | Back-annotate device/net names and key parameters into the schematic and form the tb — the `plain_skill` schemes of `gen_vsch_import` / `gen_vsch_export` plus the CDF parameter-writeback recipe in the `smart-spectre` skill. |
+| 5 | human | Finalize and configure the final tb manually; run it and double-align against the pre-import design: netlist AND simulation results. |
+
+Two hard disciplines ride on this workflow:
+
+- **Model-source discipline** — injected as the `harnessams:model-source-discipline` system prompt section (order 5400, assembled before the remote-wait policy at 5500): never read files under PDK or model-library directories; model sections and simulator setup come ONLY from the include lines of user-provided simulation logs (`input.scs` / run_dir artifacts); for a never-run process, ask for one minimal no-parameter simulation's log first.
+- **Wording rule** — in these repos, "SKILL language" / "SKILL script" always means the Cadence SKILL language (the language itself, never necessarily a file on disk); lowercase `skill` or the bare word means a DSH plugin skill.
+
+The command recipes and pitfalls live in the SmartAnaSim skill pages `virtuoso-import.md` / `virtuoso-export.md`.
 
 ## What the npm packages ship (besides the JS)
 
