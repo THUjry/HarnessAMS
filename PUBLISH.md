@@ -20,7 +20,7 @@ Checklist (per package, run from the package directory):
      browser half — combo-loaded classic script, single file), `server/` (host-half
      modules), `tools/` + `tool.js`/`py.js`/`batch.js`/`remote.js`/`trash.js`/`skills.js`/
      `progress_files.js`/`report_render.js`/`figs_export.js` (the 5 model tools:
-     `batch_submit` (local/direct/lsf) + `batch_poll` (monitor + terminal auto-fetch)
+     `batch_submit` (local/ssh/lsf per cluster_env) + `batch_poll` (monitor + terminal auto-fetch)
      + `gen_sweep_report` + `safe_trash` + `harnessams_selfcheck`; skills.js registers
      the bundled skills; progress_files.js holds the shared run-directory progress
      ladder; report_render holds the shared chart-spec/HTML templates, figs_export

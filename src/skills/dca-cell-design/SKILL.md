@@ -242,7 +242,7 @@ document any accepted penalty in `bestPoints.json` designNotes.
    `sweep_config.json` (`SW: [0,1]`, `cpf` candidates, ≤100 points).
 4. Submit: `batch_submit {run_dir, worker: "spectre/spectre_sweep_worker.py",
    worker_args: ["--config", "sweep_config.json", "--max-parallel", "8"],
-   scheduler: "lsf"|"direct", machine_id, remote_root}` — omit `remote_dir`
+   scheduler: "lsf"|"ssh", machine_id, remote_root}` — omit `remote_dir`
    for the next auto `Sim<N>_<YYYYMMDD>_batch<M>` under `RawResults/`
    (Spectre on this host: `scheduler: "local"` instead, no machine/root).
 5. Poll: `batch_poll {run_dir, wait_sec}` — completion by the point count;

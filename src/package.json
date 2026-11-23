@@ -1,7 +1,7 @@
 {
   "name": "dsh-harnessams",
   "version": "0.1.0",
-  "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-session sidebar) plus remote machines over @linxin666/dsh-ssh, the project self-check, disk usage, digital assets, the managed scan channel (batch_submit with its local/direct/lsf schedulers, batch_poll monitoring with terminal auto-fetch) and the simulator-agnostic report/ops tools (gen_sweep_report/safe_trash)",
+  "description": "HarnessAMS top-level plugin: three-tier UI (global console page over /harnessams APIs, project = DSH workspace, per-session sidebar) plus remote machines over @linxin666/dsh-ssh, the project self-check, disk usage, digital assets, the managed scan channel (batch_submit with its local/ssh/lsf schedulers per cluster_env, batch_poll monitoring with terminal auto-fetch) and the simulator-agnostic report/ops tools (gen_sweep_report/safe_trash)",
   "type": "module",
   "icon": "icon.png",
   "main": "index.js",

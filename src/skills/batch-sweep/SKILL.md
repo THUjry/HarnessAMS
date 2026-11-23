@@ -2,11 +2,13 @@
 name: batch-sweep
 description: >
   Generic parameter-sweep methodology: batch_submit with its three schedulers
-  (local background workers on this host, direct foreground on the SSH target
-  host, LSF queue), batch_poll monitoring with wait_sec and the terminal
-  auto-fetch, Sim run-directory naming, remote-first analysis, and the
-  gen_sweep_report spec flow. Spectre netlist and config rules live in the
-  smart-spectre skill. Trigger on batch simulation, sweep submission,
+  (local background workers, ssh foreground on a node, LSF queue) whose
+  meaning follows the project's working environment (cluster_env, the
+  in-cluster/out-of-cluster dichotomy), batch_poll monitoring with wait_sec
+  and the terminal auto-fetch, multi-node submission with machine_id and
+  bsub -m (lsf_node), Sim run-directory naming, remote-first analysis, and
+  the gen_sweep_report spec flow. Spectre netlist and config rules live in
+  the smart-spectre skill. Trigger on batch simulation, sweep submission,
   monitoring or the sweep report.
 ---
 
@@ -20,19 +22,42 @@ ship with the SmartAnaSim package under the project's
 template*.scs / sweep_config.json rules and the parser CLIs are NOT repeated
 here — load the `smart-spectre` skill for them.
 
+## Working environment first (cluster_env)
+
+Read the project AGENTS.md config block before choosing a scheduler: it opens
+with "This is an in-cluster / out-of-cluster project" and lists the usable
+nodes (`remote_node` for the current one, `other_nodes` for the rest). Both
+environments share ONE cluster filesystem; they differ in whether the DSH
+host sits on it.
+
+- **in-cluster** (the DSH host is a cluster node): `local` runs on this host;
+  `ssh` runs on another node (staging is a local copy, only the execution
+  crosses ssh); `lsf` submits bsub LOCALLY (no machine needed, transfers are
+  local copies).
+- **out-of-cluster** (the default): everything remote crosses dsh-ssh —
+  `local` is unavailable; `ssh` runs on the ssh node itself (a second hop
+  goes through the dsh-ssh proxy config); `lsf` submits through the ssh node.
+
 ## Execution modes
 
 All three schedulers submit the SAME run directory + worker; they differ in
-where the worker runs:
+where the worker runs (per the environment above):
 
-| Mode | Selection | Worker host |
-|---|---|---|
-| local | `batch_submit(scheduler="local")` | this host, background — submit returns immediately, poll with `batch_poll` |
-| direct | `batch_submit(scheduler="direct")` | the SSH target host, foreground (bounded by a 600 s tool timeout) — small batches only |
-| lsf | `batch_submit(scheduler="lsf")` — default | the SSH target host's cluster via the LSF queue |
+| Mode | Selection | in-cluster | out-of-cluster |
+|---|---|---|---|
+| local | `batch_submit(scheduler="local")` | this host, background — poll with `batch_poll` | unavailable (rejected) |
+| ssh | `batch_submit(scheduler="ssh")` | another node over ssh, foreground (600 s cap) — small batches only | the ssh node, foreground (600 s cap) — small batches only |
+| lsf | `batch_submit(scheduler="lsf")` — default | bsub on this host, bjobs polled locally | the cluster's queue through the ssh node |
 
-`machine_id` (a dsh-ssh alias) and the fencing `remote_root` are required
-for the remote modes only.
+`remote_root` (the shared run root in-cluster, the ssh host's path
+out-of-cluster) is required for every non-local scheduler; `machine_id` (a
+dsh-ssh alias — ANY configured node works as the target) is required for
+scheduler=ssh and out-of-cluster lsf.
+
+**Multi-node**: `machine_id` is per call, and `lsf_node` pins an LSF job to
+a host or host list — `bsub -m "<lsf_node>"` (e.g. node2, or "node2 node3").
+Spread one sweep across nodes with repeated submits; the shared filesystem
+guarantees every node sees the same run directory.
 
 ## Run directory naming: `Sim<N>_<YYYYMMDD>_batch<M>`
 
@@ -57,10 +82,13 @@ report at the project root.
    (see smart-spectre).
 2. **Submit** — `batch_submit {run_dir, worker:
    "spectre/spectre_sweep_worker.py", worker_args: ["--config",
-   "sweep_config.json", "--max-parallel", "8"], scheduler: "local"|"direct"|"lsf"}`.
-   Remote submits upload the run directory plus the whole worker scripts
-   tree and write `.batch_job.json` in the local run directory (local
-   submits write the same file after spawning the worker on this host).
+   "sweep_config.json", "--max-parallel", "8"], scheduler: "local"|"ssh"|"lsf",
+   lsf_node?: "node2"}`.
+   Out-of-cluster submits upload the run directory plus the whole worker
+   scripts tree over ssh; in-cluster the staging is a local copy on the
+   shared filesystem. Both write `.batch_job.json` in the local run directory
+   (local submits write the same file after spawning the worker on this
+   host).
    `sim_scripts_dir` set to an existing directory replaces the worker
    scripts root (custom or test worker tree).
    `overwrite: true` replaces a batch that already ran in the target
