@@ -35,9 +35,10 @@ test('apply registers the /harnessams prefix route and the model tools', async (
   ])
 })
 
-test('apply injects the remote waiting policy as a system prompt section (fail-open)', async () => {
-  // with the systemPrompt service: exactly one section, namespaced, placed in
-  // the free 5000–9000 order band; the text pins the policy's four hard rules
+test('apply injects both system prompt sections (fail-open)', async () => {
+  // with the systemPrompt service: two namespaced sections in the free
+  // 5000–9000 order band — the model-source discipline first (5400, higher
+  // priority: smaller order assembles earlier), then the wait policy (5500)
   const sections = []
   const ctx = {
     effect: (fn) => fn(),
@@ -46,15 +47,24 @@ test('apply injects the remote waiting policy as a system prompt section (fail-o
     systemPrompt: { section: (s) => { sections.push(s); return () => {} } },
   }
   await apply(ctx)
-  assert.equal(sections.length, 1)
-  assert.equal(sections[0].name, 'harnessams:remote-wait-policy')
-  assert.equal(sections[0].order, 5500)
-  assert.match(sections[0].text, /Sleep <=30 s per command/)
-  assert.match(sections[0].text, /at least once every 5 s/)
-  assert.match(sections[0].text, /stop and ask the user first/)
-  assert.match(sections[0].text, /dsh-ssh tools \(ssh_exec\/ssh_upload\/ssh_download\)/)
-  assert.match(sections[0].text, /never raw ssh commands from the shell/)
-  assert.match(sections[0].text, /two working environments/, 'the env-dichotomy pointer rides the policy')
+  assert.equal(sections.length, 2)
+  const byName = Object.fromEntries(sections.map((s) => [s.name, s]))
+  const discipline = byName['harnessams:model-source-discipline']
+  const policy = byName['harnessams:remote-wait-policy']
+  assert.ok(discipline, 'model-source section registered')
+  assert.equal(discipline.order, 5400)
+  assert.match(discipline.text, /never read files under PDK or model-library directories/)
+  assert.match(discipline.text, /include lines already present in simulation logs/)
+  assert.match(discipline.text, /one minimal no-parameter simulation/)
+  assert.match(discipline.text, /stop and ask the user instead of inspecting PDK trees/)
+  assert.ok(policy, 'wait-policy section registered')
+  assert.equal(policy.order, 5500)
+  assert.match(policy.text, /Sleep <=30 s per command/)
+  assert.match(policy.text, /at least once every 5 s/)
+  assert.match(policy.text, /stop and ask the user first/)
+  assert.match(policy.text, /dsh-ssh tools \(ssh_exec\/ssh_upload\/ssh_download\)/)
+  assert.match(policy.text, /never raw ssh commands from the shell/)
+  assert.match(policy.text, /two working environments/, 'the env-dichotomy pointer rides the policy')
   // fail-open: without the service, apply still mounts routes/tools quietly
   const bare = {
     effect: (fn) => fn(),

@@ -69,6 +69,12 @@ export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt'
 // lone "##" heading was restyled into this paragraph the same day.
 export const REMOTE_WAIT_POLICY = 'HarnessAMS remote waiting policy: poll status (batch_poll, optionally with wait_sec for a bounded blocking wait; harnessams_selfcheck "status" for self-checks) instead of blind-sleeping a guessed duration. Sleep <=30 s per command, re-check after each, repeat until the run finishes (prefer 10 s -> 20 s -> 40 s backoff with ETA from completed/total); while a progress card is displayed, refresh it at least once every 5 s (poll, do not sleep); if the standard chain cannot proceed (repeated failures, stuck run, missing capability), stop and ask the user first; any improvised fallback requires explicit approval and must still use the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download), never raw ssh commands from the shell. Projects run in one of two working environments (cluster_env): each project\'s AGENTS.md config block states which one holds ("This is an in-cluster / out-of-cluster project") and the scheduler semantics follow it — read that block before choosing scheduler="local"/"ssh"/"lsf".'
 
+// Model-source discipline (2026-11-23, the schematic round-trip wave): the agent
+// never reads PDK/model-library files; model sections and simulator setup come
+// only from include lines already present in user-provided simulation logs. Same
+// registration shape as the policy above — static text, one section, KV-stable.
+export const MODEL_SOURCE_DISCIPLINE = 'HarnessAMS model-source discipline: never read files under PDK or model-library directories (no browsing, no grepping, no listing to discover model names or sections). The only sanctioned source of model includes, sections and simulator setup is the include lines already present in simulation logs the user provides (the input.scs of a run_dir, or artifacts of past runs) — reuse them verbatim. For a process that has never been run in this workspace, ask the user for the run_dir/log of one minimal no-parameter simulation first and learn the setup from it; afterwards prefer learning from past projects over re-deriving. When unsure which section or include applies, stop and ask the user instead of inspecting PDK trees.'
+
 export function toolDefinitions(ctx = {}) {
   return [...selfcheckTools(ctx), ...batchTools(ctx), ...genReportTools(ctx), safeTrashTool()]
 }
@@ -101,6 +107,16 @@ export function apply(ctx) {
       text: REMOTE_WAIT_POLICY,
     })
   }, 'harnessams system prompt section')
+  ctx.effect(() => {
+    // same belt-and-braces guard; ordered BEFORE the wait policy (5500) —
+    // smaller order = earlier in the assembled prompt = higher priority
+    if (!ctx.systemPrompt?.section) return
+    return ctx.systemPrompt.section({
+      name: 'harnessams:model-source-discipline',
+      order: 5400, // after TOOLS_SDK (5000), before remote-wait-policy (5500)
+      text: MODEL_SOURCE_DISCIPLINE,
+    })
+  }, 'harnessams model-source prompt section')
   ctx.effect(() => {
     // Bundled skills (src/skills/<name>/SKILL.md -> ctx.skills catalog):
     // fail-open — see skills.js. The catalog carries name + description
