@@ -61,6 +61,24 @@ export function pluginScripts(root = simScriptsDir()) {
   return out.sort((a, b) => a.rel.localeCompare(b.rel))
 }
 
+// Worker scripts root for one submit call. The tool's `sim_scripts_dir`
+// argument is the documented root OVERRIDE: when it names an existing
+// directory, that directory IS the root (a custom worker tree, a test
+// fixture). Anything else — a missing path, a file — is only an ANCHOR for the
+// project walk-up, the pre-override meaning kept so a run directory outside
+// the project tree still resolves its project config. (2026-11-23: the local
+// scheduler handed a custom root silently started the stock worker instead.)
+export function submitScriptsRoot(simScriptsDirArg, runDir) {
+  const given = typeof simScriptsDirArg === 'string' ? simScriptsDirArg.trim() : ''
+  if (given) {
+    const abs = path.resolve(given)
+    try {
+      if (fs.statSync(abs).isDirectory()) return abs
+    } catch { /* not an existing directory: fall through to the anchor meaning */ }
+  }
+  return simScriptsDir(runDir)
+}
+
 export function remoteJoin(...parts) {
   return path.posix.join(...parts)
 }

@@ -16,7 +16,7 @@ import {
   collectRunFiles,
   defaultRemoteScriptsDir, nextSimDir, parseJobId, parsePollOutput, pluginScripts,
   pollCommand, postSubmitCommand, readJob, remoteJoin,
-  resolveRemoteDir, sanitizeRel, simScriptsDir, templateUploadPlan, writeJob,
+  resolveRemoteDir, sanitizeRel, submitScriptsRoot, templateUploadPlan, writeJob,
 } from '../batch.js'
 
 // The fixed light-result set a terminal poll pulls straight down (2026-11-23:
@@ -44,7 +44,7 @@ function submitLocal(args, runDir) {
     throw new Error('scheduler=local needs a scripts-root-relative worker (e.g. "spectre/spectre_sweep_worker.py"), not an absolute path')
   }
   const rel = sanitizeRel(rawWorker)
-  const workerAbs = path.join(simScriptsDir(args.sim_scripts_dir ?? runDir), ...rel.split('/'))
+  const workerAbs = path.join(submitScriptsRoot(args.sim_scripts_dir, runDir), ...rel.split('/'))
   if (!fs.existsSync(workerAbs)) {
     throw new Error(`worker script not found under the project sim_scripts_dir: ${rel} `
       + '(set workspace.sim_scripts_dir in the project\'s .harnessams/workspace_config.json '
@@ -185,7 +185,8 @@ export function batchTools(ctx) {
         machine_id: { type: 'string', description: 'dsh-ssh host alias (ssh_list / the machine card). Required unless scheduler="local"' },
         remote_python: { type: 'string', description: 'Remote Python executable (default python3; use the full path on clusters)' },
         remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remote_root>/.harnessams/scripts)' },
-        sim_scripts_dir: { type: 'string', description: 'Local worker-scripts root override (default: the project\'s workspace_config.json workspace.sim_scripts_dir, found by walking up from run_dir)' },
+        sim_scripts_dir: { type: 'string', description: 'Worker scripts root: an existing directory IS the root (override); any other value only anchors the '
+          + 'project walk-up (default: the project\'s workspace_config.json workspace.sim_scripts_dir, found by walking up from run_dir)' },
         files: { type: 'array', items: { type: 'string' }, description: 'Run-dir files to upload (default: top-level regular files)' },
         queue: { type: 'string', description: 'LSF queue (default normal)' },
         scheduler: { type: 'string', enum: ['lsf', 'direct', 'local'],
@@ -242,7 +243,7 @@ export function batchTools(ctx) {
           remoteWorker = workerRaw.replace(/\\/g, '/')
         } else {
           workerRel = sanitizeRel(workerRaw)
-          const localWorker = path.join(simScriptsDir(args.sim_scripts_dir ?? runDir), ...workerRel.split('/'))
+          const localWorker = path.join(submitScriptsRoot(args.sim_scripts_dir, runDir), ...workerRel.split('/'))
           if (!fs.existsSync(localWorker)) {
             throw new Error(`worker script not found under the project sim_scripts_dir: ${workerRel} `
               + '(set workspace.sim_scripts_dir in the project\'s .harnessams/workspace_config.json '
@@ -264,7 +265,7 @@ export function batchTools(ctx) {
           collectRunFiles(runDir, args.files), sweepConfig)
 
         if (syncScripts) {
-          for (const script of pluginScripts(simScriptsDir(args.sim_scripts_dir ?? runDir))) {
+          for (const script of pluginScripts(submitScriptsRoot(args.sim_scripts_dir, runDir))) {
             const remote = remoteJoin(scriptsRoot, script.rel)
             const up = await uploadFile(ctx, target.alias, script.local, remote)
             if (!up.ok) throw new Error(`upload failed for ${script.rel}: ${up.text}`)

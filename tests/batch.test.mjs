@@ -387,6 +387,19 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
     const died = await tool(ctx, 'batch_poll').execute({ run_dir: midRun, wait_sec: 3 }, {})
     assert.equal(died.state, 'failed')
     assert.equal(died.completed, 1)
+
+    // sim_scripts_dir naming an existing directory IS the scripts root (the
+    // documented override) and wins over the env/project default — a custom
+    // worker tree runs as handed, not the stock worker (2026-11-23 instance check)
+    const otherRoot = tmp('hams-local-root-')
+    fs.mkdirSync(path.join(otherRoot, 'spectre'), { recursive: true })
+    fs.writeFileSync(path.join(otherRoot, 'spectre', 'spectre_sweep_worker.py'), 'import sys; sys.exit(0)\n')
+    const override = await tool(ctx, 'batch_submit').execute({
+      run_dir: makeRunDir(), worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local', sim_scripts_dir: otherRoot,
+    }, {})
+    assert.equal(override.ok, true, JSON.stringify(override))
+    const overrideJob = JSON.parse(fs.readFileSync(override.job_file, 'utf8'))
+    assert.equal(overrideJob.worker, path.join(otherRoot, 'spectre', 'spectre_sweep_worker.py'))
     assert.equal(ctx.calls.length, 0, 'none of the local paths touches an ssh tool')
   } finally {
     restoreEnv()
