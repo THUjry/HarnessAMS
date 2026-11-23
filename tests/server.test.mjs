@@ -48,12 +48,12 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     assert.deepEqual((await readSessionConfigs(dir)).sessions, {})
     assert.equal(path.basename(sessionConfigsPath(dir)), 'sessions.json')
 
-    // empty tombstone entry (a brand-new session's first write, D-004)
+    // empty tombstone entry (a brand-new session's first write, D-005)
     let w = await writeSessionConfig(dir, sid, { display: 'overview', reports: [], dashboard_selected: null })
     assert.ok(!w.error, w.error)
     assert.deepEqual(w.sessions[sid], { display: 'overview', reports: [], dashboard_selected: null })
 
-    // reports ride in the session entry (legacy task payload, D-004); duplicate
+    // reports ride in the session entry (legacy task payload, D-005); duplicate
     // paths dedupe; dashboard_selected only survives while it points at a report
     const rep = { id: 'r-ab12cd34', name: 'run1', path: path.join(dir, 'run1.html'), added_at: '2026-11-19T00:00:00.000Z' }
     w = await writeSessionConfig(dir, sid, {
@@ -78,7 +78,7 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     w = await writeSessionConfig(dir, sid, { display: 'task-xxxx', reports: [], dashboard_selected: null })
     assert.equal(w.sessions[sid].display, 'overview')
 
-    // v1 file (the task-era shape) parses as EMPTY — clean break, D-004
+    // v1 file (the task-era shape) parses as EMPTY — clean break, D-005
     await writeFile(path.join(dir, '.harnessams', 'sessions.json'),
       JSON.stringify({ version: 1, sessions: { [sid]: { active: ['task-ab12cd34'], display: 'task-ab12cd34' } } }), 'utf8')
     assert.deepEqual((await readSessionConfigs(dir)).sessions, {})

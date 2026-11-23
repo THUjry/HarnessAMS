@@ -1,4 +1,4 @@
-// AGENTS.md project-config block (2026-11-18; flattened 2026-11-19 D-003).
+// AGENTS.md project-config block (2026-11-18; flattened 2026-11-19 D-004).
 // Per the front-of-house rule (the DSHstudy context-sync note: AGENTS.md
 // is the reviewable, diff-able sync vehicle — plugins must not assemble
 // injections in the back half), this module only maintains ONE marked block at

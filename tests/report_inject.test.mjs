@@ -1,5 +1,5 @@
-// Tests for the gen_sweep_report tool (D-005, 2026-11-21): spec-driven report
-// rendering, the new D-005 file layout (report at the project root, data JS in
+// Tests for the gen_sweep_report tool (D-006, 2026-11-21): spec-driven report
+// rendering, the new D-006 file layout (report at the project root, data JS in
 // SimResults/, PNGs in Figs/), the guarded single-session merge-write of
 // sessions.json (v2), and the full tool.execute(args, exec) flow — the calling
 // session comes from exec.agent.id.
@@ -147,7 +147,7 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     assert.equal(res.ok, true)
     assert.equal(res.registered, true)
     assert.equal(res.session, SID_A)
-    // D-005 layout: report at the PROJECT ROOT, data JS under SimResults/
+    // D-006 layout: report at the PROJECT ROOT, data JS under SimResults/
     assert.match(res.report_path, /projX[\\/]projX_report\.html$/)
     assert.equal(res.report_dir, proj)
     assert.match(res.output, /\[report\] 2 round\(s\) -> /)
@@ -161,7 +161,7 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     for (const f of ['SimResults/Sim0_20260805_batch1.js', 'SimResults/Sim0_20260805_batch2.js']) {
       assert.ok(html.includes(JSON.stringify(f).slice(1, -1)), `manifest must reference ${f}`)
     }
-    // the D-005 empty-table fix: the param branch reads p.params, not the root
+    // the D-006 empty-table fix: the param branch reads p.params, not the root
     assert.ok(html.includes('c.kind === "param") return { txt: esc(show(p.params ? p.params[c.key] : null))'),
       'cellVal must carry the param branch')
     // conclusions card renders (mini-markdown)

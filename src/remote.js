@@ -20,7 +20,7 @@
 //     file per call; parent directories are auto-created remotely);
 //   - ssh_download → value { ok, bytes?, error? } (single file only);
 //   - the remote root per alias is NOT dsh-ssh data: it is a per-project
-//     setting (workspace_config.json settings.remote_root, 2026-11-19 D-003)
+//     setting (workspace_config.json settings.remote_root, 2026-11-19 D-004)
 //     passed explicitly by every consumer — no family-level map, no merge.
 //
 // Hardening owned by this funnel (selection-doc §6/§7 mitigations):

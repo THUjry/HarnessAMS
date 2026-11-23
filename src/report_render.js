@@ -1,4 +1,4 @@
-// Shared sweep-report rendering (D-005, 2026-11-21): the report HTML/data-JS
+// Shared sweep-report rendering (D-006, 2026-11-21): the report HTML/data-JS
 // templates and the Node-side chart-spec builder. The same chartSpecs() output
 // feeds BOTH the browser page (the data JS embeds ready-to-plot {data, layout}
 // per chart — the client only calls newPlot and binds interactions) and the
@@ -433,7 +433,7 @@ function buildTable(RD) {
   }
   function cellVal(p, c) {
     if (c.kind === "metric") return { txt: fmtVal(p.metrics ? p.metrics[c.key] : null), cls: "num" };
-    if (c.kind === "param") return { txt: esc(show(p.params ? p.params[c.key] : null)), cls: "" };  // D-005 fix: params live at p.params, not the point root
+    if (c.kind === "param") return { txt: esc(show(p.params ? p.params[c.key] : null)), cls: "" };  // D-006 fix: params live at p.params, not the point root
     if (c.kind === "num") return { txt: num(p[c.key], 2), cls: "num" };
     if (c.key === "index") return { txt: esc(String(p.index)), cls: "num" };
     return { txt: esc(show(p[c.key])), cls: "" };
@@ -617,7 +617,7 @@ export function resolvePlotlySrc(forceCdn, outDir, project, plotlyArg) {
 }
 
 // --- report assembly --------------------------------------------------------
-// D-005 layout: data JS at <project>/SimResults/<round id>.js, report HTML at
+// D-006 layout: data JS at <project>/SimResults/<round id>.js, report HTML at
 // the PROJECT ROOT (outName defaults to <project>_report.html). prepared = {
 // title, metaLine?, conclusions?, outName?, rounds: [roundData] } where each
 // roundData already carries .charts specs. Returns { reportPath, dataDir,
