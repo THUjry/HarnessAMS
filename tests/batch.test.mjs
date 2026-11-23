@@ -1,4 +1,4 @@
-// Generic remote batch tools: machine resolution, upload/submit/poll/fetch against
+// Generic remote batch tools: machine resolution, upload/submit/poll against
 // a mocked @linxin666/dsh-ssh tool shell (structured values, no network, no SSH, no
 // LSF required). The scheduler=direct path is the node-local foreground mode (no
 // bsub). The worker-script upload tree comes from the project's
@@ -356,6 +356,38 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
     assert.equal(poll.state, 'completed')
     assert.equal(poll.completed, 2)
     assert.equal(ctx.calls.length, 0, 'local poll reads files only')
+
+    // a worker that dies at startup is a FAILED frame carrying its stderr — not
+    // "running" until wait_sec runs out (the blocking poll used to burn its
+    // whole window on a corpse)
+    const workerFile = path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py')
+    fs.writeFileSync(workerFile, [
+      'import sys',
+      'print("fake worker: unrecognized arguments --nope", file=sys.stderr)',
+      'sys.exit(3)',
+    ].join('\n'))
+    const crashRun = makeRunDir()
+    await tool(ctx, 'batch_submit').execute({ run_dir: crashRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' }, {})
+    const crashed = await tool(ctx, 'batch_poll').execute({ run_dir: crashRun, wait_sec: 3 }, {})
+    assert.equal(crashed.state, 'failed')
+    assert.equal(crashed.completed, 0)
+    assert.match(crashed.errlog_tail, /unrecognized arguments --nope/)
+
+    // a worker that dies mid-run (its last tick still says running) is failed too
+    fs.writeFileSync(workerFile, [
+      'import json, os, sys',
+      'wd = sys.argv[sys.argv.index("--work-dir") + 1]',
+      'prog = {"status": "running", "total_points": 2, "completed": 1, "succeeded": 1, "failed": 0, "points": []}',
+      'tmp = os.path.join(wd, "sweep_progress.json.tmp")',
+      'with open(tmp, "w") as f: json.dump(prog, f)',
+      'os.replace(tmp, os.path.join(wd, "sweep_progress.json"))',
+    ].join('\n'))
+    const midRun = makeRunDir()
+    await tool(ctx, 'batch_submit').execute({ run_dir: midRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' }, {})
+    const died = await tool(ctx, 'batch_poll').execute({ run_dir: midRun, wait_sec: 3 }, {})
+    assert.equal(died.state, 'failed')
+    assert.equal(died.completed, 1)
+    assert.equal(ctx.calls.length, 0, 'none of the local paths touches an ssh tool')
   } finally {
     restoreEnv()
   }

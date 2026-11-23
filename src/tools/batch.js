@@ -107,7 +107,10 @@ function submitLocal(args, runDir) {
 
 // One local poll frame from the run directory's own files (the shared ladder
 // in progress_files.js). No ssh: local runs write everything into run_dir.
-// The per-point digest mirrors the remote poll frames.
+// The per-point digest mirrors the remote poll frames. The ladder also knows
+// whether the local worker is still alive — a dead one is a FAILED frame
+// (startup death / mid-run), so a blocking wait never spends wait_sec on a
+// corpse.
 function localPollFrame(runDir) {
   const p = readRunProgress(runDir)
   if (!p.local) {
@@ -116,10 +119,16 @@ function localPollFrame(runDir) {
   const state = p.status === 'completed' ? 'completed'
     : p.status === 'failed' ? 'failed'
       : p.source === 'config' ? 'pending' : 'running'
-  let errlog = null
-  try {
-    errlog = fs.readFileSync(path.join(runDir, 'errlog.txt'), 'utf8').trim().split(/\r?\n/).slice(-5).join('\n') || null
-  } catch { /* no errlog yet */ }
+  // Failure detail: the worker's own errlog.txt (its startup-error classes),
+  // else — on a failed frame — the spawn-level stderr .batch_local.err (bad
+  // arguments, a missing import, a traceback), so a dead worker explains
+  // itself in the payload instead of leaving "running" behind.
+  const tail = (file) => {
+    try {
+      return fs.readFileSync(file, 'utf8').trim().split(/\r?\n/).slice(-5).join('\n') || null
+    } catch { return null /* not written yet */ }
+  }
+  const errlog = tail(path.join(runDir, 'errlog.txt')) || (state === 'failed' ? tail(path.join(runDir, '.batch_local.err')) : null)
   let points = null
   try {
     points = trimLocalPoints(JSON.parse(fs.readFileSync(path.join(runDir, 'sweep_progress.json'), 'utf8'))?.points)
@@ -383,7 +392,7 @@ export function batchTools(ctx) {
         + 'errlog.txt) straight into the run directory — no includes, no archive; raw psf/sp data stays remote '
         + 'by design (analyze it there and pull back compact results). The machine, directory and job id default '
         + 'to <run_dir>/.batch_job.json. A local submission (scheduler="local") is polled from the run directory\'s '
-        + 'own files, no ssh involved. Pass wait_sec for a bounded blocking wait — the in-flight call is the '
+        + 'own files, no ssh involved — a worker that died reads as failed and carries its stderr tail. Pass wait_sec for a bounded blocking wait — the in-flight call is the '
         + 'window where the session progress card live-updates.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory holding .batch_job.json' },

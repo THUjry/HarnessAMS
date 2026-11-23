@@ -8,6 +8,8 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { registerRoutes, callGet } from './helpers.mjs'
 import { projectRootOf, readRunProgress, summarizeProject } from '../src/server/progress.js'
 import { resetRemoteCacheForTest } from '../src/server/progressRemote.js'
@@ -97,6 +99,38 @@ test('progress: readRunProgress walks the progress → worker_started → config
     assert.equal(bom.source, 'progress')
     assert.equal(bom.status, 'completed')
     assert.equal(bom.pending, 0)
+
+    // scheduler=local job: the run directory IS the truth and the ladder knows
+    // whether the worker is still there (tools/batch.js records the spawned pid)
+    const localRun = path.join(dir, 'local')
+    await mkdir(localRun)
+    await writeFile(path.join(localRun, 'sweep_config.json'), JSON.stringify({ parameters: { a: [1, 2] } }))
+    await writeFile(path.join(localRun, '.batch_job.json'),
+      JSON.stringify({ job_id: 'local-1', scheduler: 'local', pid: process.pid, total_points: 2 }))
+    const liveWorker = readRunProgress(localRun)
+    assert.equal(liveWorker.source, 'job')
+    assert.equal(liveWorker.status, 'submitted') // alive and nothing written yet
+    const exited = spawn(process.execPath, ['-e', 'process.exit(0)'])
+    await once(exited, 'exit')
+    await writeFile(path.join(localRun, '.batch_job.json'),
+      JSON.stringify({ job_id: 'local-2', scheduler: 'local', pid: exited.pid, total_points: 2 }))
+    // gone before anything readable landed → a startup death, every point lost
+    const deadWorker = readRunProgress(localRun)
+    assert.equal(deadWorker.source, 'job')
+    assert.equal(deadWorker.status, 'failed')
+    assert.equal(deadWorker.failed, 2)
+    assert.equal(deadWorker.pending, 0)
+    // gone behind a tick that still says running → died mid-run, not "running" forever
+    await writeFile(path.join(localRun, 'sweep_progress.json'),
+      JSON.stringify({ status: 'running', total_points: 2, completed: 1, succeeded: 1, failed: 0 }))
+    const diedMidRun = readRunProgress(localRun)
+    assert.equal(diedMidRun.source, 'progress')
+    assert.equal(diedMidRun.status, 'failed')
+    assert.equal(diedMidRun.completed, 1)
+    // the same pid recorded under a REMOTE job is not a local worker: no liveness reading
+    await writeFile(path.join(localRun, '.batch_job.json'),
+      JSON.stringify({ job_id: '777', scheduler: 'lsf', pid: exited.pid, total_points: 2 }))
+    assert.equal(readRunProgress(localRun).status, 'running')
 
     // absent directory answers local:false (client omits the block)
     assert.equal(readRunProgress('/no/such/dir').local, false)
