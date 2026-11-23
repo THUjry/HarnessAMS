@@ -21,7 +21,8 @@
 // (workspace_config.json settings.remote_root — the family harnessams.json and
 // its remote_machines map are retired, 2026-11-19 D-004).
 // Model tools: harnessams_selfcheck (self-check + config), the batch channel
-// (batch_submit with its local/direct/lsf schedulers + batch_poll with the
+// (batch_submit with its local/ssh/lsf schedulers, semantics set by the
+// project's cluster_env — D-002 — + batch_poll with the
 // terminal auto-fetch; worker scripts come from the project's
 // workspace.sim_scripts_dir) and the simulator-agnostic report/ops tools
 // (gen_sweep_report / safe_trash).
@@ -48,13 +49,15 @@ import { safeTrashTool } from './trash.js'
 import { registerSkills } from './skills.js'
 
 export const name = 'dsh-harnessams'
-// workspaceRegistry/tools/systemPrompt/skills are required on the web
+// workspaceRegistry/tools/systemPrompt/skills/shell are required on the web
 // composition (all ship with dsh-base); the handlers still guard against
 // undefined so degraded embeds fail soft, not loud. systemPrompt is declared
-// for the waiting-policy section and skills for the bundled-skill catalog
+// for the waiting-policy section, skills for the bundled-skill catalog and
+// shell for the in-cluster local execution seam (ctx.shell, the official host
+// shell — bsub/bjobs on this host when cluster_env=in-cluster).
 // (cordis blocks ctx access to undeclared services — optional chaining
-// cannot save that, live-caught 2026-11-21).
-export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills']
+// cannot save that, live-caught 2026-11-21.)
+export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills', 'shell']
 
 // Remote waiting policy injected into the system prompt while this plugin is
 // enabled (2026-11-21, the "no dumb sleep" wave): bounded sleeps, progress-
@@ -64,13 +67,13 @@ export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt'
 // Prose, not bullets: the assembled host prompt is plain paragraphs (its core
 // sections and dsh-ssh's guidance carry no markdown block structure), so the
 // lone "##" heading was restyled into this paragraph the same day.
-export const REMOTE_WAIT_POLICY = 'HarnessAMS remote waiting policy: poll status (batch_poll, optionally with wait_sec for a bounded blocking wait; harnessams_selfcheck "status" for self-checks) instead of blind-sleeping a guessed duration. Sleep <=30 s per command, re-check after each, repeat until the run finishes (prefer 10 s -> 20 s -> 40 s backoff with ETA from completed/total); while a progress card is displayed, refresh it at least once every 5 s (poll, do not sleep); if the standard chain cannot proceed (repeated failures, stuck run, missing capability), stop and ask the user first; any improvised fallback requires explicit approval and must still use the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download), never raw ssh commands from the shell.'
+export const REMOTE_WAIT_POLICY = 'HarnessAMS remote waiting policy: poll status (batch_poll, optionally with wait_sec for a bounded blocking wait; harnessams_selfcheck "status" for self-checks) instead of blind-sleeping a guessed duration. Sleep <=30 s per command, re-check after each, repeat until the run finishes (prefer 10 s -> 20 s -> 40 s backoff with ETA from completed/total); while a progress card is displayed, refresh it at least once every 5 s (poll, do not sleep); if the standard chain cannot proceed (repeated failures, stuck run, missing capability), stop and ask the user first; any improvised fallback requires explicit approval and must still use the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download), never raw ssh commands from the shell. Projects run in one of two working environments (cluster_env): each project\'s AGENTS.md config block states which one holds ("This is an in-cluster / out-of-cluster project") and the scheduler semantics follow it — read that block before choosing scheduler="local"/"ssh"/"lsf".'
 
 export function toolDefinitions(ctx = {}) {
   return [...selfcheckTools(ctx), ...batchTools(ctx), ...genReportTools(ctx), safeTrashTool()]
 }
 // Current tool surface: harnessams_selfcheck (self-check + project config),
-// batch_submit (local/direct/lsf) / batch_poll (monitor + terminal
+// batch_submit (local/ssh/lsf, per cluster_env) / batch_poll (monitor + terminal
 // auto-fetch), gen_sweep_report (pure JS report renderer), safe_trash.
 
 export function apply(ctx) {

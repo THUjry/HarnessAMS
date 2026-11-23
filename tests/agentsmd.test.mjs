@@ -52,7 +52,7 @@ test('agentsmd: values sync fills measured flat facts, keeps the pointer, REMOVE
     // content below the block must survive the in-place replace
     await writeFile(agentsMdPath(ws), (await readFile(agentsMdPath(ws), 'utf8')) + '\n# Project notes\n\nkeep me\n', 'utf8')
 
-    const settings = { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+    const settings = { cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
     // no dsh-ssh in ctx at all anymore: the machines section is gone, the sync
     // never touches the tool shell
@@ -67,11 +67,14 @@ test('agentsmd: values sync fills measured flat facts, keeps the pointer, REMOVE
     assert.ok(md.includes(`  workspace_root: ${JSON.stringify(ws)}`), 'workspace root, JSON-escaped for yaml')
     assert.ok(md.includes(`  node_version: "${process.version}"`), 'node version as a flat field')
     assert.ok(md.includes(`  node_path: ${JSON.stringify(process.execPath)}`), 'node absolute path as a flat field')
+    assert.ok(md.includes('  cluster_env: "out-of-cluster"'), 'the working environment mirrors the config')
     assert.ok(md.includes('  run_mode: "remote"'))
-    assert.ok(md.includes('  machine: "node1"'))
+    assert.ok(md.includes('  remote_node: "node1"'), 'the node used for this verification')
+    assert.ok(md.includes('  other_nodes: null'), 'no dsh-ssh registry in ctx → the row stays null (fail-open)')
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
-    assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre)'), 'the values sync renders the settings-matched workflow branch')
+    assert.ok(md.includes('This is an out-of-cluster project'), 'the env statement rides the values build')
+    assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre (out-of-cluster))'), 'the values sync renders the settings-matched workflow branch')
     assert.ok(md.includes('ok-via-fallback'), 'the LSF branch carries the fallback rule')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block after the sync')
   } finally { await rm(ws, { recursive: true, force: true }) }
@@ -81,18 +84,45 @@ test('agentsmd: re-syncing under different settings switches the workflow branch
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-workflow-'))
   try {
     await ensureAgentsMdTemplate(ws)
-    const remoteLsf = { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+    const remoteLsf = { cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
-    const localSpectre = { run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
+    const localSpectre = { cluster_env: 'in-cluster', run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: remoteLsf })
     let md = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre)'))
+    assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre (out-of-cluster))'))
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: localSpectre })
     md = await readFile(agentsMdPath(ws), 'utf8')
     assert.ok(md.includes('### Self-check workflow (local / spectre)'), 'branch switched to the saved settings')
+    assert.ok(md.includes('This is an in-cluster project'), 'the env statement switched with it')
     assert.ok(!md.includes('LSF'), 'old branch fully replaced (uppercase LSF only lives in the workflow text)')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block')
+  } finally { await rm(ws, { recursive: true, force: true }) }
+})
+
+test('agentsmd: other_nodes lists the remaining dsh-ssh aliases (D-002, no probing)', async () => {
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-nodes-'))
+  try {
+    await ensureAgentsMdTemplate(ws)
+    const settings = { cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+      scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
+    const ctx = {
+      tools: {
+        get: (name) => (name === 'ssh_list' ? { name } : undefined),
+        execute: async (input) => {
+          const call = input.calls[0]
+          if (JSON.parse(call.arguments || '{}') && call.name !== 'ssh_list') throw new Error('unexpected tool ' + call.name)
+          return { results: [{ callId: call.id, result: { isError: false, value: { hosts: [
+            { alias: 'node1', host: '192.0.2.11' }, { alias: 'lab9', host: '192.0.2.99' }, { alias: 'node2', host: '192.0.2.12' },
+          ] } } }] }
+        },
+      },
+    }
+    const r = await syncAgentsMd(ctx, { project: { path: ws, title: 'demo' }, settings })
+    assert.equal(r.ok, true)
+    const md = await readFile(agentsMdPath(ws), 'utf8')
+    assert.ok(md.includes('  other_nodes: "lab9, node2"'), 'the other aliases minus the primary, connectivity left to dsh-ssh')
+    assert.ok(md.includes('  remote_node: "node1"'))
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
@@ -132,14 +162,14 @@ test('agentsmd route+writers: .harnessams creation lays the template; /api/tool 
     // writeSettings (behind the tool's settings argument) = one of the two
     // .harnessams creation moments → the AGENTS.md template appears
     await writeSettings(ws, {
-      run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+      cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     })
     const md1 = await readFile(agentsMdPath(ws), 'utf8')
     assert.ok(md1.includes(INSTRUCTION), 'template with the first-fill instruction')
     // a second settings write stays idempotent (block present → untouched)
     await writeSettings(ws, {
-      run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+      cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     })
     assert.ok((await readFile(agentsMdPath(ws), 'utf8')).includes(INSTRUCTION), 'later writes never rewrite the block')
@@ -165,8 +195,8 @@ test('agentsmd route+writers: .harnessams creation lays the template; /api/tool 
     // instruction; pending settings ride along (the table's confirm button)
     const r = await callPost(handler, base + '/tool', {
       sessionId: 's1', action: 'save_agentsmd',
-      settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
-        scheduler: 'direct', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' },
+      settings: { cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+        scheduler: 'ssh', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' },
     })
     assert.equal(r.code, 200, JSON.stringify(r.body))
     assert.equal(r.body.ok, true)
@@ -175,8 +205,8 @@ test('agentsmd route+writers: .harnessams creation lays the template; /api/tool 
     const md2 = await readFile(agentsMdPath(ws), 'utf8')
     assert.ok(!md2.includes(INSTRUCTION))
     assert.ok(md2.includes('  run_mode: "remote"'), 'settings snapshot comes from workspace_config.json')
-    assert.ok(md2.includes('  scheduler: "direct"'), 'the riding settings landed before the sync')
-    assert.ok(md2.includes('### Self-check workflow (remote / direct / spectre)'), 'save_agentsmd renders the workflow for the riding settings')
+    assert.ok(md2.includes('  scheduler: "ssh"'), 'the riding settings landed before the sync')
+    assert.ok(md2.includes('### Self-check workflow (remote / ssh / spectre (out-of-cluster))'), 'save_agentsmd renders the workflow for the riding settings')
 
     // a second POST keeps exactly one block
     await callPost(handler, base + '/tool', { sessionId: 's1', action: 'save_agentsmd' })
@@ -223,6 +253,8 @@ test('agentsmd client: button row order and wiring, new keys bilingual', () => {
     'agents.saveBtn', 'agents.saving', 'agents.saved', 'agents.saveFailed', 'agents.checkAll', 'agents.checkAllRunning',
     'pset.browse', 'pset.browseTitle', 'pset.browsePickDir', 'pset.pickDir', 'pset.pickThisDir', 'pset.pickCurrentDir',
     'pset.colName', 'pset.colValue', 'pset.confirmBtn', 'pset.unsaved', 'pset.stagedHint',
+    'pset.envTitle', 'pset.envIn', 'pset.envOut', 'pset.envHint',
+    'envc.title', 'envc.bodyIn', 'envc.bodyOut', 'envc.ok',
     'chk.btn.local', 'chk.truncated',
   ])
 })

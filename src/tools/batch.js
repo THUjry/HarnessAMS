@@ -1,18 +1,24 @@
-// Generic batch tools: submit a worker script through LSF (bsub), run it
-// directly on the remote host (scheduler=direct, the node-local foreground
-// mode), or run it on THIS host as a detached background process
-// (scheduler=local — batch_poll then reads the run directory's own files).
-// Then poll (auto-retrieving the light result files on completion) — nothing
-// in this file names a simulator; a Spectre run is just a worker choice, and
-// the worker tree comes from the workspace sim_scripts_dir (see ../batch.js).
+// Generic batch tools: submit a worker script through LSF (bsub), run it on a
+// node over ssh (scheduler=ssh, foreground), or run it on THIS host as a
+// detached background process (scheduler=local — batch_poll then reads the
+// run directory's own files). Scheduler semantics follow the project's working
+// environment (cluster_env, D-002): out-of-cluster every remote operation
+// crosses dsh-ssh; in-cluster bsub runs on THIS host (the official ctx.shell
+// seam) and file "transfers" are local copies on the shared filesystem —
+// scheduler=ssh still executes over ssh, on any other node. Then poll
+// (auto-retrieving the light result files on completion) — nothing in this
+// file names a simulator; a Spectre run is just a worker choice, and the
+// worker tree comes from the workspace sim_scripts_dir (see ../batch.js).
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { readJsonIfExists, resolveDir } from '../py.js'
 import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
+import { execLocal, localCopy } from '../localchannel.js'
 import { readRunProgress, totalFromConfig } from '../progress_files.js'
+import { readSettingsFor } from '../server/settings.js'
 import {
-  DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildDirectCommand, buildSubmitCommand,
+  DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildSshCommand, buildSubmitCommand,
   collectRunFiles,
   defaultRemoteScriptsDir, nextSimDir, parseJobId, parsePollOutput, pluginScripts,
   pollCommand, postSubmitCommand, readJob, remoteJoin,
@@ -173,46 +179,99 @@ export function batchTools(ctx) {
   return [
     {
       name: 'batch_submit',
-      description: 'Submit a batch through the suite\'s worker scripts. scheduler="local" (2026-11-23) '
-        + 'runs the worker on THIS host as a detached background process and returns immediately — poll with '
-        + 'batch_poll (wait_sec for the blocking wait; the session card live-updates off the run directory). '
-        + 'scheduler="lsf" (default) uploads the run directory (template + sweep_config.json + metadata) and the '
-        + 'worker scripts tree (the workspace sim_scripts_dir) to a dsh-ssh host and runs it under bsub; '
-        + 'scheduler="direct" runs it directly on the target host in the foreground. The worker path is '
-        + 'scripts-root-relative (e.g. "spectre/spectre_sweep_worker.py") or absolute on the remote; worker_args '
-        + 'are passed through. Writes .batch_job.json in the run directory for batch_poll.',
+      description: 'Submit a batch through the suite\'s worker scripts under one of three schedulers, with '
+        + 'semantics set by the project\'s working environment (cluster_env in workspace_config.json, mirrored in '
+        + 'the AGENTS.md config block). scheduler="local" runs the worker on THIS host detached and returns '
+        + 'immediately — poll with batch_poll (in-cluster only; an out-of-cluster host cannot run it). '
+        + 'scheduler="lsf" (default) runs it under bsub: in-cluster bsub runs right on this host and the run '
+        + 'directory stages as a local copy on the shared filesystem; out-of-cluster the directory and the worker '
+        + 'scripts tree (the workspace sim_scripts_dir) upload to a dsh-ssh host and bsub runs there. '
+        + 'scheduler="ssh" runs the worker directly on the target host in the foreground and waits for it '
+        + '(out-of-cluster: the ssh node itself, a second hop goes through the dsh-ssh proxy config; in-cluster: '
+        + 'any other node — files never cross ssh). The worker path is scripts-root-relative (e.g. '
+        + '"spectre/spectre_sweep_worker.py") or absolute on the target; worker_args are passed through. Writes '
+        + '.batch_job.json in the run directory for batch_poll.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
         remote_dir: { type: 'string', description: 'Remote batch directory: absolute, or relative to remote_root. '
           + 'Omit to auto-generate the next Sim<N>_<YYYYMMDD>_batch<M> directory under <remote_root>/RawResults '
           + '(the D-006 raw-simulation-data convention; mirror the same name locally under <project>/RawResults). '
           + 'Unused for scheduler="local"' },
-        remote_root: { type: 'string', description: 'Absolute remote root that fences remote_dir — the project\'s '
-          + 'workspace_config.json settings.remote_root (shown in the AGENTS.md config table). Required unless scheduler="local"' },
+        remote_root: { type: 'string', description: 'Absolute run root that fences remote_dir — the project\'s '
+          + 'workspace_config.json settings.remote_root (shown in the AGENTS.md config table): a shared-filesystem '
+          + 'path in-cluster, the ssh host\'s path out-of-cluster. Required unless scheduler="local"' },
         worker: { type: 'string', required: true, description: 'Worker script relative to the scripts root (e.g. spectre/spectre_sweep_worker.py) or an absolute remote path' },
         worker_args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed to the worker (e.g. --config sweep_config.json --max-parallel 8)' },
-        machine_id: { type: 'string', description: 'dsh-ssh host alias (ssh_list / the machine card). Required unless scheduler="local"' },
+        machine_id: { type: 'string', description: 'dsh-ssh host alias (ssh_list / the machine card) — the node to '
+          + 'run on. Required for scheduler="ssh" and for out-of-cluster lsf; unused by in-cluster lsf (bsub runs '
+          + 'on this host)' },
         remote_python: { type: 'string', description: 'Remote Python executable (default python3; use the full path on clusters)' },
         remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remote_root>/.harnessams/scripts)' },
         sim_scripts_dir: { type: 'string', description: 'Worker scripts root: an existing directory IS the root (override); any other value only anchors the '
           + 'project walk-up (default: the project\'s workspace_config.json workspace.sim_scripts_dir, found by walking up from run_dir)' },
         files: { type: 'array', items: { type: 'string' }, description: 'Run-dir files to upload (default: top-level regular files)' },
         queue: { type: 'string', description: 'LSF queue (default normal)' },
-        scheduler: { type: 'string', enum: ['lsf', 'direct', 'local'],
-          description: 'local runs the worker on THIS host in the background; lsf (default) submits it through '
-            + 'bsub on the target host; direct runs it directly on the target host (node-local foreground, no LSF) '
-            + 'and waits for it to finish' },
+        scheduler: { type: 'string', enum: ['lsf', 'ssh', 'local'],
+          description: 'local runs the worker on THIS host in the background (in-cluster only); lsf (default) '
+            + 'submits through bsub (locally in-cluster, on the target host out-of-cluster); ssh runs it directly '
+            + 'on the target host (foreground, no LSF) and waits for it to finish' },
+        lsf_node: { type: 'string', description: 'LSF only: pin the job to a host or host list — bsub -m "<lsf_node>" '
+          + '(e.g. node2, or "node2 node3" to spread). Combine with repeated submits to run one sweep on several nodes' },
         job_name: { type: 'string', description: 'bsub -J name (default hams-<run dir name>)' },
         sync_scripts: { type: 'boolean', description: 'Upload scripts/ to the remote scripts root (default true; pass false after a successful sync)' },
         overwrite: { type: 'boolean', description: 'Allow submitting into a remote directory that already has point_meta.json files. '
-          + 'Stale replay markers (.hams_submitted / .hams_direct_done) are cleared first, so a batch that already ran here actually re-runs '
-          + '(without this, a completed direct/LSF dir short-circuits to its old result)' },
+          + 'Stale replay markers (.hams_submitted / .hams_ssh_done) are cleared first, so a batch that already ran here actually re-runs '
+          + '(without this, a completed ssh/LSF dir short-circuits to its old result)' },
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
-        const scheduler = args.scheduler === 'direct' ? 'direct' : args.scheduler === 'local' ? 'local' : 'lsf'
-        if (scheduler === 'local') return submitLocal(args, runDir)
-        const target = await resolveMachine(ctx, args.machine_id, args.remote_root)
+        const scheduler = args.scheduler === 'ssh' ? 'ssh' : args.scheduler === 'local' ? 'local' : 'lsf'
+        // Channel matrix (D-002): the project's cluster_env picks the semantics.
+        // Out-of-cluster every remote operation crosses dsh-ssh; in-cluster
+        // bsub runs on THIS host (the official ctx.shell seam) and "transfers"
+        // are local copies on the shared filesystem — scheduler=ssh still
+        // executes over ssh, on any other node.
+        const settings = readSettingsFor(runDir)
+        const inCluster = settings.cluster_env === 'in-cluster'
+        if (scheduler === 'local') {
+          if (!inCluster) {
+            throw new Error('scheduler=local requires cluster_env=in-cluster (an out-of-cluster host cannot run '
+              + 'the worker — use scheduler="ssh" or "lsf")')
+          }
+          return submitLocal(args, runDir)
+        }
+        if (args.lsf_node != null && scheduler !== 'lsf') {
+          throw new Error('lsf_node applies to scheduler="lsf" only')
+        }
+        if (args.lsf_node != null && !/^[A-Za-z0-9][A-Za-z0-9._-]*( [A-Za-z0-9][A-Za-z0-9._-]*)*$/.test(String(args.lsf_node))) {
+          throw new Error(`invalid lsf_node ${JSON.stringify(args.lsf_node)} (a host name or a space-separated host list — it is passed to bsub -m)`)
+        }
+        const remoteRootArg = args.remote_root || settings.remote_root || undefined
+        const sshExec = scheduler === 'ssh' || !inCluster
+        let target
+        if (!sshExec) {
+          // in-cluster LSF: no ssh hop, no machine — bsub runs right here
+          const root = typeof remoteRootArg === 'string' ? remoteRootArg.trim().replace(/\\/g, '/') : ''
+          if (!root || !root.startsWith('/')) {
+            throw new Error('remote_root is required (the absolute shared-filesystem root that fences remote_dir '
+              + '— the project\'s settings.remote_root)')
+          }
+          target = { machine: null, alias: null, remoteRoot: root }
+        } else {
+          target = await resolveMachine(ctx, args.machine_id, remoteRootArg)
+        }
+        const channel = {
+          alias: target.alias,
+          exec: sshExec
+            ? (command, opts) => execRemote(ctx, target.alias, command, opts)
+            : (command, opts) => execLocal(ctx, command, opts),
+          upload: !inCluster
+            ? (localPath, remotePath) => uploadFile(ctx, target.alias, localPath, remotePath)
+            : localCopy,
+          download: !inCluster
+            ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath)
+            : localCopy,
+        }
         let remoteDir
         if (args.remote_dir) {
           remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)
@@ -223,7 +282,7 @@ export function batchTools(ctx) {
           // RawResults/ subdir is fine (empty list → Sim0_..._batch1, uploads
           // create it); the point_meta probe below still guards collisions.
           const rawBase = `${target.remoteRoot.replace(/\/+$/, '')}/RawResults`
-          const ls = await execRemote(ctx, target.alias,
+          const ls = await channel.exec(
             `ls -1d ${shq(target.remoteRoot)} >/dev/null 2>&1 || echo __NOROOT__; `
             + `ls -1 ${shq(rawBase)} 2>/dev/null || true`, { timeoutMs: 30_000 })
           if (!ls.ok || String(ls.stdout ?? '').includes('__NOROOT__')) {
@@ -261,7 +320,7 @@ export function batchTools(ctx) {
           remoteWorker = remoteJoin(scriptsRoot, workerRel)
         }
 
-        const probe = await execRemote(ctx, target.alias,
+        const probe = await channel.exec(
           `ls -1 ${shq(remoteDir)}/*/point_meta.json 2>/dev/null | wc -l`, { timeoutMs: 30_000 })
         const existing = Number(String(probe.stdout ?? '').trim()) || 0
         if (existing > 0 && !args.overwrite) {
@@ -276,34 +335,36 @@ export function batchTools(ctx) {
         if (syncScripts) {
           for (const script of pluginScripts(submitScriptsRoot(args.sim_scripts_dir, runDir))) {
             const remote = remoteJoin(scriptsRoot, script.rel)
-            const up = await uploadFile(ctx, target.alias, script.local, remote)
+            const up = await channel.upload(script.local, remote)
             if (!up.ok) throw new Error(`upload failed for ${script.rel}: ${up.text}`)
           }
         }
 
         for (const file of files) {
           const name = file.uploadName || file.name
-          const up = await uploadFile(ctx, target.alias, file.local, remoteJoin(remoteDir, name))
+          const up = await channel.upload(file.local, remoteJoin(remoteDir, name))
           if (!up.ok) throw new Error(`upload failed for ${name}: ${up.text}`)
         }
 
         const remotePython = args.remote_python || DEFAULT_REMOTE_PYTHON
         const queue = args.queue || 'normal'
         const jobName = args.job_name || `hams-${path.basename(runDir)}`
-        if (scheduler === 'direct') {
-          // Node-local foreground mode: no bsub, no queue — run the worker on
-          // the machine's login host and wait for it, exactly like an
-          // interactive ssh run. poll/fetch still work through the recorded
-          // job file (batch_poll scheduler=direct reads the progress files).
-          const command = buildDirectCommand({
+        if (scheduler === 'ssh') {
+          // Foreground mode: no bsub, no queue — run the worker on the target
+          // node and wait for it, exactly like an interactive run. The
+          // execution crosses ssh; in-cluster the staging itself stayed a
+          // local copy (only out-of-cluster uploads over sftp). poll/fetch
+          // still work through the recorded job file (batch_poll
+          // scheduler=ssh reads the progress files).
+          const command = buildSshCommand({
             remoteDir,
             python: remotePython,
             workerPath: remoteWorker,
             workerArgs: args.worker_args || [],
             overwrite: args.overwrite === true,
           })
-          const ran = await execRemote(ctx, target.alias, command, { timeoutMs: 600_000 })
-          const jobId = `direct-${Date.now()}`
+          const ran = await channel.exec(command, { timeoutMs: 600_000 })
+          const jobId = `ssh-${Date.now()}`
           const job = {
             machine_id: args.machine_id || target.machine?.id || null,
             machine_name: target.machine?.name || null,
@@ -315,20 +376,21 @@ export function batchTools(ctx) {
             job_id: jobId,
             queue: null,
             remote_python: remotePython,
-            scheduler: 'direct',
+            scheduler: 'ssh',
+            cluster_env: inCluster ? 'in-cluster' : 'out-of-cluster',
             submitted_at: new Date().toISOString(),
             total_points: totalFromConfig(runDir),
           }
           writeJob(runDir, job)
           if (!ran.ok) {
-            throw new Error(`direct run failed (exit ${ran.exitCode}): `
+            throw new Error(`ssh run failed (exit ${ran.exitCode}): `
               + `${(ran.stderr || ran.stdout || ran.text || '').slice(0, 1200)}`)
           }
           return {
             ok: true,
             job_id: jobId,
             state: 'completed',
-            scheduler: 'direct',
+            scheduler: 'ssh',
             remote_dir: remoteDir,
             scripts_dir: scriptsRoot,
             warnings: [],
@@ -340,12 +402,13 @@ export function batchTools(ctx) {
           remoteDir,
           queue,
           jobName,
+          node: args.lsf_node != null ? String(args.lsf_node) : null,
           python: remotePython,
           workerPath: remoteWorker,
           workerArgs: args.worker_args || [],
           overwrite: args.overwrite === true,
         })
-        const submitted = await execRemote(ctx, target.alias, command, { timeoutMs: 90_000 })
+        const submitted = await channel.exec(command, { timeoutMs: 90_000 })
         if (!submitted.ok) {
           throw new Error(`bsub submission failed (exit ${submitted.exitCode}): `
             + `${(submitted.stderr || submitted.stdout || '').slice(0, 1200)}`)
@@ -356,7 +419,7 @@ export function batchTools(ctx) {
         }
 
         const warnings = []
-        const post = await execRemote(ctx, target.alias, postSubmitCommand(remoteDir, jobId),
+        const post = await channel.exec(postSubmitCommand(remoteDir, jobId),
           { timeoutMs: 30_000 })
         if (!post.ok) warnings.push(`post-submit verification failed: ${(post.stderr || post.text).slice(0, 300)}`)
         if (post.stdout.includes('__ERRLOG__')) {
@@ -378,6 +441,8 @@ export function batchTools(ctx) {
           queue,
           remote_python: remotePython,
           scheduler: 'lsf',
+          cluster_env: inCluster ? 'in-cluster' : 'out-of-cluster',
+          lsf_node: args.lsf_node != null ? String(args.lsf_node) : null,
           submitted_at: new Date().toISOString(),
           total_points: totalFromConfig(runDir),
         }
@@ -399,10 +464,12 @@ export function batchTools(ctx) {
       description: 'Poll a batch submitted by batch_submit: bjobs state plus the batch\'s own progress '
         + '(point_meta.json count, sweep_progress.json summary, errlog tail) and a per-point digest (index/name/'
         + 'status/params). On a terminal state it auto-fetches the light result files (sweep_progress.json, '
-        + 'errlog.txt) straight into the run directory — no includes, no archive; raw psf/sp data stays remote '
-        + 'by design (analyze it there and pull back compact results). The machine, directory and job id default '
-        + 'to <run_dir>/.batch_job.json. A local submission (scheduler="local") is polled from the run directory\'s '
-        + 'own files, no ssh involved — a worker that died reads as failed and carries its stderr tail. Pass wait_sec for a bounded blocking wait — the in-flight call is the '
+        + 'errlog.txt) straight into the run directory — no includes, no archive; raw psf/sp data stays on the '
+        + 'executing side by design (analyze it there and pull back compact results). The machine, directory and '
+        + 'job id default to <run_dir>/.batch_job.json. A local submission (scheduler="local") is polled from the '
+        + 'run directory\'s own files, no ssh involved — a worker that died reads as failed and carries its stderr '
+        + 'tail. An in-cluster LSF submission polls locally (bjobs on this host); everything else polls over ssh. '
+        + 'Pass wait_sec for a bounded blocking wait — the in-flight call is the '
         + 'window where the session progress card live-updates.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory holding .batch_job.json' },
@@ -410,7 +477,7 @@ export function batchTools(ctx) {
         remote_root: { type: 'string', description: 'Override the fencing remote root (default: the job file\'s remote_root)' },
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the job id' },
-        scheduler: { type: 'string', enum: ['lsf', 'direct', 'local'], description: 'lsf (default) checks bjobs; direct relies on the batch progress files; local reads the run directory itself' },
+        scheduler: { type: 'string', enum: ['lsf', 'ssh', 'local'], description: 'lsf (default) checks bjobs; ssh relies on the batch progress files; local reads the run directory itself' },
         wait_sec: { type: 'integer', description: 'Bounded blocking wait: re-poll (~10 s apart) until a terminal state '
           + '(completed/failed/partial) or this many seconds elapse (capped at 600), then return the last payload. '
           + 'Default 0 = single snapshot, the original contract' },
@@ -422,7 +489,6 @@ export function batchTools(ctx) {
         if (!jobId) throw new Error('no job id: pass job_id or run batch_submit first')
         if (!/^[\w.-]+$/.test(jobId)) throw new Error(`invalid job_id ${JSON.stringify(jobId)} (word/dot/dash only — it is joined into local paths)`)
         let scheduler = args.scheduler || job?.scheduler || 'lsf'
-        if (scheduler === 'none') scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
         // wait_sec (D-008): 0 keeps the single-snapshot contract; a positive
         // value re-polls every WAIT_GAP_MS until a terminal state or the
         // deadline, returning the LAST payload (shape unchanged). The blocking
@@ -453,14 +519,38 @@ export function batchTools(ctx) {
             ...frame,
           }
         }
-        const machineId = args.machine_id || job?.machine_id || undefined
-        const target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
+        // Remote-side channel mirrors the submit matrix: an in-cluster LSF job
+        // (no machine in the job file) polls locally — bjobs and the progress
+        // files live on this host's shared filesystem; everything else polls
+        // over ssh on the job's machine.
+        const settings = readSettingsFor(runDir)
+        const inCluster = (job?.cluster_env ?? settings.cluster_env) === 'in-cluster'
+        const sshExec = scheduler === 'ssh' || !inCluster
+        let target
+        if (!sshExec) {
+          const root = String(args.remote_root || job?.remote_root || '').trim().replace(/\\/g, '/')
+          if (!root || !root.startsWith('/')) {
+            throw new Error('remote_root is required (the absolute shared-filesystem root — pass it or re-submit so the job file records it)')
+          }
+          target = { alias: null, remoteRoot: root }
+        } else {
+          const machineId = args.machine_id || job?.machine_id || undefined
+          target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
+        }
+        const channel = {
+          exec: sshExec
+            ? (cmd, opts) => execRemote(ctx, target.alias, cmd, opts)
+            : (cmd, opts) => execLocal(ctx, cmd, opts),
+          download: !inCluster
+            ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath)
+            : localCopy,
+        }
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const command = pollCommand({ remoteDir, jobId, scheduler })
         let parsed
         let stdout = ''
         for (;;) {
-          const r = await execRemote(ctx, target.alias, command, { timeoutMs: 30_000 })
+          const r = await channel.exec(command, { timeoutMs: 30_000 })
           if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
           parsed = parsePollOutput(r.stdout, { total: job?.total_points })
           stdout = r.stdout || ''
@@ -473,13 +563,13 @@ export function batchTools(ctx) {
         // straight down per file (existence probed once, no archive).
         const fetched = []
         if (TERMINAL_POLL_STATES.has(parsed.state)) {
-          const probe = await execRemote(ctx, target.alias,
+          const probe = await channel.exec(
             `cd ${shq(remoteDir)} && ls -1 ${AUTO_FETCH_FILES.map(shq).join(' ')} 2>/dev/null`,
             { timeoutMs: 30_000 })
           if (probe.ok) {
             for (const name of String(probe.stdout || '').split(/\r?\n/).map((s) => s.trim())) {
               if (!AUTO_FETCH_FILES.includes(name)) continue
-              const dl = await downloadFile(ctx, target.alias, remoteJoin(remoteDir, name), path.join(runDir, name))
+              const dl = await channel.download(remoteJoin(remoteDir, name), path.join(runDir, name))
               if (dl.ok) fetched.push(name)
             }
           }

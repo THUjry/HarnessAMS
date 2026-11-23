@@ -1,14 +1,19 @@
 // Generic remote batch tools: machine resolution, upload/submit/poll against
 // a mocked @linxin666/dsh-ssh tool shell (structured values, no network, no SSH, no
-// LSF required). The scheduler=direct path is the node-local foreground mode (no
-// bsub). The worker-script upload tree comes from the project's
+// LSF required). The scheduler=ssh path is the foreground mode (no bsub). The
+// channel matrix follows the project's cluster_env (D-002): out-of-cluster (the
+// default for bare temp dirs) keeps every operation over the mocked ssh shell;
+// in-cluster tests plant a .harnessams project root with cluster_env=in-cluster
+// and a mocked ctx.shell seam — bsub runs "locally" and transfers are plain
+// local copies onto POSIX-shaped paths (drive-resolved on Windows). The
+// worker-script upload tree comes from the project's
 // workspace_config.json workspace.sim_scripts_dir; tests point
 // HARNESSAMS_SIM_SCRIPTS_DIR at a self-built fixture, and the fencing remote root
 // is an explicit remote_root argument (the per-project settings.remote_root —
 // the family remote_machines map is retired), so nothing depends on the real
 // SmartAnaSim checkout or any workspace file.
 // The ssh_exec wrapping (timeout -s KILL) and the value shapes live in
-// remote.test.mjs / server.test.mjs; submit/direct idempotency guards are asserted
+// remote.test.mjs / server.test.mjs; submit/ssh idempotency guards are asserted
 // here against the generated commands.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,7 +23,7 @@ import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { resolveMachine } from '../src/remote.js'
-import { buildDirectCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
+import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
 
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
 
@@ -125,8 +130,8 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
   }
 }
 
-function makeRunDir({ template = 'template.scs', config } = {}) {
-  const dir = tmp('hams-run-')
+function makeRunDir({ template = 'template.scs', config, under } = {}) {
+  const dir = under ? fs.mkdtempSync(path.join(under, 'hams-run-')) : tmp('hams-run-')
   fs.writeFileSync(path.join(dir, template), 'simulator lang=spectre\nparameters SW=@@SW@@\n')
   fs.writeFileSync(path.join(dir, 'sweep_config.json'), JSON.stringify(config || {
     netlist_template: 'template.scs',
@@ -134,6 +139,66 @@ function makeRunDir({ template = 'template.scs', config } = {}) {
     sweep_mode: 'cross_product',
   }))
   return dir
+}
+
+// A planted project root whose workspace_config.json selects the working
+// environment; run dirs created `under` it resolve their settings through the
+// walk-up (readSettingsFor), exactly like a real project.
+function makeProjectRoot(clusterEnv = 'in-cluster') {
+  const root = tmp('hams-proj-')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      cluster_env: clusterEnv, run_mode: 'local', machine_id: null, remote_root: null,
+      remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+      compute_script_local: 'python', compute_script_remote: 'python',
+    },
+  }, null, 2))
+  return root
+}
+
+// A mocked ctx.shell seam (the in-cluster local executor): records every
+// command and answers the same probe shapes the ssh mock does. Any ssh tool
+// call throws — in-cluster paths must never touch dsh-ssh.
+function makeShellCtx({ existing = 0, poll = null } = {}) {
+  const commands = []
+  const okExec = (stdout) => ({
+    exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 30_000,
+    stdout: { text: stdout, truncated: false }, stderr: { text: '', truncated: false },
+  })
+  return {
+    commands,
+    shell: {
+      resolve: (req) => ({ onExpiry: 'kill', stdoutMaxBytes: 1 << 20, ...req, workdir: req.workdir || process.cwd() }),
+      execute: async (spec) => {
+        const cmd = String(spec.command)
+        commands.push(cmd)
+        let stdout = ''
+        if (cmd.includes('__BJOB__')) stdout = poll ? pollValue(poll).stdout : '__BJOB__\n777 RUN\n__META__\n2\n__DIRS__\n2\n__PROG__\n'
+        else if (cmd.includes('wc -l')) stdout = `${existing}\n`
+        else if (cmd.includes('bsub -q')) stdout = 'Job <777> is submitted to queue <normal>.\n'
+        else if (cmd.includes('sleep 1; bjobs')) stdout = '777 RUN\n__STARTED__\n'
+        else if (cmd.includes('ls -1') && cmd.includes('sweep_progress.json')) stdout = 'sweep_progress.json\n'
+        return {
+          status: 'completed', exitCode: 0, signal: null, done: Promise.resolve(),
+          readOutput: () => ({ delta: '', lossy: false }), kill: () => false,
+          result: async () => okExec(stdout),
+        }
+      },
+    },
+    tools: {
+      get: () => undefined,
+      execute: async () => { throw new Error('in-cluster paths must not touch the ssh tools') },
+    },
+  }
+}
+
+// A POSIX-shaped "shared filesystem" root unique per call: on Windows Node
+// resolves /x against the current drive, so the copies land on a real,
+// cleanup-safe path either way.
+function makeSharedRoot() {
+  return `/hams_ic_${process.pid}_${Date.now()}`
 }
 
 function tool(ctx, name) {
@@ -185,7 +250,7 @@ test('path guards and poll parsing', () => {
   assert.equal(spliced.errlog_tail, null)
 })
 
-test('submit/direct commands carry the replay idempotency guards', () => {
+test('submit/ssh commands carry the replay idempotency guards (and bsub -m)', () => {
   const submit = buildSubmitCommand({
     remoteDir: '/home/op/sim/batch1', python: 'python3',
     workerPath: '/root/.harnessams/scripts/spectre/spectre_sweep_worker.py', workerArgs: [],
@@ -195,14 +260,27 @@ test('submit/direct commands carry the replay idempotency guards', () => {
   assert.ok(submit.includes('flock 9'), 'flock serializes concurrent first attempts')
   assert.ok(submit.includes('| tee .hams_submitted'), 'marker written with the bsub output')
   assert.ok(submit.includes('"$rc" -eq 0'), 'marker only written when bsub exits 0')
+  assert.ok(!submit.includes('-m'), 'no host pin without lsf_node')
 
-  const direct = buildDirectCommand({
+  // lsf_node pins the job (bsub -m "<node>"): single host or host list
+  const pinned = buildSubmitCommand({
+    remoteDir: '/home/op/sim/batch1', python: 'python3',
+    workerPath: '/w/spectre_sweep_worker.py', workerArgs: [], node: 'node2',
+  })
+  assert.match(pinned, /-m "node2"/)
+  const pinnedList = buildSubmitCommand({
+    remoteDir: '/home/op/sim/batch1', python: 'python3',
+    workerPath: '/w/spectre_sweep_worker.py', workerArgs: [], node: 'node2 node3',
+  })
+  assert.match(pinnedList, /-m "node2 node3"/)
+
+  const ssh = buildSshCommand({
     remoteDir: '/home/op/sim/fore', python: 'python3',
     workerPath: '/root/.harnessams/scripts/spectre/spectre_sweep_worker.py', workerArgs: [],
   })
-  assert.ok((direct.match(/\.hams_direct_done/g) ?? []).length >= 3, 'done marker checked twice + touched')
-  assert.ok(direct.includes('flock 9'), 'direct also serializes replays behind a live run')
-  assert.ok(direct.includes('&& touch .hams_direct_done'), 'marker written only on worker success')
+  assert.ok((ssh.match(/\.hams_ssh_done/g) ?? []).length >= 3, 'done marker checked twice + touched')
+  assert.ok(ssh.includes('flock 9'), 'ssh also serializes replays behind a live run')
+  assert.ok(ssh.includes('&& touch .hams_ssh_done'), 'marker written only on worker success')
   assert.ok(!submit.includes('rm -f .hams_submitted'), 'plain submit never clears markers')
 
   // overwrite=true (2026-11-23): a finished batch re-runs — stale markers are
@@ -212,16 +290,16 @@ test('submit/direct commands carry the replay idempotency guards', () => {
     remoteDir: '/home/op/sim/batch1', python: 'python3',
     workerPath: '/w/spectre_sweep_worker.py', workerArgs: [], overwrite: true,
   })
-  assert.match(ow, /rm -f \.hams_submitted \.hams_direct_done/, 'stale markers cleared')
+  assert.match(ow, /rm -f \.hams_submitted \.hams_ssh_done/, 'stale markers cleared')
   assert.match(ow, /grep -q "\^#hams-overwrite" \.hams_submitted/, 'a tagged fresh marker still short-circuits')
   assert.match(ow, /#hams-overwrite\\n' "\$out"/, 'the marker this run writes is tagged')
 
-  const owDirect = buildDirectCommand({
+  const owSsh = buildSshCommand({
     remoteDir: '/home/op/sim/fore', python: 'python3',
     workerPath: '/w/spectre_sweep_worker.py', workerArgs: [], overwrite: true,
   })
-  assert.match(owDirect, /rm -f \.hams_submitted \.hams_direct_done/, 'direct clears both markers too')
-  assert.match(owDirect, /#hams-overwrite\\n' > \.hams_direct_done/, 'the done marker is tagged')
+  assert.match(owSsh, /rm -f \.hams_submitted \.hams_ssh_done/, 'ssh clears both markers too')
+  assert.match(owSsh, /#hams-overwrite\\n' > \.hams_ssh_done/, 'the done marker is tagged')
 })
 
 test('batch_submit uploads the worker scripts tree and run files, then records the job', async () => {
@@ -281,7 +359,7 @@ test('batch_submit rejects a worker outside the scripts root with guidance', asy
   }
 })
 
-test('batch_submit scheduler=direct runs the worker directly on the host (no bsub)', async () => {
+test('batch_submit scheduler=ssh runs the worker directly on the target host (no bsub)', async () => {
   const run = makeRunDir()
   try {
     const ctx = makeCtx()
@@ -291,30 +369,37 @@ test('batch_submit scheduler=direct runs the worker directly on the host (no bsu
       machine_id: 'node1',
       remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
-      scheduler: 'direct',
+      scheduler: 'ssh',
     }, {})
     assert.equal(res.ok, true, JSON.stringify(res))
-    assert.equal(res.scheduler, 'direct')
+    assert.equal(res.scheduler, 'ssh')
     assert.equal(res.state, 'completed')
 
     const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
-    assert.equal(job.scheduler, 'direct')
+    assert.equal(job.scheduler, 'ssh')
     assert.equal(job.queue, null)
-    assert.match(job.job_id, /^direct-/)
+    assert.equal(job.cluster_env, 'out-of-cluster')
+    assert.match(job.job_id, /^ssh-/)
     assert.equal(job.remote_dir, '/home/op/sim/fore')
 
     const commands = ctx.calls.filter((c) => c.name === 'ssh_exec')
       .map((c) => String(c.arguments.command).replace(/\\"/g, '"'))
-    const direct = commands.find((c) => c.includes('spectre_sweep_worker.py'))
-    assert.ok(direct, 'direct worker command sent')
-    assert.match(direct, /"--work-dir" "\/home\/op\/sim\/fore"/)
-    assert.ok(direct.includes('.hams_direct_done'), 'direct carries the done-marker guard')
+    const ssh = commands.find((c) => c.includes('spectre_sweep_worker.py'))
+    assert.ok(ssh, 'ssh worker command sent')
+    assert.match(ssh, /"--work-dir" "\/home\/op\/sim\/fore"/)
+    assert.ok(ssh.includes('.hams_ssh_done'), 'ssh run carries the done-marker guard')
   } finally {
     restoreEnv()
   }
 })
 
-test('scheduler=local: detached worker + local poll, zero ssh', async () => {
+test('scheduler=local: detached worker + local poll, zero ssh (in-cluster project)', async () => {
+  // out-of-cluster (a bare temp run dir, no .harnessams walk-up hit) rejects
+  // scheduler=local up front — the host cannot run the worker
+  await assert.rejects(() => tool(makeCtx(), 'batch_submit').execute({
+    run_dir: makeRunDir(), worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local',
+  }, {}), /requires cluster_env=in-cluster/)
+
   // a runnable fake worker under a private scripts root (the shared fixture
   // tree is a stub whose upload manifest is pinned by another test)
   const scriptsRoot = tmp('hams-local-')
@@ -329,7 +414,8 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
     'os.replace(tmp, os.path.join(wd, "sweep_progress.json"))',
   ].join('\n'))
   process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
-  const run = makeRunDir()
+  const proj = makeProjectRoot('in-cluster')
+  const run = makeRunDir({ under: proj })
   try {
     const ctx = makeCtx()
     const res = await tool(ctx, 'batch_submit').execute({
@@ -368,7 +454,7 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
       'print("fake worker: unrecognized arguments --nope", file=sys.stderr)',
       'sys.exit(3)',
     ].join('\n'))
-    const crashRun = makeRunDir()
+    const crashRun = makeRunDir({ under: proj })
     await tool(ctx, 'batch_submit').execute({ run_dir: crashRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' }, {})
     const crashed = await tool(ctx, 'batch_poll').execute({ run_dir: crashRun, wait_sec: 3 }, {})
     assert.equal(crashed.state, 'failed')
@@ -384,7 +470,7 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
       'with open(tmp, "w") as f: json.dump(prog, f)',
       'os.replace(tmp, os.path.join(wd, "sweep_progress.json"))',
     ].join('\n'))
-    const midRun = makeRunDir()
+    const midRun = makeRunDir({ under: proj })
     await tool(ctx, 'batch_submit').execute({ run_dir: midRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' }, {})
     const died = await tool(ctx, 'batch_poll').execute({ run_dir: midRun, wait_sec: 3 }, {})
     assert.equal(died.state, 'failed')
@@ -397,7 +483,7 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
     fs.mkdirSync(path.join(otherRoot, 'spectre'), { recursive: true })
     fs.writeFileSync(path.join(otherRoot, 'spectre', 'spectre_sweep_worker.py'), 'import sys; sys.exit(0)\n')
     const override = await tool(ctx, 'batch_submit').execute({
-      run_dir: makeRunDir(), worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local', sim_scripts_dir: otherRoot,
+      run_dir: makeRunDir({ under: proj }), worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local', sim_scripts_dir: otherRoot,
     }, {})
     assert.equal(override.ok, true, JSON.stringify(override))
     const overrideJob = JSON.parse(fs.readFileSync(override.job_file, 'utf8'))
@@ -408,7 +494,7 @@ test('scheduler=local: detached worker + local poll, zero ssh', async () => {
     const savedPath = process.env.PATH
     process.env.PATH = tmp('hams-local-nopath-')
     try {
-      const noPythonRun = makeRunDir()
+      const noPythonRun = makeRunDir({ under: proj })
       await assert.rejects(
         () => tool(ctx, 'batch_submit').execute({ run_dir: noPythonRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' }, {}),
         /cannot start the local worker/)
@@ -649,4 +735,144 @@ test('nextSimDir: Sim<N>_<date>_batch<M> naming rules (2026-11-21 convention)', 
   // same highest index across days: its latest batch still governs
   assert.equal(nextSimDir(['Sim1_20260805_batch4', 'Sim1_20261120_batch2'], '20261121'),
     'Sim2_20261121_batch1')
+})
+
+test('in-cluster LSF (D-002): bsub through ctx.shell, transfers are local copies, no ssh', async () => {
+  const proj = makeProjectRoot('in-cluster')
+  const shared = makeSharedRoot()
+  const localShared = path.resolve(shared)
+  try {
+    const ctx = makeShellCtx()
+    const run = makeRunDir({ under: proj })
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run,
+      remote_dir: 'batch1',
+      remote_root: shared,
+      worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.job_id, '777')
+    assert.equal(res.state, 'running')
+
+    const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
+    assert.equal(job.scheduler, 'lsf')
+    assert.equal(job.cluster_env, 'in-cluster')
+    assert.equal(job.machine_id, null, 'in-cluster LSF needs no machine')
+
+    // bsub ran through the local shell seam, without a host pin
+    const bsub = ctx.commands.find((c) => c.includes('bsub -q'))
+    assert.ok(bsub, 'local bsub command issued')
+    assert.ok(!bsub.includes('-m '), 'no bsub -m without lsf_node')
+    assert.ok(bsub.includes(`"--work-dir" "${shared}/batch1"`), bsub)
+
+    // "transfers" landed as plain local copies on the shared root: run files
+    // and the synced scripts tree (drive-resolved on Windows)
+    assert.ok(fs.existsSync(path.join(localShared, 'batch1', 'template.scs')))
+    assert.ok(fs.existsSync(path.join(localShared, 'batch1', 'sweep_config.json')))
+    assert.ok(fs.existsSync(path.join(localShared, '.harnessams', 'scripts', 'spectre', 'spectre_sweep_worker.py')))
+  } finally {
+    fs.rmSync(localShared, { recursive: true, force: true })
+    restoreEnv()
+  }
+})
+
+test('lsf_node pins bsub -m and validates its token shape', async () => {
+  const proj = makeProjectRoot('in-cluster')
+  const shared = makeSharedRoot()
+  const localShared = path.resolve(shared)
+  try {
+    const ctx = makeShellCtx()
+    const run = makeRunDir({ under: proj })
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run,
+      remote_dir: 'batch1',
+      remote_root: shared,
+      worker: 'spectre/spectre_sweep_worker.py',
+      lsf_node: 'node2',
+    }, {})
+    assert.equal(res.ok, true, JSON.stringify(res))
+    const bsub = ctx.commands.find((c) => c.includes('bsub -q'))
+    assert.match(bsub, /-m "node2"/)
+    const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
+    assert.equal(job.lsf_node, 'node2')
+
+    // shell metacharacters are refused; the pin applies to lsf only
+    await assert.rejects(() => tool(makeShellCtx(), 'batch_submit').execute({
+      run_dir: makeRunDir({ under: proj }), remote_dir: 'b2', remote_root: shared,
+      worker: 'spectre/spectre_sweep_worker.py', lsf_node: 'a;b',
+    }, {}), /invalid lsf_node/)
+    await assert.rejects(() => tool(makeCtx(), 'batch_submit').execute({
+      run_dir: makeRunDir({ under: proj }), remote_dir: 'b3', remote_root: '/home/op/sim',
+      machine_id: 'node1', worker: 'spectre/spectre_sweep_worker.py',
+      scheduler: 'ssh', lsf_node: 'node2',
+    }, {}), /lsf_node applies to scheduler="lsf" only/)
+  } finally {
+    fs.rmSync(localShared, { recursive: true, force: true })
+    restoreEnv()
+  }
+})
+
+test('in-cluster LSF poll (D-002): reads bjobs and fetches results locally', async () => {
+  const proj = makeProjectRoot('in-cluster')
+  const shared = makeSharedRoot()
+  const localShared = path.resolve(shared)
+  try {
+    const run = makeRunDir({ under: proj })
+    fs.mkdirSync(path.join(localShared, 'batch1'), { recursive: true })
+    fs.writeFileSync(path.join(localShared, 'batch1', 'sweep_progress.json'),
+      JSON.stringify({ status: 'completed', total_points: 2, completed: 2, succeeded: 2, failed: 0 }))
+    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
+      machine_id: null, remote_root: shared, remote_dir: shared + '/batch1', job_id: '777',
+      scheduler: 'lsf', cluster_env: 'in-cluster', total_points: 2,
+    }))
+    const ctx = makeShellCtx({ poll: { meta: 2, total: 2 } })
+    const res = await tool(ctx, 'batch_poll').execute({ run_dir: run }, {})
+    assert.equal(res.ok, true)
+    assert.equal(res.state, 'completed')
+    assert.equal(res.completed, 2)
+    assert.equal(res.scheduler, 'lsf')
+    assert.ok(ctx.commands.some((c) => c.includes('bjobs')), 'bjobs ran through the local seam')
+    // terminal auto-fetch = a plain local copy into the run dir
+    assert.deepEqual(res.fetched, ['sweep_progress.json'])
+    assert.ok(fs.existsSync(path.join(run, 'sweep_progress.json')))
+  } finally {
+    fs.rmSync(localShared, { recursive: true, force: true })
+    restoreEnv()
+  }
+})
+
+test('in-cluster scheduler=ssh (D-002): exec over ssh, staging stays a local copy', async () => {
+  const proj = makeProjectRoot('in-cluster')
+  const shared = makeSharedRoot()
+  const localShared = path.resolve(shared)
+  try {
+    const ctx = makeCtx()
+    const run = makeRunDir({ under: proj })
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run,
+      remote_dir: 'fore',
+      machine_id: 'node1',
+      remote_root: shared,
+      worker: 'spectre/spectre_sweep_worker.py',
+      scheduler: 'ssh',
+    }, {})
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.scheduler, 'ssh')
+    assert.equal(res.state, 'completed')
+
+    const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
+    assert.equal(job.cluster_env, 'in-cluster')
+    assert.equal(job.machine_id, 'node1')
+
+    // the run crossed ssh (worker command), but NO sftp: staging was a local copy
+    const sshCalls = ctx.calls.filter((c) => c.name === 'ssh_exec')
+      .map((c) => String(c.arguments.command).replace(/\\"/g, '"'))
+    assert.ok(sshCalls.some((c) => c.includes('spectre_sweep_worker.py') && c.includes('.hams_ssh_done')),
+      'ssh worker command sent with the done-marker guard')
+    assert.equal(ctx.calls.filter((c) => c.name === 'ssh_upload').length, 0, 'in-cluster ssh stages no sftp upload')
+    assert.ok(fs.existsSync(path.join(localShared, 'fore', 'template.scs')), 'staging landed on the shared root')
+  } finally {
+    fs.rmSync(localShared, { recursive: true, force: true })
+    restoreEnv()
+  }
 })

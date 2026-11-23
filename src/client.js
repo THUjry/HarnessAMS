@@ -68,7 +68,7 @@ window.__ModuleLoader__.load({
         'guide.s1t': '工作方式：本地还是远程',
         'guide.s1': '本地 — spectre 本地闭环（SmartAnaSim 装配/检查＋batch_submit 本机后台扫批＋脚本解析＋报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置；本页「机器」卡展示各别名，远端根路径是各项目自己的设置（项目总览设置表「远端根路径」行）。',
         'guide.s2t': '提交作业方式',
-        'guide.s2': '统一走 batch_submit：本地 — worker 在本机后台运行（scheduler="local"）；batch — 经 dsh-ssh 提交到目标机（scheduler="lsf" 进 LSF 队列、"direct" 目标机前台）。进度与取回用 batch_poll（完成时自动拉回 sweep_progress.json 与 errlog.txt）。',
+        'guide.s2': '统一走 batch_submit，调度语义随工作环境（总览页拨杆）：集群内 — local 本机后台运行、ssh 到其他节点运行、lsf 本机直接 bsub（共享文件系统，文件不经 ssh）；集群外 — local 不可用、ssh 在 ssh 节点运行（第二跳走 dsh-ssh 代理配置）、lsf 先经 dsh-ssh 到集群再 bsub。进度与取回用 batch_poll（完成时自动拉回 sweep_progress.json 与 errlog.txt）。',
         'guide.s2slurm': 'slurm —— 暂不支持。',
         'guide.s3t': '工作区位置',
         'guide.s3': '配置＝各工作区自己的 .harnessams/workspace_config.json 单文件（运行设置含远端根路径、脚本目录、plotly、回收站）。远程 — 路径即远端真实路径（dsh-ssh 按别名直达，无本地镜像）。',
@@ -173,11 +173,19 @@ window.__ModuleLoader__.load({
         'pset.colName': '项目名',
         'pset.colValue': '当前值',
         'pset.colMode': '工作模式',
-        'pset.colMachine': '远程机器',
+        'pset.colMachine': '远程节点（本次验证用）',
         'pset.unsaved': '不一致',
         'pset.confirmBtn': '确认',
         'pset.confirming': '写入中…',
         'pset.stagedHint': '表格有未确认修改（状态列红色）；「确认」写入 workspace_config.json 并同步 AGENTS.md',
+        'pset.envTitle': '工作环境',
+        'pset.envIn': '集群内',
+        'pset.envOut': '集群外',
+        'pset.envHint': '本机是否身处集群共享文件系统；切换需确认',
+        'envc.title': '切换工作环境',
+        'envc.bodyIn': '切换到「集群内」：本机即集群节点（共享文件系统）——local 本机运行、ssh 到其他节点运行、lsf 本机直接 bsub；文件不再经 ssh 传输。',
+        'envc.bodyOut': '切换到「集群外」：远程操作经 dsh-ssh——local 不可用、ssh 在 ssh 节点运行（第二跳走 dsh-ssh 代理配置）、lsf 先 ssh 到集群再 bsub；文件经 ssh 上传/取回。',
+        'envc.ok': '确认切换',
         'pset.colSched': '调度器',
         'pset.colSim': '仿真器',
         'pset.colCompLocal': '本地计算',
@@ -185,7 +193,7 @@ window.__ModuleLoader__.load({
         'pset.mode.local': '本地',
         'pset.mode.remote': '远程',
         'pset.sched.lsf': 'LSF 队列',
-        'pset.sched.direct': '直接运行',
+        'pset.sched.ssh': 'SSH 运行',
         'pset.sim.spectre': 'spectre',
         'pset.sim.none': 'none（免仿真）',
         'pset.comp.python': 'python',
@@ -205,7 +213,7 @@ window.__ModuleLoader__.load({
         'selfchk.noneYet': '尚未运行自检。',
         'selfchk.skipped': '跳过',
         'selfchk.summaryOk': '自检通过',
-        'selfchk.summaryFallback': '通过（远程经直接运行回退）',
+        'selfchk.summaryFallback': '通过（经 SSH 运行回退）',
         'selfchk.summaryFail': '自检失败',
         'selfchk.diagDone': '已创建诊断会话 {id} — 请到左侧会话树查看。',
         'selfchk.diagFail': '创建诊断会话失败：{err}',
@@ -261,7 +269,7 @@ window.__ModuleLoader__.load({
         'guide.s1t': 'Working mode: local or remote',
         'guide.s1': 'Local — the spectre loop runs on this machine (SmartAnaSim assembly/checks + batch_submit local background sweeps + script parsing + report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured in the dsh-ssh plugin; this page\'s “Machines” card lists the aliases, and each remote root is a per-project setting (the “Remote root” row of the project overview settings table).',
         'guide.s2t': 'Job submission',
-        'guide.s2': 'Everything goes through batch_submit: local — the worker runs in the background on this machine (scheduler="local"); batch — submitted to the target host over dsh-ssh (scheduler="lsf" into the LSF queue, "direct" foreground on the host). Monitor and retrieve with batch_poll (a finished batch pulls sweep_progress.json and errlog.txt back automatically).',
+        'guide.s2': 'Everything goes through batch_submit, with scheduler semantics set by the working environment (the overview toggle): in-cluster — local runs in the background on this host, ssh runs on another node, lsf submits bsub locally (shared filesystem; files never cross ssh); out-of-cluster — local is unavailable, ssh runs on the ssh node (a second hop goes through the dsh-ssh proxy config), lsf submits through dsh-ssh. Monitor and retrieve with batch_poll (a finished batch pulls sweep_progress.json and errlog.txt back automatically).',
         'guide.s2slurm': 'slurm — not supported yet.',
         'guide.s3t': 'Workspace location',
         'guide.s3': 'Config = each workspace\'s own single file .harnessams/workspace_config.json (run settings incl. the remote root, script dir, plotly, trash). Remote — paths are the real remote paths (dsh-ssh goes by alias, no local mirror).',
@@ -366,11 +374,19 @@ window.__ModuleLoader__.load({
         'pset.colName': 'Item',
         'pset.colValue': 'Value',
         'pset.colMode': 'Mode',
-        'pset.colMachine': 'Machine',
+        'pset.colMachine': 'Remote node (this run)',
         'pset.unsaved': 'out of sync',
         'pset.confirmBtn': 'Confirm',
         'pset.confirming': 'Writing…',
         'pset.stagedHint': 'The table has unconfirmed edits (red status cells); "Confirm" writes workspace_config.json and syncs AGENTS.md',
+        'pset.envTitle': 'Working environment',
+        'pset.envIn': 'in-cluster',
+        'pset.envOut': 'out-of-cluster',
+        'pset.envHint': 'whether this host sits on the cluster\'s shared filesystem; switching asks first',
+        'envc.title': 'Switch working environment',
+        'envc.bodyIn': 'Switch to in-cluster: this host is itself a cluster node on the shared filesystem — local runs here, ssh runs on another node, lsf submits bsub locally; files never cross ssh.',
+        'envc.bodyOut': 'Switch to out-of-cluster: remote work goes through dsh-ssh — local is unavailable, ssh runs on the ssh node (a second hop goes through the dsh-ssh proxy config), lsf submits through the cluster\'s ssh node; files upload/fetch over ssh.',
+        'envc.ok': 'Switch',
         'pset.colSched': 'Scheduler',
         'pset.colSim': 'Simulator',
         'pset.colCompLocal': 'Local compute',
@@ -378,7 +394,7 @@ window.__ModuleLoader__.load({
         'pset.mode.local': 'local',
         'pset.mode.remote': 'remote',
         'pset.sched.lsf': 'LSF queue',
-        'pset.sched.direct': 'direct',
+        'pset.sched.ssh': 'ssh run',
         'pset.sim.spectre': 'spectre',
         'pset.sim.none': 'none (no simulation)',
         'pset.comp.python': 'python',
@@ -398,7 +414,7 @@ window.__ModuleLoader__.load({
         'selfchk.noneYet': 'No self-check yet.',
         'selfchk.skipped': 'skipped',
         'selfchk.summaryOk': 'self-check passed',
-        'selfchk.summaryFallback': 'passed (remote fell back to the direct run)',
+        'selfchk.summaryFallback': 'passed (remote fell back to the ssh run)',
         'selfchk.summaryFail': 'self-check failed',
         'selfchk.diagDone': 'Diagnosis session {id} created — see the session tree.',
         'selfchk.diagFail': 'Failed to create a diagnosis session: {err}',
@@ -1419,7 +1435,7 @@ window.__ModuleLoader__.load({
       // remote-root line above the table (browse-only — no free-typed paths)
       { id: 'scheduler', labelKey: 'pset.colSched', column: 'scheduler',
         visible: (s) => s.run_mode === 'remote' && s.simulator === 'spectre',
-        options: [['lsf', 'pset.sched.lsf'], ['direct', 'pset.sched.direct']] },
+        options: [['lsf', 'pset.sched.lsf'], ['ssh', 'pset.sched.ssh']] },
       { id: 'simulator', labelKey: 'pset.colSim', column: 'simulator',
         options: [['spectre', 'pset.sim.spectre'], ['none', 'pset.sim.none']] },
       { id: 'compute_script_local', labelKey: 'pset.colCompLocal', column: 'compute_local',
@@ -1430,7 +1446,7 @@ window.__ModuleLoader__.load({
     ]
 
     // Aggregate one settings column from the run's step stream: any failure →
-    // bad, else any warn (e.g. the LSF→direct fallback) → warn, all-skip → skip.
+    // bad, else any warn (e.g. the LSF→ssh fallback) → warn, all-skip → skip.
     function selfcheckColumnResult(run, column) {
       if (!run) return null
       const steps = (run.steps ?? []).filter((s) => s && s.settingColumn === column && s.ms != null)
@@ -1546,6 +1562,7 @@ window.__ModuleLoader__.load({
       const [envRun, setEnvRun] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.envRun : null))
       const [saveState, setSaveState] = useState(null) // {status:'running'|'done'|'failed', path?, error?}
       const [browseOpen, setBrowseOpen] = useState(false)
+      const [envDialog, setEnvDialog] = useState(null) // pending cluster_env switch awaiting its confirm dialog
       const [checkAllPending, setCheckAllPending] = useState(false) // auto-save once the check-all run lands
       const [stopping, setStopping] = useState(false) // a stop request is in flight / awaiting the status flip
       const machines = info?.machines ?? []
@@ -1731,6 +1748,25 @@ window.__ModuleLoader__.load({
         void saveAgents()
       }, [checkAllPending, run?.status])
 
+      // Working-environment switch (cluster_env, D-002): the toggle opens a
+      // confirm dialog first; the write rides the SAVED settings (not the
+      // staged draft) so an unconfirmed table edit never sneaks along, and
+      // save_agentsmd re-renders the AGENTS.md workflow for the new
+      // environment in the same call.
+      const commitEnv = async (next) => {
+        setEnvDialog(null)
+        const base = { ...(lastServerRef.current ?? draft ?? {}), cluster_env: next }
+        setSaveState({ status: 'running' })
+        try {
+          const r = await callToolRoute({ sessionId, action: 'save_agentsmd', lang: effectiveLang(), settings: base })
+          setDraft((prev) => (prev ? { ...prev, cluster_env: next } : prev))
+          refetchSettings()
+          setSaveState({ status: 'done', path: r.path })
+        } catch (e) {
+          setSaveState({ status: 'failed', error: String(e.message ?? e) })
+        }
+      }
+
       const remote = draft?.run_mode === 'remote'
       const machine = machines.find((m) => m.id === draft?.machine_id) ?? null
       const root = String(draft?.remote_root ?? '').replace(/\/+$/, '')
@@ -1747,6 +1783,16 @@ window.__ModuleLoader__.load({
         settingsError && h('div', { className: 'hams-err' }, txt(settingsError)),
         !draft && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
         draft && h('div', null,
+          // working environment (cluster_env, D-002): the confirm-gated 0/1
+          // switch — the value only lands after the dialog's "switch" button
+          h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: '0 0 4px' } },
+            h('b', { style: { flexShrink: 0 } }, tr('pset.envTitle')),
+            h('select', { className: 'hams-select', style: { flexShrink: 0 },
+              value: draft.cluster_env === 'in-cluster' ? '1' : '0',
+              onChange: (e) => setEnvDialog(e.target.value === '1' ? 'in-cluster' : 'out-of-cluster') },
+              h('option', { value: '1' }, tr('pset.envIn')),
+              h('option', { value: '0' }, tr('pset.envOut'))),
+            h('span', { className: 'hams-dim' }, tr('pset.envHint'))),
           // remote root (the working-directory row merged in, 2026-11-21):
           // browse-only — the free-typed root input and the separate
           // working-directory concept are both retired; the dim preview shows
@@ -1798,6 +1844,15 @@ window.__ModuleLoader__.load({
             onCancel: () => setBrowseOpen(false),
             onPick: (dir) => { setBrowseOpen(false); if (dir && dir !== draft.remote_root) updateSetting('remote_root', dir) },
           }),
+          envDialog && h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) setEnvDialog(null) } },
+            h('div', { className: 'hams-dialog' },
+              h('h3', null, tr('envc.title')),
+              h('div', { className: 'hams-dim', style: { margin: '0 0 12px' } },
+                txt(tr(envDialog === 'in-cluster' ? 'envc.bodyIn' : 'envc.bodyOut'))),
+              h('div', { className: 'hams-row' },
+                h('button', { className: 'hams-btn', disabled: saving || !sessionId, onClick: () => void commitEnv(envDialog) },
+                  tr('envc.ok')),
+                h('button', { className: 'hams-btn', onClick: () => setEnvDialog(null) }, tr('common.cancel'))))),
           h(SelfcheckSteps, { run }),
           run?.summary && h('div', { className: 'hams-row' },
             run.status === 'cancelled'

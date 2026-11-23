@@ -7,8 +7,9 @@
 //     and hand-edited only; every key still has a runtime default so a missing
 //     or partial section fails open.
 //   settings  — the run settings the Overview table stages + confirms through
-//     the harnessams_selfcheck tool (mode / machine / remote_root / remote_dir /
-//     scheduler / simulator / compute scripts). The remote root now lives HERE
+//     the harnessams_selfcheck tool (working environment / mode / machine /
+//     remote_root / remote_dir / scheduler / simulator / compute scripts). The
+//     remote root now lives HERE
 //     (settings.remote_root), not in a family map — the project is the single
 //     authority, so UI / config file / AGENTS.md can never disagree.
 // Per-session check params are NOT here (D-005: sessions.json carries the
@@ -23,8 +24,9 @@ const STORE_DIR = '.harnessams'
 const CONFIG_FILE = 'workspace_config.json'
 
 const ENUMS = {
+  cluster_env: ['in-cluster', 'out-of-cluster'],
   run_mode: ['local', 'remote'],
-  scheduler: ['lsf', 'direct'],
+  scheduler: ['lsf', 'ssh'],
   simulator: ['spectre', 'none'],
   compute_script_local: ['python', 'js'],
   compute_script_remote: ['python', 'js'],
@@ -32,6 +34,7 @@ const ENUMS = {
 
 export function defaultSettings() {
   return {
+    cluster_env: 'out-of-cluster',
     run_mode: 'local',
     machine_id: null,
     remote_root: null,
@@ -117,8 +120,6 @@ function parseConfig(raw) {
         if (typeof v === 'string' && v.trim()) settings.remote_root = v.trim().replace(/\\/g, '/')
       } else if (k === 'remote_dir') {
         if (typeof v === 'string' && v.trim()) settings.remote_dir = v.trim().replace(/\\/g, '/')
-      } else if (k === 'scheduler' && v === 'none') {
-        settings.scheduler = 'direct' // 'none' is not a valid scheduler; treat it as direct
       } else if (ENUMS[k] && ENUMS[k].includes(v)) {
         settings[k] = v
       }
@@ -155,6 +156,19 @@ export async function readSettings(workspacePath) {
   return { settings: config.settings }
 }
 
+// Settings for an ANCHOR path inside the project (the batch tools' run_dir):
+// the project root is the nearest ancestor with a .harnessams store; no store
+// or a corrupt file = the defaults (out-of-cluster, the conservative channel).
+// Sync — the batch submit/poll call sites are synchronous setup.
+export function readSettingsFor(anchor = process.cwd()) {
+  const base = findProjectRoot(anchor) ?? path.resolve(String(anchor ?? '.'))
+  try {
+    return readConfigSync(base).config.settings
+  } catch {
+    return defaultSettings()
+  }
+}
+
 // Resolve the workspace section's path keys against the project root (relative
 // values like ".harnessams/trash" are project-relative by design). The root is
 // the nearest ancestor of `anchor` holding a .harnessams store; with no store
@@ -179,8 +193,9 @@ export function resolveWorkspacePaths(anchor = process.cwd()) {
 
 // Validate a full settings object (tool `settings` param / staged table
 // confirm). remote_root: absolute POSIX path fencing remote_dir (resolveRemoteDir
-// re-fences at use time); ".." rejected here. remote mode requires machine_id
-// AND remote_root.
+// re-fences at use time); ".." rejected here. remote mode requires remote_root
+// always and machine_id unless in-cluster LSF is the only remote channel;
+// out-of-cluster forbids local spectre (the host cannot run it).
 export function validateSettings(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { error: 'settings must be an object' }
@@ -212,8 +227,14 @@ export function validateSettings(input) {
     }
   }
   if (out.run_mode === 'remote') {
-    if (!out.machine_id) return { error: 'run_mode=remote requires machine_id (pick a dsh-ssh host alias)' }
+    const sshlessLsf = out.cluster_env === 'in-cluster' && out.scheduler !== 'ssh'
+    if (!sshlessLsf && !out.machine_id) {
+      return { error: 'run_mode=remote requires machine_id unless in-cluster LSF is the only remote channel (pick a dsh-ssh host alias)' }
+    }
     if (!out.remote_root) return { error: 'run_mode=remote requires remote_root (the absolute remote path that fences remote_dir)' }
+  }
+  if (out.cluster_env === 'out-of-cluster' && out.run_mode === 'local' && out.simulator === 'spectre') {
+    return { error: 'run_mode=local with simulator=spectre requires cluster_env=in-cluster (the DSH host itself must run spectre)' }
   }
   return { settings: out }
 }

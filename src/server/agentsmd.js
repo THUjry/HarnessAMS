@@ -18,15 +18,18 @@
 //   - plugin writes are external writes (no watcher): the block enters context
 //     on the next session or after the next first-party fs call, as an
 //     appended instruction delta — prefix cache intact.
-// The yaml is pure English by ruling, single-level (no nested sections, no
-// machines registry facts — 2026-11-19), and mirrors workspace_config.json:
-// UI table = config file = AGENTS.md by construction (the same tool writes
-// both). The .harnessams pointer paragraph rides BOTH the template and the
-// values build, so it always tells the agent where the real state lives.
+// The yaml is pure English by ruling, single-level (no nested sections; the
+// retired family remote_machines registry stays out — the one node-ish fact
+// that rides along is the flat other_nodes name list, D-002) and mirrors
+// workspace_config.json: UI table = config file = AGENTS.md by construction
+// (the same tool writes both). The .harnessams pointer paragraph rides BOTH
+// the template and the values build, so it always tells the agent where the
+// real state lives.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { localEnvFacts } from './checks.js'
-import { workflowSection } from './selfcheckWorkflow.js'
+import { envStatement, workflowSection } from './selfcheckWorkflow.js'
+import { listMachines } from '../remote.js'
 
 const BEGIN = '<!-- hams-config:begin (HarnessAMS plugin-managed block; the harnessams_selfcheck tool overwrites it — keep edits outside the markers) -->'
 const END = '<!-- hams-config:end -->'
@@ -49,16 +52,21 @@ const q = (v) => JSON.stringify(String(v))
 const scalar = (v) => (v === null || v === undefined ? 'null' : q(v))
 
 // Single-level projection: meta + workspace root + the settings mirror + local
-// env facts + the latest finished self-check verdict.
-function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
+// env facts + the latest finished self-check verdict. remote_node is the node
+// THIS verification ran against (settings.machine_id — in-cluster LSF-only
+// projects carry none); other_nodes lists the remaining dsh-ssh aliases (D-002:
+// connectivity is dsh-ssh's business, no probing here).
+function yamlLines({ syncedAt, workspaceRoot, settings, env, run, otherNodes }) {
   const s = settings ?? {}
   const lines = ['hams_project_config:']
   const row = (k, v) => lines.push(`  ${k}: ${scalar(v)}`)
   row('synced_at', syncedAt ?? '')
   row('synced_by', 'dsh-harnessams')
   row('workspace_root', workspaceRoot ?? '')
+  row('cluster_env', s.cluster_env)
   row('run_mode', s.run_mode)
-  row('machine', s.machine_id)
+  row('remote_node', s.machine_id)
+  row('other_nodes', otherNodes ?? null)
   row('scheduler', s.scheduler)
   row('simulator', s.simulator)
   row('compute_local', s.compute_script_local)
@@ -85,9 +93,13 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
 function buildSection(facts, { withInstruction = false } = {}) {
   const parts = [BEGIN, HEADER, '', POINTER]
   if (withInstruction) parts.push('', INSTRUCTION)
-  // values builds carry settings, so they also carry the workflow branch that
-  // matches them; the first-fill template (no settings) renders no workflow
-  if (facts.settings) parts.push('', workflowSection(facts.settings))
+  // values builds carry settings, so they also carry the working-environment
+  // statement (D-002, "This is an in-cluster / out-of-cluster project") and
+  // the workflow branch that matches them; the first-fill template (no
+  // settings) renders neither
+  if (facts.settings) {
+    parts.push('', envStatement(facts.settings), '', workflowSection(facts.settings))
+  }
   parts.push('', '```yaml', yamlLines(facts).join('\n'), '```', END)
   return parts.join('\n')
 }
@@ -162,12 +174,24 @@ export async function syncAgentsMd(ctx, { project, settings }) {
     if (!project?.path) return { error: 'project.path is required' }
     const env = await localEnvFacts()
     const run = await latestSelfcheckRun(project.path)
+    // Other usable nodes (D-002): the dsh-ssh host list minus the primary —
+    // connectivity is dsh-ssh's business, no probing here (user ruling
+    // 2026-11-23). Fail-open: no list / no registry -> the row stays null.
+    let otherNodes = null
+    if (ctx?.tools?.get?.('ssh_list')) {
+      const list = await listMachines(ctx).catch(() => null)
+      if (list?.ok) {
+        const rest = list.machines.map((m) => m.id).filter((id) => id && id !== settings?.machine_id)
+        if (rest.length) otherNodes = rest.join(', ')
+      }
+    }
     const section = buildSection({
       syncedAt: new Date().toISOString(),
       workspaceRoot: project.path,
       settings,
       env,
       run,
+      otherNodes,
     })
     const file = agentsMdPath(project.path)
     const existing = await fsp.readFile(file, 'utf8').catch((e) => (e.code === 'ENOENT' ? null : Promise.reject(e)))

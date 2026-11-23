@@ -1,7 +1,10 @@
 // Generic remote batch channel: submit a worker through LSF (bsub), or run the
-// same worker directly on the remote login host (scheduler=direct, node-local
-// foreground). Both paths upload one run directory plus the suite's worker
-// scripts and record the same job file for batch_poll.
+// same worker on a node over ssh (scheduler=ssh, foreground). Out-of-cluster
+// both paths upload one run directory plus the suite's worker scripts over
+// dsh-ssh; in-cluster the uploads are local copies on the shared filesystem
+// and in-cluster LSF submits locally (the channel matrix lives in
+// tools/batch.js, the environment ruling in docs/decisions.md D-002). Both
+// paths record the same job file for batch_poll.
 //
 // This layer knows nothing about a simulator: it uploads a run directory plus
 // the suite's worker scripts, submits a worker script through bsub, and polls
@@ -202,18 +205,19 @@ export function nextSimDir(names, today) {
 // so a failed submit stays retryable.
 //
 // overwrite=true replaces a batch that already ran here (2026-11-23): the
-// stale replay markers (.hams_submitted / .hams_direct_done) are cleared under
+// stale replay markers (.hams_submitted / .hams_ssh_done) are cleared under
 // the flock so the run actually re-runs, and the fresh marker this attempt
 // writes carries a "#hams-overwrite" tag — a REPLAY of the same overwrite call
 // sees the tag and still short-circuits instead of double-submitting. An
 // untagged marker is by definition stale under overwrite (it predates this
 // call). parseJobId/parsePollOutput ignore the extra tag line.
-export function buildSubmitCommand({ remoteDir, queue, jobName, python, workerPath, workerArgs, overwrite }) {
+// `node` (LSF only) pins the job to a host or host list: bsub -m "<node>".
+export function buildSubmitCommand({ remoteDir, queue, jobName, node, python, workerPath, workerArgs, overwrite }) {
   const args = (workerArgs || []).map(String)
   if (!args.includes('--work-dir')) args.push('--work-dir', remoteDir)
   const replay = 'if [ -f .hams_submitted ]; then cat .hams_submitted; exit 0; fi;'
   const replaceStale = 'grep -q "^#hams-overwrite" .hams_submitted 2>/dev/null '
-    + '&& { cat .hams_submitted; exit 0; }; rm -f .hams_submitted .hams_direct_done;'
+    + '&& { cat .hams_submitted; exit 0; }; rm -f .hams_submitted .hams_ssh_done;'
   const preLock = overwrite ? ':' : replay
   const inLock = overwrite ? replaceStale : replay
   const mark = overwrite
@@ -227,6 +231,7 @@ export function buildSubmitCommand({ remoteDir, queue, jobName, python, workerPa
     'out=$(bsub',
     '-q', shq(queue || 'normal'),
     '-J', shq(jobName || 'harnessams'),
+    ...(node ? ['-m', shq(node)] : []),
     '-o', 'bsub.out', '-e', 'bsub.err',
     shq(python), shq(workerPath), ...args.map(shq),
     '2>&1); rc=$?;',
@@ -236,31 +241,32 @@ export function buildSubmitCommand({ remoteDir, queue, jobName, python, workerPa
   ].join(' ')
 }
 
-// scheduler=direct: run the SAME worker directly on the remote host (the
-// node-local foreground mode — no LSF involvement), executed synchronously
-// through ssh_exec. Same guard family as the LSF submit: a completed run
-// short-circuits on the .hams_direct_done marker (read back, exit 0); a
+// scheduler=ssh: run the SAME worker directly on the target node (the
+// foreground mode — no LSF involvement), executed synchronously through
+// ssh_exec. Same guard family as the LSF submit: a completed run
+// short-circuits on the .hams_ssh_done marker (read back, exit 0); a
 // still-running first attempt holds the flock so a replay queues behind it
 // instead of double-running; a dead first attempt releases the lock (its
-// holder was killed), letting the replay rerun. The execRemote `timeout -s
-// KILL` wrapper bounds any lock wait. overwrite=true uses the same
-// clear-and-tag scheme as the LSF submit (see there).
-export function buildDirectCommand({ remoteDir, python, workerPath, workerArgs, overwrite }) {
+// holder was killed), letting the replay rerun. The exec timeout wrapper
+// (ssh out-of-cluster, the ctx.shell deadline in-cluster) bounds any lock
+// wait. overwrite=true uses the same clear-and-tag scheme as the LSF submit
+// (see there).
+export function buildSshCommand({ remoteDir, python, workerPath, workerArgs, overwrite }) {
   const args = (workerArgs || []).map(String)
   if (!args.includes('--work-dir')) args.push('--work-dir', remoteDir)
-  const replay = 'if [ -f .hams_direct_done ]; then echo \'[hams] already completed (marker present)\'; exit 0; fi;'
-  const replaceStale = 'if [ -f .hams_direct_done ] && grep -q "^#hams-overwrite" .hams_direct_done 2>/dev/null; '
+  const replay = 'if [ -f .hams_ssh_done ]; then echo \'[hams] already completed (marker present)\'; exit 0; fi;'
+  const replaceStale = 'if [ -f .hams_ssh_done ] && grep -q "^#hams-overwrite" .hams_ssh_done 2>/dev/null; '
     + 'then echo \'[hams] already completed (overwrite run)\'; exit 0; fi; '
-    + 'rm -f .hams_submitted .hams_direct_done;'
+    + 'rm -f .hams_submitted .hams_ssh_done;'
   const preLock = overwrite ? ':' : replay
   const inLock = overwrite ? replaceStale : replay
   const done = overwrite
-    ? 'printf \'#hams-overwrite\\n\' > .hams_direct_done'
-    : 'touch .hams_direct_done'
+    ? 'printf \'#hams-overwrite\\n\' > .hams_ssh_done'
+    : 'touch .hams_ssh_done'
   return [
     'cd', shq(remoteDir), '|| exit 9;',
     preLock,
-    'exec 9>.hams_direct.lock; flock 9;',
+    'exec 9>.hams_ssh.lock; flock 9;',
     inLock,
     shq(python), shq(workerPath), ...args.map(shq), `&& ${done}`,
   ].join(' ')
@@ -283,8 +289,8 @@ export function postSubmitCommand(remoteDir, jobId) {
 export const TERMINAL_POLL_STATES = new Set(['completed', 'failed', 'partial'])
 
 export function pollCommand({ remoteDir, jobId, scheduler }) {
-  const bjob = scheduler === 'direct'
-    ? 'echo __BJOB__; echo "(scheduler=direct)"'
+  const bjob = scheduler === 'ssh'
+    ? 'echo __BJOB__; echo "(scheduler=ssh)"'
     : `echo __BJOB__; bjobs -noheader -o 'jobid stat exec_host' ${shq(jobId)} 2>&1`
   return `cd ${shq(remoteDir)} || exit 9; ${bjob}; `
     + `echo __META__; ls -1 ${shq(normalizeRemoteRoot(remoteDir))}/*/point_meta.json 2>/dev/null | wc -l; `

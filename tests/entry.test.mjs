@@ -11,7 +11,7 @@ import { makeTool } from '../src/tool.js'
 
 test('plugin metadata', () => {
   assert.equal(name, 'dsh-harnessams')
-  assert.deepEqual(inject, ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills'])
+  assert.deepEqual(inject, ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills', 'shell'])
   assert.equal(typeof apply, 'function')
 })
 
@@ -54,6 +54,7 @@ test('apply injects the remote waiting policy as a system prompt section (fail-o
   assert.match(sections[0].text, /stop and ask the user first/)
   assert.match(sections[0].text, /dsh-ssh tools \(ssh_exec\/ssh_upload\/ssh_download\)/)
   assert.match(sections[0].text, /never raw ssh commands from the shell/)
+  assert.match(sections[0].text, /two working environments/, 'the env-dichotomy pointer rides the policy')
   // fail-open: without the service, apply still mounts routes/tools quietly
   const bare = {
     effect: (fn) => fn(),

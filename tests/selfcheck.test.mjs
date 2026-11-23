@@ -123,6 +123,7 @@ function makeHarness({ scenario = {} }) {
   const execLog = []
   const uploads = []
   const downloads = []
+  const localCommands = []
   const scCalls = { create: [], prompt: [], rename: [] }
   let hangResolve = null
   let pollCalls = 0
@@ -149,14 +150,16 @@ function makeHarness({ scenario = {} }) {
 
   // ssh_exec behavior script: commands arrive wrapped by execRemote; routing
   // matches substrings inside the wrapper and answers with structured values.
-  async function sshExec(command) {
-    guardShell(command)
+  // `record`=false serves the ctx.shell mock (same routing, no rw_* recording:
+  // a raw local command must not pollute the wrapper-shaped assertion log).
+  async function sshExec(command, { record = true } = {}) {
+    if (record) guardShell(command)
     if (command.includes('bsub -q')) {
       if (scenario.lsfSubmitFail) return { success: false, exitCode: 1, timedOut: false, stdout: '', stderr: 'bsub: queue not available\n', durationMs: 3 }
       return { success: true, exitCode: 0, timedOut: false, stdout: 'Job <4242> is submitted to queue <normal>\n', stderr: '', durationMs: 3 }
     }
     if (command.includes('spectre_sweep_worker.py')) {
-      if (scenario.directRunFail) return { success: false, exitCode: 2, timedOut: false, stdout: '', stderr: 'worker crashed\n', durationMs: 3 }
+      if (scenario.sshRunFail) return { success: false, exitCode: 2, timedOut: false, stdout: '', stderr: 'worker crashed\n', durationMs: 3 }
       return { success: true, exitCode: 0, timedOut: false, stdout: '[sweep] done: 9 success / 0 partial / 0 failed\n', stderr: '', durationMs: 3 }
     }
     if (command.includes('__BJOB__')) {
@@ -188,6 +191,34 @@ function makeHarness({ scenario = {} }) {
     }
     if (command.includes('wc -l')) return { success: true, exitCode: 0, timedOut: false, stdout: '0\n', stderr: '', durationMs: 3 }
     return { success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 3 }
+  }
+
+  // The official ctx.shell seam (in-cluster local execution, D-002): routes
+  // the SAME command script as sshExec — but as the raw command, no
+  // `timeout -s KILL` wrapper — and, because the "remote" side is this host's
+  // filesystem, physically lays down the artifacts the transfers then copy:
+  // the parse branch writes the worker's psf output into the run dir, the poll
+  // branch writes sweep_progress.json.
+  async function shellExec(command) {
+    localCommands.push(String(command))
+    assertValidShell(String(command))
+    const dirOf = (re) => re.exec(String(command))?.[1]
+    if (command.includes('spectre_psf_parse.py')) {
+      const dir = dirOf(/cd "([^"]+)" &&/)
+      const topo = dirOf(/--topo (lpf|hpf)/) ?? 'lpf'
+      if (dir) await writeVerifyFixture(dir, topo)
+      const v = await sshExec(command, { record: false })
+      return { ...v, stdout: `[selfcheck] ${JSON.stringify(remoteVerifyJson(topo))}\n` }
+    }
+    if (command.includes('__BJOB__')) {
+      const dir = dirOf(/cd "([^"]+)" \|\| exit/)
+      if (dir) {
+        await fsp.mkdir(dir, { recursive: true })
+        await fsp.writeFile(path.posix.join(dir, 'sweep_progress.json'),
+          JSON.stringify({ status: 'completed', total_points: 9, succeeded: 9, failed: 0 }) + '\n', 'utf8')
+      }
+    }
+    return sshExec(command, { record: false })
   }
 
   async function sshDownload(args) {
@@ -306,6 +337,20 @@ function makeHarness({ scenario = {} }) {
     effect: (fn) => { fn() },
     webServer: { register: () => {} },
     tools,
+    shell: {
+      resolve: (req) => ({ onExpiry: 'kill', stdoutMaxBytes: 1 << 20, ...req,
+        workdir: req.workdir || process.cwd(), timeoutMs: req.timeoutMs ?? 40_000 }),
+      execute: async (spec) => {
+        const v = await shellExec(String(spec.command))
+        return {
+          status: 'completed', exitCode: v.exitCode ?? 0, signal: null, done: Promise.resolve(),
+          readOutput: () => ({ delta: '', lossy: false }), kill: () => false,
+          result: async () => ({ exitCode: v.exitCode ?? 0, signal: null, timedOut: !!v.timedOut, aborted: false,
+            timeoutMs: spec.timeoutMs, stdout: { text: String(v.stdout ?? ''), truncated: false },
+            stderr: { text: String(v.stderr ?? ''), truncated: false } }),
+        }
+      },
+    },
     workspaceRegistry: { list: () => [] },
     get: (n) => {
       if (n === 'sessionController') {
@@ -320,6 +365,7 @@ function makeHarness({ scenario = {} }) {
     __execLog: execLog,
     __uploads: uploads,
     __downloads: downloads,
+    __localCommands: localCommands,
     __scCalls: scCalls,
     __waitHang: async () => { while (!hangStarted) await new Promise((r) => setTimeout(r, 10)) },
     __resolveHang: () => { const r = hangResolve; hangResolve = null; r?.() },
@@ -459,20 +505,31 @@ async function startFlow({ scenario = {}, settings = {} }) {
 
 test('settings: defaults, validation, persistence, workspace section', async () => {
   assert.deepEqual(defaultSettings(), {
-    run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
+    cluster_env: 'out-of-cluster', run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
     scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
   })
   // valid full object round-trips
   const v = validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1',
-    remote_root: '/home/op/sim', remote_dir: '/abs/path', scheduler: 'direct', compute_script_remote: 'js' })
+    remote_root: '/home/op/sim', remote_dir: '/abs/path', scheduler: 'ssh', compute_script_remote: 'js' })
   assert.ok(!v.error, v.error)
   assert.equal(v.settings.compute_script_remote, 'js')
   // enum + mode coupling guards
   assert.match(validateSettings({ ...defaultSettings(), simulator: 'ngspice' }).error, /simulator must be one of/)
   assert.match(validateSettings({ ...defaultSettings(), scheduler: 'none' }).error, /scheduler must be one of/)
+  assert.match(validateSettings({ ...defaultSettings(), cluster_env: 'cluster' }).error, /cluster_env must be one of/)
   assert.match(validateSettings({ ...defaultSettings(), run_mode: 'remote' }).error, /run_mode=remote requires machine_id/)
   assert.match(validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1' }).error,
     /run_mode=remote requires remote_root/)
+  // D-002 coupling: out-of-cluster forbids local spectre (the host cannot run it)
+  assert.match(validateSettings({ ...defaultSettings(), run_mode: 'local', simulator: 'spectre' }).error,
+    /requires cluster_env=in-cluster/)
+  assert.ok(!validateSettings({ ...defaultSettings(), cluster_env: 'in-cluster' }).error)
+  assert.ok(!validateSettings({ ...defaultSettings(), simulator: 'none' }).error)
+  // in-cluster LSF needs no machine; ssh or out-of-cluster does
+  assert.ok(!validateSettings({ ...defaultSettings(), cluster_env: 'in-cluster', run_mode: 'remote',
+    remote_root: '/home/op/sim' }).error)
+  assert.match(validateSettings({ ...defaultSettings(), cluster_env: 'in-cluster', run_mode: 'remote',
+    remote_root: '/home/op/sim', scheduler: 'ssh' }).error, /requires machine_id/)
   assert.match(validateSettings({ ...defaultSettings(), remote_dir: 'a/../b' }).error, /must not contain/)
   assert.match(validateSettings({ ...defaultSettings(), remote_root: 'rel/path' }).error, /absolute remote path/)
   assert.match(validateSettings({ ...defaultSettings(), remote_root: '/a/../b' }).error, /must not contain/)
@@ -503,19 +560,21 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   const raw2 = JSON.parse(await fsp.readFile(configPath(tmp), 'utf8'))
   assert.equal(raw2.workspace.plotly_asset, 'C:/custom/plotly.min.js')
   assert.equal(raw2.settings.machine_id, 'm2')
-  // local mode keeps remote fields stored
-  const local = validateSettings({ ...v.settings, run_mode: 'local' })
-  assert.ok(!local.error)
+  // local mode keeps remote fields stored (in-cluster: local spectre is legal)
+  const local = validateSettings({ ...v.settings, run_mode: 'local', cluster_env: 'in-cluster' })
+  assert.ok(!local.error, local.error)
   assert.equal(local.settings.machine_id, 'm1')
   // hand-edited junk falls back per-key instead of breaking the Overview
   await fsp.writeFile(configPath(tmp), '{"settings":{"run_mode":"bogus","machine_id":"x"}}', 'utf8')
   const dirty = await readSettings(tmp)
   assert.equal(dirty.settings.run_mode, 'local')
   assert.equal(dirty.settings.machine_id, 'x')
-  // legacy scheduler=none (settings file from before the direct rename) migrates on read
+  // unknown scheduler values (incl. the retired "direct"/"none") fall back to
+  // the default — no migration, the pre-release no-compat ruling (D-002 wave)
   await fsp.writeFile(configPath(tmp), '{"settings":{"scheduler":"none"}}', 'utf8')
-  const legacy = await readSettings(tmp)
-  assert.equal(legacy.settings.scheduler, 'direct')
+  assert.equal((await readSettings(tmp)).settings.scheduler, 'lsf')
+  await fsp.writeFile(configPath(tmp), '{"settings":{"scheduler":"direct"}}', 'utf8')
+  assert.equal((await readSettings(tmp)).settings.scheduler, 'lsf')
 })
 
 // ---------------------------------------------------------------------------
@@ -805,7 +864,7 @@ test('flow: simulator=spectre + local', async () => {
   } finally { f.restoreAll() }
 })
 
-test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) passes; failed-run evidence kept then cleaned by the next run', async () => {
+test('flow: spectre + remote — LSF fails → diagnosis + fallback(ssh) passes; failed-run evidence kept then cleaned by the next run', async () => {
   const f = await startFlow({
     settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'lsf', compute_script_remote: 'js' },
     scenario: { lsfSubmitFail: true },
@@ -867,13 +926,13 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(direct) pass
   } finally { f.restoreAll() }
 })
 
-test('flow: spectre + remote — scheduler=direct fails → verdict fails (nothing forgives a primary failure)', async () => {
-  // With scheduler=direct there is no fallback, and finalize must not forgive
-  // primary-attempt failures unconditionally — a broken direct submit would
+test('flow: spectre + remote — scheduler=ssh fails → verdict fails (nothing forgives a primary failure)', async () => {
+  // With scheduler=ssh there is no fallback, and finalize must not forgive
+  // primary-attempt failures unconditionally — a broken ssh submit would
   // otherwise still report remote:'ok' / summary.ok:true.
   const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'direct' },
-    scenario: { directRunFail: true },
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'ssh' },
+    scenario: { sshRunFail: true },
   })
   try {
     assert.ok(f.start.runId, f.start.error)
@@ -891,7 +950,7 @@ test('flow: spectre + remote — scheduler=direct fails → verdict fails (nothi
 test('flow: spectre + remote — fallback also fails → final diagnosis covers the rest', async () => {
   const f = await startFlow({
     settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'lsf' },
-    scenario: { lsfSubmitFail: true, directRunFail: true },
+    scenario: { lsfSubmitFail: true, sshRunFail: true },
   })
   try {
     await waitDone(f.start.runId, f.projectPath)
@@ -906,6 +965,39 @@ test('flow: spectre + remote — fallback also fails → final diagnosis covers 
     assert.ok(skipped.some((s) => /remote parse \+ verify/.test(s.item)))
     assert.equal(run.diagnoses.every((d) => d.status === 'done'), true)
   } finally { f.restoreAll() }
+})
+
+test('flow: spectre + remote in-cluster LSF (D-002) — local bsub via ctx.shell, zero ssh, local-copy transfers', async () => {
+  // No machine_id at all: in-cluster LSF is the only channel. The shared root
+  // is drive-resolved on Windows, unique per run and cleaned up after.
+  const shared = `/hams_sc_ic_${process.pid}_${Date.now()}`
+  const localShared = path.resolve(shared)
+  const f = await startFlow({
+    settings: { cluster_env: 'in-cluster', run_mode: 'remote', machine_id: null, remote_root: shared, scheduler: 'lsf' },
+  })
+  try {
+    assert.ok(f.start.runId, f.start.error)
+    const run = await waitDone(f.start.runId, f.projectPath)
+    assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result, s.detail])))
+    assert.equal(run.summary.remote, 'ok')
+    // zero dsh-ssh usage: bsub/bjobs/parse all went through the ctx.shell seam
+    assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0)
+    assert.equal(f.ctx.__uploads.length, 0, 'in-cluster transfers are local copies, not sftp uploads')
+    assert.ok(f.ctx.__localCommands.some((c) => c.includes('bsub -q')), 'bsub ran locally')
+    assert.ok(f.ctx.__localCommands.some((c) => c.includes('bjobs')), 'bjobs polled locally')
+    assert.ok(f.ctx.__localCommands.some((c) => c.includes('spectre_psf_parse.py')), 'parse+verify ran locally')
+    // staging physically landed on the shared root (plain local copies; a clean
+    // run's staging under the project is deleted at finalize, so the shared
+    // tree is the durable witness)
+    assert.ok(fs.existsSync(path.join(localShared, '.harnessams', 'selfcheck')), 'shared run tree exists')
+    // the settings-validation row says so
+    const c2 = run.steps.find((s) => s.item === 'Settings validation')
+    assert.match(c2.result, /local bsub on this host/, c2.result)
+  } finally {
+    f.restoreAll()
+    await rmRetry(f.tmp)
+    fs.rmSync(localShared, { recursive: true, force: true })
+  }
 })
 
 test('flow: none + remote — upload, remote compute (python), download + js cross-check', async () => {
@@ -1010,7 +1102,7 @@ test('buildSelfcheckPrompt: english body, artifacts pointer, answer-language lin
     lang: 'zh',
   })
   assert.match(p, /diagnostic agent of the HarnessAMS workbench/)
-  assert.match(p, /mode=remote simulator=none/)
+  assert.match(p, /mode=remote env=n\/a simulator=none/)
   assert.match(p, /Run artifacts: C:\/ws\/selfcheck\/rc_x/)
   assert.match(p, /Remote root: \/home\/op\/sim/)
   assert.match(p, /dsh-ssh alias "node1"/)
@@ -1061,7 +1153,7 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
     'pset.title', 'pset.rootLabel', 'pset.dirLocalHint', 'pset.dirRemoteRel',
     'pset.colMode', 'pset.colMachine', 'pset.colSched',
     'pset.colSim', 'pset.colCompLocal', 'pset.colCompRemote', 'pset.mode.local', 'pset.mode.remote',
-    'pset.sched.lsf', 'pset.sched.direct', 'pset.sim.spectre', 'pset.sim.none', 'pset.comp.python',
+    'pset.sched.lsf', 'pset.sched.ssh', 'pset.sim.spectre', 'pset.sim.none', 'pset.comp.python',
     'pset.comp.js', 'pset.noMachine', 'pset.saveFailed', 'pset.unsaved', 'pset.confirmBtn',
     'pset.stagedHint',
     'selfchk.desc', 'selfchk.run', 'selfchk.running', 'selfchk.startFailed',
@@ -1104,6 +1196,12 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
   assert.ok(src.includes("value === 'remote' && !next.machine_id && machines.length"),
     'remote switch must auto-pick a machine when none is set')
   assert.ok(src.includes('next.machine_id = machines[0].id'), 'auto-pick assigns machines[0].id')
+  // working-environment switch (D-002): confirm dialog gates the write
+  assert.ok(src.includes('const [envDialog, setEnvDialog]'), 'pending-switch state exists')
+  assert.ok(src.includes('const commitEnv = async (next)'), 'confirm handler commits the switch')
+  assert.ok(src.includes("action: 'save_agentsmd', lang: effectiveLang(), settings: base"),
+    'the switch rides the single write funnel (save_agentsmd + settings)')
+  assert.ok(src.includes("tr('envc.ok')") && src.includes("tr('common.cancel')"), 'confirm/cancel labels')
 })
 
 // ---------------------------------------------------------------------------
@@ -1149,14 +1247,14 @@ test('selfcheck stop: cancelled finalize, bkill both LSF jobs, evidence kept, no
 })
 
 test('selfcheck fallback observability: a failed submit leads with its error text, stale job record annotated', async () => {
-  const flow = await startFlow({ scenario: { pollFail: true, directRunFail: true }, settings: REMOTE_LSF })
+  const flow = await startFlow({ scenario: { pollFail: true, sshRunFail: true }, settings: REMOTE_LSF })
   try {
     const run = await waitDone(flow.start.runId, flow.projectPath)
     assert.equal(run.summary.remote, 'failed')
     const fb = run.steps.find((s) => s.attempt === 'fallback' && s.item.includes('batch_submit'))
     assert.ok(fb, 'fallback submit step exists')
     assert.equal(fb.ok, false)
-    assert.match(fb.detail, /FAILED — direct run failed/, 'the failure text is the headline')
+    assert.match(fb.detail, /FAILED — ssh run failed/, 'the failure text is the headline')
     assert.match(fb.detail, /stale job record from a previous attempt/,
       'a leftover job record demotes to an annotation (2026-11-21 observability fix)')
   } finally {

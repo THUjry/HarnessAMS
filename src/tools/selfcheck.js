@@ -98,8 +98,9 @@ export function selfcheckTools(ctx) {
       + 'self-check workflow text for the current settings). '
       + 'Passing "settings" (full object) writes .harnessams/workspace_config.json settings '
       + 'section BEFORE the action runs — that is the single config write face '
-      + '(run_mode/machine_id/remote_root/remote_dir/scheduler/simulator/compute_script_local/'
-      + 'compute_script_remote; remote mode requires machine_id and an absolute remote_root).',
+      + '(cluster_env/run_mode/machine_id/remote_root/remote_dir/scheduler/simulator/compute_script_local/'
+      + 'compute_script_remote; remote mode requires an absolute remote_root and machine_id '
+      + 'unless in-cluster LSF is the only remote channel; scheduler is lsf/ssh).',
     parameters: {
       action: { type: 'string', required: true, enum: ['run', 'status', 'stop', 'env', 'save_agentsmd'],
         description: 'run=start a self-check (background, returns run_id) | status=fetch one run | stop=cancel a running self-check | env=local environment listing | save_agentsmd=sync the AGENTS.md config table' },

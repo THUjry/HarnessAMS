@@ -7,14 +7,20 @@
 //   simulator=spectre  full simulation path: spectre_assemble -> batch_submit
 //                      (scheduler=local background workers) -> batch_poll ->
 //                      the standalone parser run directly -> pointwise verify
-//                      (local), or batch_submit/poll (remote LSF/direct) ->
+//                      (local), or batch_submit/poll (remote LSF/ssh) ->
 //                      remote parse+verify -> psf CSV download + cross-check
 //                      (an LSF failure is diagnosed and retried once with
-//                      scheduler=direct).
+//                      scheduler=ssh, when an ssh target is configured).
 //   simulator=none     no simulation: the bundled golden dataset (src/selfcheck/
 //                      golden, analytic RC AC responses in psfascii form) replays
 //                      parse + compute locally, or upload -> remote compute ->
 //                      download + cross-check remotely.
+//
+// The remote chains follow the project's working environment (cluster_env,
+// D-002): out-of-cluster everything crosses dsh-ssh through run._priv.alias;
+// in-cluster LSF has NO alias — the batch tools submit locally, and this
+// module's own parse/verify/upload/download become local copies and
+// ctx.shell executions on the shared filesystem (runChannel below).
 //
 // The verification is POINTWISE (not a -3dB extraction): every frequency sample
 // of every sweep point is compared against the analytic RC response with a 1%
@@ -46,6 +52,7 @@ import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'node:url'
 import { runPython } from '../py.js'
 import { callTool, execRemote, uploadFile, downloadFile, shq } from '../remote.js'
+import { execLocal, localCopy } from '../localchannel.js'
 import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
 import { readSettings } from './settings.js'
 import { syncAgentsMd } from './agentsmd.js'
@@ -214,7 +221,7 @@ export function buildSelfcheckPrompt({ scope, runDir, machine, remotePath, proje
   lines.push('You are the diagnostic agent of the HarnessAMS workbench.')
   lines.push('')
   lines.push('A project self-check reported problems. Diagnose the root cause. Context:')
-  lines.push(`- Self-check settings: mode=${scope?.mode} simulator=${scope?.simulator} `
+  lines.push(`- Self-check settings: mode=${scope?.mode} env=${scope?.cluster_env ?? 'n/a'} simulator=${scope?.simulator} `
     + `scheduler=${scope?.scheduler ?? 'n/a'} compute=local:${scope?.compute_local}/remote:${scope?.compute_remote}`)
   if (machine) {
     lines.push(`- Machine: ${machine.name || machine.host} (${machine.username ? machine.username + '@' : ''}${machine.host}:${machine.port ?? 22}, dsh-ssh alias "${machine.alias ?? machine.id}")`)
@@ -300,16 +307,22 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
   let machine = null
   let alias = null
   let remoteBase = null
+  const inCluster = settings.cluster_env === 'in-cluster'
   if (settings.run_mode === 'remote') {
-    const list = await fetchMachines(ctx.tools)
-    if (!list.ok) return { error: `dsh-ssh hosts unavailable: ${list.reason}`, code: 503 }
-    machine = list.machines.find((m) => m.id === settings.machine_id || m.name === settings.machine_id) || null
-    if (!machine) return { error: `no such dsh-ssh host: ${settings.machine_id}`, code: 404 }
     if (!settings.remote_root) {
       return { error: 'run_mode=remote requires remote_root — set it in the Overview settings table '
         + '(or pass settings to the harnessams_selfcheck tool) and confirm', code: 409 }
     }
-    alias = machine.id
+    // D-002: in-cluster LSF needs no ssh hop — no machine. Everything else
+    // (ssh scheduler, out-of-cluster) targets the configured dsh-ssh alias.
+    const needMachine = !inCluster || settings.scheduler === 'ssh'
+    if (needMachine) {
+      const list = await fetchMachines(ctx.tools)
+      if (!list.ok) return { error: `dsh-ssh hosts unavailable: ${list.reason}`, code: 503 }
+      machine = list.machines.find((m) => m.id === settings.machine_id || m.name === settings.machine_id) || null
+      if (!machine) return { error: `no such dsh-ssh host: ${settings.machine_id}`, code: 404 }
+      alias = machine.id
+    }
     try {
       remoteBase = resolveRemoteDir(settings.remote_root, settings.remote_dir)
     } catch (e) {
@@ -348,6 +361,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     projectPath: project.path,
     scope: {
       mode: settings.run_mode,
+      cluster_env: settings.cluster_env,
       simulator: settings.simulator,
       scheduler: settings.run_mode === 'remote' && settings.simulator === 'spectre' ? settings.scheduler : null,
       compute_local: settings.compute_script_local,
@@ -358,7 +372,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     summary: null,
     diagnoses: [],
     _priv: {
-      ctx, sessionId, settings, project, lang, machine, alias, remoteBase,
+      ctx, sessionId, settings, project, lang, machine, alias, remoteBase, inCluster,
       localWorkspaceId, deadline: Date.now() + TOTAL_BUDGET_MS, current: null,
       diagnosed: new Set(),
       // stop face (action=stop): the flag trips every gate; aborting the
@@ -414,12 +428,11 @@ export async function stopSelfcheck(id, projectPath) {
 }
 
 async function killSubmittedLsfJobs(run) {
-  const { ctx, alias } = run._priv
-  if (!alias) return
+  const ch = runChannel(run)
   for (const topo of TOPOS) {
     const job = readJob(path.join(run.runDir, 'remote', topo))
     if (job?.scheduler === 'lsf' && job.job_id) {
-      await execRemote(ctx, alias, 'bkill ' + shq(String(job.job_id)), { timeoutMs: 15_000 })
+      await ch.exec('bkill ' + shq(String(job.job_id)), { timeoutMs: 15_000 })
     }
   }
 }
@@ -540,9 +553,11 @@ async function orchestrate(run) {
     c2.ok = true
     c2.ms = 1
     c2.result = mode === 'remote'
-      ? `machine ${run._priv.machine?.name ?? run._priv.machine?.host}, remote dir ${run._priv.remoteBase}`
+      ? (run._priv.machine
+        ? `remote node ${run._priv.machine.name ?? run._priv.machine.host} (this run), remote dir ${run._priv.remoteBase}`
+        : `local bsub on this host (in-cluster), remote dir ${run._priv.remoteBase}`)
       : 'local mode'
-    c2.detail = `simulator=${sim}, compute local=${settings.compute_script_local}, remote=${settings.compute_script_remote}`
+    c2.detail = `env=${settings.cluster_env}, simulator=${sim}, compute local=${settings.compute_script_local}, remote=${settings.compute_script_remote}`
       + (run.scope.scheduler ? `, scheduler=${run.scope.scheduler}` : '')
     void persistRun(run)
 
@@ -651,7 +666,7 @@ function skipRestForUnprepared(run, mode, sim, reason) {
     skipStep(run, { section, item: `remote parse + verify (${run._priv.settings.compute_script_remote})`, settingColumn: 'compute_remote' }, reason)
     skipStep(run, { section, item: 'result download + local cross-check', settingColumn: 'compute_remote' }, reason)
   } else {
-    skipStep(run, { section, item: 'golden upload (ssh_upload)', settingColumn: 'machine' }, reason)
+    skipStep(run, { section, item: `golden upload (${run._priv.alias ? 'ssh_upload' : 'local copy'})`, settingColumn: 'machine' }, reason)
     skipStep(run, { section, item: `remote parse + verify (${run._priv.settings.compute_script_remote})`, settingColumn: 'compute_remote' }, reason)
     skipStep(run, { section, item: 'artifact download + local cross-check', settingColumn: 'compute_remote' }, reason)
   }
@@ -799,9 +814,31 @@ function remoteDirFor(run, topo, scheduler) {
   return remoteJoin(run._priv.remoteBase, run.id, `${topo}_${scheduler}`)
 }
 
+// The remote chains' exec/transfer channel. Exec follows the alias: over
+// dsh-ssh when one is configured (out-of-cluster, or in-cluster scheduler=ssh
+// — the run itself crosses ssh), else the official local ctx.shell seam
+// (in-cluster LSF). Transfers cross ssh ONLY out-of-cluster (D-002): an
+// in-cluster run stages and fetches with plain local copies on the shared
+// filesystem, whatever the scheduler. Same value shapes either way, so the
+// chains below stay channel-agnostic.
+function runChannel(run) {
+  const { ctx, alias, inCluster } = run._priv
+  return {
+    exec: alias
+      ? (cmd, opts) => execRemote(ctx, alias, cmd, opts)
+      : (cmd, opts) => execLocal(ctx, cmd, opts),
+    upload: !inCluster && alias
+      ? (localPath, remotePath) => uploadFile(ctx, alias, localPath, remotePath)
+      : localCopy,
+    download: !inCluster && alias
+      ? (remotePath, localPath) => downloadFile(ctx, alias, remotePath, localPath)
+      : localCopy,
+  }
+}
+
 async function remoteSpectreChain(run) {
   const { ctx, settings } = run._priv
-  const primary = settings.scheduler === 'direct' ? 'direct' : 'lsf'
+  const primary = settings.scheduler === 'ssh' ? 'ssh' : 'lsf'
 
   // staging: template + sweep_config + both verify flavors ride along (the
   // compute language can be switched without re-staging)
@@ -830,7 +867,7 @@ async function remoteSpectreChain(run) {
         machine_id: settings.machine_id,
         remote_root: settings.remote_root,
         scheduler,
-      }, { timeoutMs: scheduler === 'direct' ? 660_000 : 900_000, signal: run._priv.cancel.controller.signal })
+      }, { timeoutMs: scheduler === 'ssh' ? 660_000 : 900_000, signal: run._priv.cancel.controller.signal })
       const job = readJob(staging)
       if (r.isError || !job) ok = false
       // failure-first: the error text leads; a leftover job record from the
@@ -877,7 +914,7 @@ async function remoteSpectreChain(run) {
           void persistRun(run)
         }
         if (state === 'completed' || state === 'failed' || r.isError) break
-        if (scheduler === 'direct') break // direct runs finish inside submit
+        if (scheduler === 'ssh') break // ssh runs finish inside submit
         await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
       }
       const prog = await fsp.readFile(path.join(staging, 'sweep_progress.json'), 'utf8')
@@ -890,20 +927,27 @@ async function remoteSpectreChain(run) {
     return { ok, result: ok ? 'completed 9/9 (both topos)' : 'batch not completed', detail: details.join('\n').slice(0, 1200) }
   })
 
-  const s1 = await submitStep(primary, primary === 'lsf' ? 'LSF' : 'direct', false)
+  const s1 = await submitStep(primary, primary === 'lsf' ? 'LSF' : 'ssh', false)
   const p1 = await pollStep(primary, s1.ok === true)
   let good = { scheduler: primary, ok: s1.ok === true && p1.ok === true }
 
-  if (!good.ok && primary !== 'direct') {
+  if (!good.ok && primary !== 'ssh') {
     if (run._priv.cancel.requested) throw new SelfcheckCancelled()
-    // Immediate diagnosis of the scheduler cluster, then retry direct.
-    await diagnoseSteps(run, [s1, p1], 'remote-scheduler')
-    const s2 = await submitStep('direct', 'direct', true)
-    const p2 = await pollStep('direct', s2.ok === true)
-    if (s2.ok === true && p2.ok === true) {
-      good = { scheduler: 'direct', ok: true, viaFallback: true }
-      p2.warn = (p2.warn ? p2.warn + ' · ' : '') + 'completed via fallback (direct run)'
+    // A scheduler=ssh retry needs an ssh target: without machine_id (in-cluster
+    // LSF-only project) there is no fallback at all — say so instead of trying.
+    if (!settings.machine_id) {
+      p1.warn = (p1.warn ? p1.warn + ' · ' : '') + 'no scheduler=ssh fallback possible without machine_id'
       void persistRun(run)
+    } else {
+      // Immediate diagnosis of the scheduler cluster, then retry ssh.
+      await diagnoseSteps(run, [s1, p1], 'remote-scheduler')
+      const s2 = await submitStep('ssh', 'ssh', true)
+      const p2 = await pollStep('ssh', s2.ok === true)
+      if (s2.ok === true && p2.ok === true) {
+        good = { scheduler: 'ssh', ok: true, viaFallback: true }
+        p2.warn = (p2.warn ? p2.warn + ' · ' : '') + 'completed via fallback (ssh run)'
+        void persistRun(run)
+      }
     }
   }
 
@@ -918,7 +962,8 @@ async function remoteSpectreChain(run) {
 }
 
 async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
-  const { ctx, settings, alias } = run._priv
+  const { settings } = run._priv
+  const ch = runChannel(run)
   const lang = settings.compute_script_remote
   const remotePython = DEFAULT_REMOTE_PYTHON
   const remoteNode = DEFAULT_REMOTE_NODE
@@ -941,7 +986,7 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
         remoteDir: dir, parserPath, python: job?.remote_python ?? remotePython,
         node: remoteNode, lang, topo,
       })
-      const r = await execRemote(ctx, alias, cmd, { timeoutMs: 180_000 })
+      const r = await ch.exec(cmd, { timeoutMs: 180_000 })
       const json = parseMarkerJson(r.stdout)
       results[topo] = json
       const sum = verifySummary(topo, json, { prefix: false })
@@ -980,7 +1025,7 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
         for (const rel of [`${name}/point_meta.json`, `psf/${name}_psf.csv`]) {
           const local = path.join(staging, ...rel.split('/'))
           await fsp.mkdir(path.dirname(local), { recursive: true })
-          const dl = await downloadFile(ctx, alias, remoteJoin(dir, rel), local)
+          const dl = await ch.download(remoteJoin(dir, rel), local)
           if (dl.ok) got += 1
         }
       }
@@ -1001,13 +1046,16 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
 }
 
 async function remoteGoldenChain(run) {
-  const { ctx, alias, settings } = run._priv
+  const { settings } = run._priv
+  const ch = runChannel(run)
+  const via = run._priv.alias ? 'ssh_upload' : 'local copy'
 
   // RN1 — upload the golden run trees + the verify flavors + the standalone
   // psf parser (spectre_psf_parse.py is stdlib-only, so it runs from the batch
-  // dir without the whole scripts tree)
+  // dir without the whole scripts tree); in-cluster this "upload" is a local
+  // copy on the shared filesystem (D-002)
   const uploadStep = await timedStep(run, {
-    section: 'remote', item: 'golden upload (ssh_upload)', settingColumn: 'machine',
+    section: 'remote', item: `golden upload (${via})`, settingColumn: 'machine',
   }, async () => {
     checkBudget(run)
     let parserSrc
@@ -1037,7 +1085,7 @@ async function remoteGoldenChain(run) {
         const target = path.join(staging, ...rel.split('/'))
         await fsp.mkdir(path.dirname(target), { recursive: true })
         await fsp.copyFile(local, target)
-        const up = await uploadFile(ctx, alias, local, remoteJoin(dir, rel))
+        const up = await ch.upload(local, remoteJoin(dir, rel))
         if (up.ok) uploaded += 1
         else failed.push(`${topo}/${rel}: ${up.text.slice(0, 120)}`)
       }
@@ -1078,7 +1126,8 @@ function finalize(run) {
     // The PRIMARY submit/poll pair fails on purpose when the scheduler breaks and
     // the fallback attempt takes over — those failures must not sink the verdict
     // once the fallback completed the chain. Without a SUCCESSFUL fallback there
-    // is nothing to forgive: with scheduler=direct there is no fallback at all,
+    // is nothing to forgive: with scheduler=ssh (or an in-cluster LSF-only
+    // project with no machine_id) there is no fallback at all,
     // so a primary failure must fail the verdict.
     const hardFailed = remoteSteps.some((s) => s.ok === false
       && (s.attempt !== 'primary' || !run._priv.viaFallback))
