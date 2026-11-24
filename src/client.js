@@ -123,6 +123,10 @@ window.__ModuleLoader__.load({
         'dash.refresh': '刷新报告（强制重载）',
         'dash.remove': '移除当前报告（只解除登记，不删除文件）',
         'dash.openTab': '在新标签页打开',
+        'dash.add': '添加',
+        'dash.refreshShort': '刷新',
+        'dash.removeShort': '移除',
+        'dash.openShort': '打开',
         'dash.empty': '尚未添加报告 — 浏览本地磁盘加入已有的 HTML 报告。',
         'dash.addFirst': '+ 添加报告',
         'dash.currentDir': '当前目录',
@@ -144,9 +148,9 @@ window.__ModuleLoader__.load({
         'check.rclR': '理想电阻范围 (R)',
         'check.rclC': '理想电容范围 (C)',
         'check.rclL': '理想电感范围 (L)',
-        'check.noteR': 'Ω；下限 < 上限（基本单位）',
-        'check.noteC': 'F；下限 < 上限（基本单位）',
-        'check.noteL': 'H；下限 < 上限（基本单位）',
+        'check.noteR': '数值支持科学计数法与普通小数；下限 < 上限',
+        'check.noteC': '数值支持科学计数法与普通小数；下限 < 上限',
+        'check.noteL': '数值支持科学计数法与普通小数；下限 < 上限',
         'check.unitCheck': '单位检查',
         'check.noteUnit': '长度 u/n、频率/电流后缀与裸数拦截',
         'check.biasCheck': '偏置 < Vdd 检查',
@@ -190,6 +194,8 @@ window.__ModuleLoader__.load({
         'pset.colSim': '仿真器',
         'pset.colCompLocal': '本地计算',
         'pset.colCompRemote': '远端计算',
+        'pset.colFigs': '报告出图',
+        'pset.figsWarn': '开启后每次生成报告都会把每张图导出为 PNG 存入 Figs/；持续保存图片会造成较大磁盘占用',
         'pset.mode.local': '本地',
         'pset.mode.remote': '远程',
         'pset.sched.lsf': 'LSF 队列',
@@ -324,6 +330,10 @@ window.__ModuleLoader__.load({
         'dash.refresh': 'Reload the report (hard reload)',
         'dash.remove': 'Remove the current report (unregisters it; the file is kept)',
         'dash.openTab': 'Open in a new tab',
+        'dash.add': 'Add',
+        'dash.refreshShort': 'Refresh',
+        'dash.removeShort': 'Remove',
+        'dash.openShort': 'Open',
         'dash.empty': 'No report added yet — browse the local disk to add an existing HTML report.',
         'dash.addFirst': '+ Add report',
         'dash.currentDir': 'Current directory',
@@ -345,9 +355,9 @@ window.__ModuleLoader__.load({
         'check.rclR': 'Ideal resistor range (R)',
         'check.rclC': 'Ideal capacitor range (C)',
         'check.rclL': 'Ideal inductor range (L)',
-        'check.noteR': 'ohm; min < max (base unit)',
-        'check.noteC': 'farad; min < max (base unit)',
-        'check.noteL': 'henry; min < max (base unit)',
+        'check.noteR': 'scientific notation and plain decimals both parse; min < max',
+        'check.noteC': 'scientific notation and plain decimals both parse; min < max',
+        'check.noteL': 'scientific notation and plain decimals both parse; min < max',
         'check.unitCheck': 'Unit checks',
         'check.noteUnit': 'length u/n suffixes, freq/current suffixes, bare-number rejection',
         'check.biasCheck': 'Bias < Vdd check',
@@ -391,6 +401,8 @@ window.__ModuleLoader__.load({
         'pset.colSim': 'Simulator',
         'pset.colCompLocal': 'Local compute',
         'pset.colCompRemote': 'Remote compute',
+        'pset.colFigs': 'Report figures',
+        'pset.figsWarn': 'When on, every generated report exports one PNG per chart into Figs/; continuously saving images causes significant disk usage',
         'pset.mode.local': 'local',
         'pset.mode.remote': 'remote',
         'pset.sched.lsf': 'LSF queue',
@@ -651,14 +663,17 @@ window.__ModuleLoader__.load({
 /* tier 3 Dashboard: report viewer (toolbar + iframe) and the add-report browser */
 .hams-dashview { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; min-height: 0; flex: 1; }
 .hams-dashtoolbar { margin: 0; flex-wrap: wrap; }
-.hams-dashtoolbar .hams-select { flex: 1 1 120px; min-width: 0; max-width: 100%; }
+.hams-dashtoolbar .hams-select { flex: 0 1 auto; min-width: 80px; max-width: 50%; }
 .hams-btn { text-decoration: none; }
 .hams-dashframe { width: 100%; flex: 1; min-height: 300px;
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 8px; }
+/* fixed 5.5-row viewport (the half row hints at scrollability; row = 1.4 line-height + 3px+3px
+   padding) so loading/empty states keep the dialog height stable */
 .hams-list { border: 1px solid color-mix(in srgb, currentColor 18%, transparent); border-radius: 6px;
-  max-height: 240px; overflow: auto; display: flex; flex-direction: column; }
+  height: calc(5.5 * ((12.5px + var(--dsh-content-font-delta, 0px)) * 1.4 + 6px)); overflow: auto;
+  display: flex; flex-direction: column; }
 .hams-listitem { display: flex; align-items: center; gap: 6px; text-align: left; padding: 3px 8px;
-  cursor: pointer; background: none; border: none; color: inherit;
+  cursor: pointer; background: none; border: none; color: inherit; line-height: 1.4;
   font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
 .hams-listitem:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
 .hams-listitem .hams-dim { margin-left: auto; }
@@ -1404,6 +1419,7 @@ window.__ModuleLoader__.load({
             h('label', null, tr('pset.browsePickDir')),
             h('div', { className: 'hams-list' },
               error && h('div', { className: 'hams-err' }, error),
+              !error && !listing && h('div', { className: 'hams-dim', style: { padding: '8px' } }, tr('common.loading')),
               listing && !error && h('div', null,
                 (listing.dirs ?? []).map((d) => h('div', { key: 'd:' + d, className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
                   h('button', { className: 'hams-listitem', style: { flex: 1, textAlign: 'left', minWidth: 0 },
@@ -1443,6 +1459,9 @@ window.__ModuleLoader__.load({
       { id: 'compute_script_remote', labelKey: 'pset.colCompRemote', column: 'compute_remote',
         visible: (s) => s.run_mode === 'remote',
         options: [['python', 'pset.comp.python'], ['js', 'pset.comp.js']] },
+      // gen_sweep_report PNG export gate (default off — disk); no selfcheck
+      // verdict column of its own, the row always shows a faint dash
+      { id: 'report_figs', labelKey: 'pset.colFigs', column: null, kind: 'bool' },
     ]
 
     // Aggregate one settings column from the run's step stream: any failure →
@@ -1476,6 +1495,13 @@ window.__ModuleLoader__.load({
               ? [h('option', { key: 'kept', value: draft.machine_id }, txt(draft.machine_id) + ' ?')] : []),
             machines.map((m) => h('option', { key: m.id, value: m.id },
               txt(m.name || m.host) + (m.host && m.host !== m.name ? ' · ' + txt(m.host) : ''))))
+        }
+        if (c.kind === 'bool') {
+          return h('select', { className: 'hams-select', value: draft[c.id] ? '1' : '0',
+            title: tr('pset.figsWarn'),
+            onChange: (e) => onChange(c.id, e.target.value === '1') },
+            h('option', { value: '1' }, tr('check.on')),
+            h('option', { value: '0' }, tr('check.off')))
         }
         return h('select', { className: 'hams-select', value: draft[c.id] ?? '',
           onChange: (e) => onChange(c.id, e.target.value) },
@@ -1811,6 +1837,9 @@ window.__ModuleLoader__.load({
           remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
             '→ ', txt(dirPreview), ' · ', tr('pset.dirRemoteRel')),
           h(SettingsTable, { draft, settings, machines, run, onChange: updateSetting }),
+          // report_figs warning rides under the settings table (also the row's
+          // tooltip): PNG export is off by default to keep disk usage bounded
+          h('div', { className: 'hams-dim' }, tr('pset.figsWarn')),
           // confirm row: staged edits land in workspace_config.json (and AGENTS.md
           // re-syncs) only here — red "unsaved" cells mark the pending state
           h('div', { className: 'hams-row' },
@@ -2164,26 +2193,12 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // Sidebar embed pass for the report iframe (same-origin by construction —
-    // the report is served from /harnessams/dash/): tighten the report's own
-    // page paddings and scale its content by the DSH font-size ratio, so a
-    // generated report tracks the user's font setting inside the narrow
-    // sidebar instead of showing its authored fixed layout. Best effort — a
-    // cross-origin or odd document just renders unmodified; the ↗ open-in-tab
-    // link bypasses this entirely (full fidelity).
-    function embedReportFrame(frame) {
-      try {
-        const doc = frame?.contentDocument
-        if (!doc || !doc.body || doc.documentElement?.dataset?.hamsEmbed) return
-        doc.documentElement.dataset.hamsEmbed = '1'
-        const style = doc.createElement('style')
-        style.textContent = 'body { padding: 10px 12px !important; margin: 0 !important; }'
-        ;(doc.head ?? doc.documentElement).appendChild(style)
-        const base = parseFloat(getComputedStyle(document.body).fontSize) || 14
-        const ratio = base / 14
-        if (ratio > 1.02 || ratio < 0.98) doc.body.style.zoom = String(ratio)
-      } catch { /* not same-origin / not ready: render as-is */ }
-    }
+    // The dashboard iframe embeds the report 1:1 — deliberately NO injection
+    // into the embedded document. The previous body padding/zoom pass skewed
+    // apparent curve weight and marker visibility, risked breaking Plotly
+    // pointer hit-testing, and made the embed diverge from the standalone
+    // file; the ↗ open-in-tab link and a direct file open now all render
+    // identically.
 
     // Dashboard sub-view: the task's registered local HTML reports. The report
     // list + current selection live in the task store (reports[] /
@@ -2199,7 +2214,11 @@ window.__ModuleLoader__.load({
     function SessionDashboard({ sessionId, config, updateConfig }) {
       const [nonce, setNonce] = useState(0)
       const [dialogOpen, setDialogOpen] = useState(false)
-      const reports = config.reports ?? []
+      // newest first: the dropdown and every fallback pick order by added_at
+      // descending, so the latest simulation's report is the default view
+      // (storage order stays insertion; sort is stable for equal stamps)
+      const reports = [...(config.reports ?? [])].sort((a, b) =>
+        (Date.parse(b.added_at ?? '') || 0) - (Date.parse(a.added_at ?? '') || 0))
       const selectedId = reports.some((r) => r.id === config.dashboard_selected)
         ? config.dashboard_selected
         : (reports[0]?.id ?? null)
@@ -2239,7 +2258,7 @@ window.__ModuleLoader__.load({
       const addReport = (absPath, name) => {
         // same-path dedupe (the server merges by resolved path on its next
         // write; adding twice would leave the client id dangling and the
-        // selection would snap back to the first report)
+        // selection would snap back to the newest report)
         const dup = (config?.reports ?? []).find((r) => r && r.path === absPath)
         if (dup) {
           updateConfig((c) => ({ ...c, dashboard_selected: dup.id }))
@@ -2257,7 +2276,9 @@ window.__ModuleLoader__.load({
       }
       const removeCurrent = () => updateConfig((c) => {
         const rest = (c.reports ?? []).filter((r) => r.id !== selectedId)
-        return { ...c, reports: rest, dashboard_selected: rest[0]?.id ?? null }
+        const newest = [...rest].sort((a, b) =>
+          (Date.parse(b.added_at ?? '') || 0) - (Date.parse(a.added_at ?? '') || 0))[0]
+        return { ...c, reports: rest, dashboard_selected: newest?.id ?? null }
       })
       const dashUrl = current ? '/harnessams/dash/' + encodeURIComponent(sessionId) + '/' + encodeURIComponent(current.id) + '/' : null
 
@@ -2273,17 +2294,16 @@ window.__ModuleLoader__.load({
             reports.length
               ? reports.map((r) => h('option', { key: r.id, value: r.id }, txt(r.name)))
               : h('option', { value: '' }, tr('dash.noReports'))),
-          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.addTitle'), onClick: () => setDialogOpen(true) }, '\uFF0B'),
-          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻'),
-          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.remove'), disabled: !current, onClick: removeCurrent }, '×'),
-          current && h('a', { className: 'hams-btn hams-btn-sm', title: tr('dash.openTab'), href: dashUrl, target: '_blank', rel: 'noopener' }, '↗')),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.addTitle'), onClick: () => setDialogOpen(true) }, '\uFF0B ' + tr('dash.add')),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻ ' + tr('dash.refreshShort')),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.remove'), disabled: !current, onClick: removeCurrent }, '× ' + tr('dash.removeShort')),
+          current && h('a', { className: 'hams-btn hams-btn-sm', title: tr('dash.openTab'), href: dashUrl, target: '_blank', rel: 'noopener' }, '↗ ' + tr('dash.openShort'))),
         current
           ? h('iframe', {
               key: current.id + ':' + nonce,
               className: 'hams-dashframe',
               title: current.name,
               src: dashUrl + '?_r=' + nonce,
-              onLoad: (e) => embedReportFrame(e.target),
             })
           : h('div', { className: 'hams-dash' },
               tr('dash.empty'), ' ',
@@ -2328,6 +2348,7 @@ window.__ModuleLoader__.load({
             h('label', null, tr('dash.pickFile')),
             h('div', { className: 'hams-list' },
               error && h('div', { className: 'hams-err' }, error),
+              !error && !listing && h('div', { className: 'hams-dim', style: { padding: '8px' } }, tr('common.loading')),
               listing && !error && h('div', null,
                 listing.dirs.map((d) => h('button', { key: 'd:' + d, className: 'hams-listitem',
                   onClick: () => setCwd(listing.path + '/' + d) },
@@ -2353,11 +2374,29 @@ window.__ModuleLoader__.load({
     // sessions.json entry (per-session since D-005). The initial table is the
     // session's confirmed copy, or the project-file∪built-in fallback while
     // unconfirmed (the source line under the title says which is in effect).
-    // The six R/C/L numbers are strings while drafting; the confirm button
-    // validates locally, then saves through the rebased single-session persist
-    // channel and the server re-validates. While a draft differs from the
-    // loaded value the cell keeps the old value visible in gray parentheses so
-    // the pre-confirm state is always readable.
+    // Each R/C/L bound drafts as a {value, unit} pair (a unit dropdown per
+    // field so the two ends may carry different units, e.g. 1 fF … 1 uF; the
+    // value parses both scientific notation and plain decimals — storage stays
+    // in base units); the confirm button validates locally, then saves through
+    // the rebased single-session persist channel and the server re-validates.
+    // While a draft differs from the loaded value the cell keeps the old value
+    // visible in gray parentheses so the pre-confirm state is always readable.
+    const RCL_UNITS = {
+      r: [['\u03A9', 1], ['k\u03A9', 1e3], ['M\u03A9', 1e6]],
+      c: [['fF', 1e-15], ['pF', 1e-12], ['nF', 1e-9], ['uF', 1e-6]],
+      l: [['pH', 1e-12], ['nH', 1e-9]],
+    }
+    const unitMult = (k, u) => (RCL_UNITS[k].find((e) => e[0] === u) ?? RCL_UNITS[k][0])[1]
+    const unitValue = (k, d) => Number(d.v) * unitMult(k, d.u)
+    // largest ladder unit with value/multiplier >= 1 (else the smallest), then
+    // a <=6-significant-digit decimal for the input box
+    const toUnitDraft = (k, x) => {
+      const lad = RCL_UNITS[k]
+      let u = lad[0][0]
+      for (let i = lad.length - 1; i >= 0; i--) { if (x / lad[i][1] >= 1) { u = lad[i][0]; break } }
+      return { v: String(+((x / unitMult(k, u)).toPrecision(6))), u }
+    }
+    const fmtSavedUnit = (k, x) => { const d = toUnitDraft(k, x); return d.v + ' ' + d.u }
     function CheckParams({ sessionId, updateConfig }) {
       const [params, setParams] = useState(null) // loaded copy (null = loading)
       const [hasOwn, setHasOwn] = useState(false) // session confirmed its own table
@@ -2367,16 +2406,20 @@ window.__ModuleLoader__.load({
       const [saving, setSaving] = useState(false)
 
       const toDraft = (p) => ({
-        rcl: { r: p.rcl.r.map(String), c: p.rcl.c.map(String), l: p.rcl.l.map(String) },
+        rcl: {
+          r: p.rcl.r.map((x) => toUnitDraft('r', x)),
+          c: p.rcl.c.map((x) => toUnitDraft('c', x)),
+          l: p.rcl.l.map((x) => toUnitDraft('l', x)),
+        },
         unit_check: p.unit_check,
         bias_check: p.bias_check,
         strict_includes: p.strict_includes,
       })
       const toNumeric = (d) => ({
         rcl: {
-          r: [Number(d.rcl.r[0]), Number(d.rcl.r[1])],
-          c: [Number(d.rcl.c[0]), Number(d.rcl.c[1])],
-          l: [Number(d.rcl.l[0]), Number(d.rcl.l[1])],
+          r: [unitValue('r', d.rcl.r[0]), unitValue('r', d.rcl.r[1])],
+          c: [unitValue('c', d.rcl.c[0]), unitValue('c', d.rcl.c[1])],
+          l: [unitValue('l', d.rcl.l[0]), unitValue('l', d.rcl.l[1])],
         },
         unit_check: d.unit_check,
         bias_check: d.bias_check,
@@ -2407,8 +2450,8 @@ window.__ModuleLoader__.load({
       const confirm = async () => {
         setSaveError(null)
         for (const k of ['r', 'c', 'l']) {
-          const lo = Number(draft.rcl[k][0])
-          const hi = Number(draft.rcl[k][1])
+          const lo = unitValue(k, draft.rcl[k][0])
+          const hi = unitValue(k, draft.rcl[k][1])
           if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || lo >= hi) {
             setSaveError(tr('check.badPair', { p: tr('check.rcl' + k.toUpperCase()) }))
             return
@@ -2429,22 +2472,28 @@ window.__ModuleLoader__.load({
         }
       }
 
+      const rclField = (k, end, patch) => h('span', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+        h('input', { className: 'hams-input', style: { width: '72px' }, value: draft.rcl[k][end].v,
+          onChange: (e) => patch({ v: e.target.value }),
+          onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void confirm() } } }),
+        h('select', { className: 'hams-select', style: { width: '58px' }, value: draft.rcl[k][end].u,
+          onChange: (e) => patch({ u: e.target.value }) },
+          RCL_UNITS[k].map(([u]) => h('option', { key: u, value: u }, u))))
       const rclRow = (k, labelKey, noteKey) => {
         const saved = params?.rcl?.[k]
-        const changed = !!saved && (draft.rcl[k][0] !== String(saved[0]) || draft.rcl[k][1] !== String(saved[1]))
+        const changed = !!saved
+          && (unitValue(k, draft.rcl[k][0]) !== saved[0] || unitValue(k, draft.rcl[k][1]) !== saved[1])
+        const patchEnd = (end) => (patch) => setDraft({ ...draft, rcl: {
+          ...draft.rcl, [k]: draft.rcl[k].map((d, i) => (i === end ? { ...d, ...patch } : d)) } })
         return h('tr', null,
           h('td', null, tr(labelKey)),
           h('td', null,
             h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
-              h('input', { className: 'hams-input', style: { width: '80px' }, value: draft.rcl[k][0],
-                onChange: (e) => setDraft({ ...draft, rcl: { ...draft.rcl, [k]: [e.target.value, draft.rcl[k][1]] } }),
-                onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void confirm() } } }),
+              rclField(k, 0, patchEnd(0)),
               h('span', { className: 'hams-dim' }, '…'),
-              h('input', { className: 'hams-input', style: { width: '80px' }, value: draft.rcl[k][1],
-                onChange: (e) => setDraft({ ...draft, rcl: { ...draft.rcl, [k]: [draft.rcl[k][0], e.target.value] } }),
-                onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void confirm() } } })),
+              rclField(k, 1, patchEnd(1))),
             changed && h('span', { className: 'hams-dim' },
-              tr('check.oldValue', { v: String(saved[0]) + ' … ' + String(saved[1]) }))),
+              tr('check.oldValue', { v: fmtSavedUnit(k, saved[0]) + ' … ' + fmtSavedUnit(k, saved[1]) }))),
           h('td', { className: 'hams-dim' }, tr(noteKey)))
       }
 

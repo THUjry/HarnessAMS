@@ -8,6 +8,12 @@
 // table-swatch color mapping, selection dims other curves (width 4 vs 1,
 // opacity 1 vs 0.08), DOM legend grid as the reliable cross-highlight path
 // (plotly_click does not fire in the host's embedded browser — 2026-11-21).
+// 2026-11-24: curve charts ONLY — one trace = one design point (the
+// metric-vs-sweep-index chart type is gone; scalars live in the table and
+// summary cards); cross-highlight keys on trace-order indices, never on label
+// matching (two label sources drifted apart and silently killed highlighting);
+// a DOM hit-test fallback covers hosts where plotly_click never fires; the
+// manifest is newest-first (natural id order).
 import fs from 'node:fs'
 import path from 'node:path'
 
@@ -64,44 +70,16 @@ export function hslColor(i, n) {
 }
 
 // --- chart specs (single source of truth for browser + PNG exporter) --------
-// rd comes from buildRoundData(): {points, metric_names, group_by, group_values,
-// curves?, note?}. Returns [{id, kind, title, slug, data, layout, indices?}].
-// kind 'metric': x = sweep point index; kind 'curve': one trace per parameter
-// combination, indices maps trace order -> point index (click mapping).
+// rd comes from buildRoundData(): {points, metric_names, curves?, note?}.
+// Returns [{id, kind:'curve', title, slug, data, layout, indices}] — CURVE
+// charts only (2026-11-24): one trace per parameter combination, i.e. one
+// design point per curve, x = the curves' real signal. Scalar metrics are
+// table/summary material and never charts (the metric-vs-sweep-index chart
+// type strayed from the verified dashboard format and was removed). indices
+// maps trace order -> point index and is THE cross-highlight key (labels are
+// display-only).
 export function chartSpecs(rd) {
   const specs = []
-  const points = rd.points || []
-  const byGroup = rd.group_by && rd.group_values && rd.group_values.length > 1
-  for (let mi = 0; mi < (rd.metric_names || []).length; mi++) {
-    const mk = rd.metric_names[mi]
-    const traces = []
-    if (byGroup) {
-      rd.group_values.forEach((gv, gi) => {
-        const pts = points.filter((p) => String((p.params || {})[rd.group_by]) === String(gv))
-        traces.push({
-          x: pts.map((p) => p.index),
-          y: pts.map((p) => (p.metrics && typeof p.metrics[mk] === 'number') ? p.metrics[mk] : null),
-          mode: 'lines+markers', name: `${rd.group_by}=${gv === null || gv === undefined || gv === '' ? '-' : String(gv)}`,
-          line: { width: 2, color: hslColor(gi, rd.group_values.length) },
-          marker: { size: 7, opacity: 0.3, color: hslColor(gi, rd.group_values.length) },
-          connectgaps: false, cliponaxis: false,
-          hovertemplate: '%{fullData.name}<br>point %{x}<br>' + mk + ': %{y:.4g}<extra></extra>',
-        })
-      })
-    } else {
-      traces.push({
-        x: points.map((p) => p.index),
-        y: points.map((p) => (p.metrics && typeof p.metrics[mk] === 'number') ? p.metrics[mk] : null),
-        mode: 'lines+markers', name: mk,
-        line: { width: 2, color: 'hsl(210,65%,45%)' }, marker: { size: 7, opacity: 0.3, color: 'hsl(210,65%,45%)' },
-        connectgaps: false, cliponaxis: false,
-        hovertemplate: '%{fullData.name}<br>point %{x}: %{y:.4g}<extra></extra>',
-      })
-    }
-    const layout = chartLayout(mk, 'sweep point index', byGroup)
-    layout.xaxis.dtick = 1
-    specs.push({ id: `chart-metric-${mi}`, kind: 'metric', title: mk, slug: slugify(mk), data: traces, layout })
-  }
   const curves = rd.curves
   if (curves && Array.isArray(curves.points) && curves.points.length) {
     for (let si = 0; si < (curves.signals || []).length; si++) {
@@ -117,7 +95,7 @@ export function chartSpecs(rd) {
       }))
       specs.push({
         id: `chart-curve-${si}`, kind: 'curve', title: disp, slug: slugify(sk.name),
-        data: traces, layout: chartLayout(disp, curves.x_signal, false),
+        data: traces, layout: chartLayout(disp, curves.x_signal),
         indices: curves.points.map((p) => p.index),
       })
     }
@@ -129,7 +107,7 @@ function slugify(s) {
   return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'chart'
 }
 
-function chartLayout(ytitle, xtitle, legend) {
+function chartLayout(ytitle, xtitle) {
   return {
     title: { text: ytitle, font: { size: 20 } },
     xaxis: { title: { text: xtitle, standoff: 14 }, tickfont: { size: 16 }, showgrid: true,
@@ -137,7 +115,7 @@ function chartLayout(ytitle, xtitle, legend) {
     yaxis: { title: { text: ytitle, standoff: 12 }, tickfont: { size: 16 }, gridcolor: '#e8e8e8',
       zeroline: true, zerolinecolor: '#ddd' },
     margin: { t: 48, b: 60, l: 76, r: 40 }, height: 480,
-    showlegend: !!legend, hovermode: 'closest', clickmode: 'event',
+    showlegend: false, hovermode: 'closest', clickmode: 'event',
     hoverlabel: { font: { size: 15 }, bgcolor: '#fff', bordercolor: '#ccc' },
     paper_bgcolor: '#fcfcfb', plot_bgcolor: '#fcfcfb',
     font: { family: 'system-ui, -apple-system, sans-serif', color: '#0b0b0b' },
@@ -258,7 +236,7 @@ var ROUND_DATA = null;                       // hard rule: var, not const (batch
 
 var sel = null, clickFired = false, sortCol = null, sortAsc = true;
 var PTS = [], N = 0, PARAM_KEYS = [], METRIC_KEYS = [];
-var CURVE_DIVS = [];                         // legend-less curve charts (swatch-mapped)
+var CHART_DIVS = [];                         // every chart div id (curve charts only)
 var MIDS = null, X_LABEL = "";               // mid-curve samples for the info bar
 
 function num(v, n) {                         // hard rule: robust formatter
@@ -375,43 +353,88 @@ function newChartBox(id) {
 
 // Charts render from the Node-built specs embedded in ROUND_DATA.charts
 // (single source of truth — the PNG exporter plots the very same specs).
+// Curve charts only: one trace = one design point. _hamsIndices (trace order
+// -> point index) is attached per div because cross-highlighting keys on
+// INDICES, never on trace-name/label matching.
 function buildCharts(RD) {
   const area = document.getElementById("chart-area");
   area.innerHTML = "";
-  CURVE_DIVS = [];
+  CHART_DIVS = [];
   if (RD.note) {
     const note = document.createElement("p");
     note.className = "filter-line"; note.textContent = RD.note;
     area.appendChild(note);
   }
   const specs = RD.charts || [];
-  if (!specs.length) { area.innerHTML += '<p class="hint">No metric or curve data in this batch.</p>'; return; }
+  if (!specs.length) { area.innerHTML += '<p class="hint">No curve data in this batch — scalars are in the table below.</p>'; return; }
   specs.forEach(function (sp) {
     const div = newChartBox(sp.id);
     Plotly.newPlot(div, sp.data, sp.layout, { displayModeBar: false });
-    if (sp.kind === "curve") {
-      CURVE_DIVS.push(div.id);
-      div.on("plotly_click", function (evt) {               // trace order maps to point indices
-        clickFired = true;
-        if (evt.points && evt.points[0] && sp.indices) { toggle(String(sp.indices[evt.points[0].curveNumber])); }
-      });
-    } else {
-      div.on("plotly_click", function (evt) {               // index-axis charts: x IS the point index
-        clickFired = true;
-        if (evt.points && evt.points[0]) { toggle(String(evt.points[0].x)); }
-      });
-    }
+    div._hamsIndices = sp.indices || [];
+    CHART_DIVS.push(div.id);
+    div.on("plotly_click", function (evt) {                 // trace order maps to point indices
+      clickFired = true;
+      if (evt.points && evt.points[0] && div._hamsIndices.length) {
+        toggle(String(div._hamsIndices[evt.points[0].curveNumber]));
+      }
+    });
     div.on("plotly_deselect", resetAll);
-    addBlankDeselect(div);
+    addDomClick(div);
   });
 }
 
-// blank-area click deselects (AttST0p5dB pattern): a plotly_click sets the
-// flag first; a bare click that follows within the timeout resets
-function addBlankDeselect(el) {
-  el.addEventListener("click", function () {
-    setTimeout(function () { if (!clickFired && sel !== null) resetAll(); clickFired = false; }, 10);
+// DOM click path (blank-deselect + hit-test fallback): plotly_click does not
+// fire in every host (IAB record, 2026-11-21), so a bare DOM click first tries
+// a manual nearest-trace hit test from the chart's own layout geometry; a miss
+// acts as the blank-area deselect. When plotly's own event DID fire, the
+// clickFired flag short-circuits this handler entirely.
+function addDomClick(el) {
+  el.addEventListener("click", function (ev) {
+    setTimeout(function () {
+      if (clickFired) { clickFired = false; return; }
+      const idx = hitTest(el, ev);
+      if (idx !== null && idx !== undefined) { toggle(String(idx)); }
+      else if (sel !== null) { resetAll(); }
+    }, 10);
   });
+}
+
+// px -> data inversion against Plotly's effective (_fullLayout) ranges; the
+// nearest sample of any trace within ~25 px wins and maps to its point index.
+// Returns the point index, or null when the click hit nothing plot-like.
+function hitTest(el, ev) {
+  const fl = el._fullLayout;
+  if (!fl || !fl.xaxis || !fl.yaxis || !el._hamsIndices || !el._hamsIndices.length || !el.data) return null;
+  const m = fl.margin || { t: 48, b: 60, l: 76, r: 40 };
+  const rect = el.getBoundingClientRect();
+  const px = ev.clientX - rect.left, py = ev.clientY - rect.top;
+  const plotL = m.l, plotR = Math.max(m.l + 1, el.clientWidth - m.r);
+  const plotT = m.t, plotB = Math.max(m.t + 1, el.clientHeight - m.b);
+  if (px < plotL - 4 || px > plotR + 4 || py < plotT - 4 || py > plotB + 4) return null;
+  const xr = fl.xaxis.range, yr = fl.yaxis.range;
+  if (!xr || xr.length !== 2 || !yr || yr.length !== 2) return null;
+  const xlog = fl.xaxis.type === "log", ylog = fl.yaxis.type === "log";
+  const X = function (v) { return xlog ? Math.log10(v) : v; };
+  const Y = function (v) { return ylog ? Math.log10(v) : v; };
+  const w = plotR - plotL, h = plotB - plotT;
+  const dataX = xr[0] + (px - plotL) / w * (xr[1] - xr[0]);
+  let best = null, bestD = 25;
+  el.data.forEach(function (tr, ti) {
+    if (!Array.isArray(tr.x) || !tr.x.length || tr.visible === false) return;
+    let bi = 0, bd = Infinity;
+    for (let i = 0; i < tr.x.length; i++) {
+      if (typeof tr.x[i] !== "number") continue;
+      const d = Math.abs(X(tr.x[i]) - dataX);
+      if (d < bd) { bd = d; bi = i; }
+    }
+    const yv = tr.y && tr.y[bi];
+    if (typeof yv !== "number" || !isFinite(yv)) return;
+    const sx = plotL + (X(tr.x[bi]) - xr[0]) / (xr[1] - xr[0]) * w;
+    const sy = plotB - (Y(yv) - yr[0]) / (yr[1] - yr[0]) * h;
+    const dist = Math.sqrt((px - sx) * (px - sx) + (py - sy) * (py - sy));
+    if (dist < bestD) { bestD = dist; best = el._hamsIndices[ti]; }
+  });
+  return best;
 }
 
 function buildTable(RD) {
@@ -498,12 +521,12 @@ function highlight(idx) {                    // cross-highlight: table row + cur
     if (ms.length) txt += " → " + ms.join(" | ");
     bar.innerHTML = txt;
   }
-  CURVE_DIVS.forEach(function (id) {         // selected curve width 4 / others 1 @ opacity 0.08
-    const el = document.getElementById(id);
+  CHART_DIVS.forEach(function (id) {         // selected curve width 4 / others 1 @ opacity 0.08;
+    const el = document.getElementById(id);  // keyed on trace-order indices, not labels
     if (!el || !el.data) return;
     const w = [], o = [];
-    el.data.forEach(function (tr) {
-      const m = p && tr.name === p.label;
+    el.data.forEach(function (tr, ti) {
+      const m = el._hamsIndices && String(el._hamsIndices[ti]) === String(idx);
       w.push(m ? 4 : 1); o.push(m ? 1 : 0.08);
     });
     Plotly.restyle(id, { "line.width": w, opacity: o });
@@ -516,7 +539,7 @@ function resetAll() {
   sel = null;
   document.getElementById("info-bar").textContent = "Click a legend entry or table row to cross-highlight a parameter combination";
   document.querySelectorAll("#legend-grid .selected").forEach(function (it) { it.classList.remove("selected"); });
-  CURVE_DIVS.forEach(function (id) {
+  CHART_DIVS.forEach(function (id) {
     if (document.getElementById(id)) Plotly.restyle(id, { "line.width": 2, opacity: 1 });
   });
   document.querySelectorAll("#points-body .selected").forEach(function (r) { r.classList.remove("selected"); });
@@ -544,8 +567,9 @@ function isFileLoose(p) {
 
 // Walk upward from the report's PROJECT directory for the single project
 // config (.harnessams/workspace_config.json), at most 8 levels. Corrupt
-// configs are skipped and the walk continues. Only the workspace section
-// matters here (plotly_asset).
+// configs are skipped and the walk continues. Both sections matter here:
+// workspace (plotly_asset seeding) and settings (report_figs — the PNG export
+// gate gen_sweep_report reads at execute time).
 export function findProjectConfigFrom(startDir, maxLevels = 8) {
   let d = path.resolve(String(startDir ?? '.'))
   for (let i = 0; i < maxLevels; i++) {
@@ -554,7 +578,8 @@ export function findProjectConfigFrom(startDir, maxLevels = 8) {
       try {
         const raw = readJsonBom(cand)
         const ws = raw?.workspace && typeof raw.workspace === 'object' ? raw.workspace : {}
-        return { workspace: ws, root: d }
+        const st = raw?.settings && typeof raw.settings === 'object' ? raw.settings : {}
+        return { workspace: ws, settings: st, root: d }
       } catch { /* corrupt config keeps the walk going */ }
     }
     const parent = path.dirname(d)
@@ -616,6 +641,22 @@ export function resolvePlotlySrc(forceCdn, outDir, project, plotlyArg) {
   return { src: rel.replace(/\\/g, '/'), localFile: wsAsset }
 }
 
+// Natural-order comparison (numeric chunks compare as numbers, so Sim10 sorts
+// above Sim9) — used to order the manifest NEWEST-FIRST: round ids carry the
+// date/batch, so a descending natural order puts the latest simulation first
+// in the in-report batch dropdown and as the default-loaded round.
+function naturalCompare(a, b) {
+  const A = String(a).split(/(\d+)/), B = String(b).split(/(\d+)/)
+  for (let i = 0; i < Math.max(A.length, B.length); i++) {
+    const x = A[i] ?? '', y = B[i] ?? ''
+    if (/^\d+$/.test(x) && /^\d+$/.test(y)) {
+      const d = parseInt(x, 10) - parseInt(y, 10)
+      if (d) return d
+    } else if (x !== y) return x < y ? -1 : 1
+  }
+  return 0
+}
+
 // --- report assembly --------------------------------------------------------
 // D-006 layout: data JS at <project>/SimResults/<round id>.js, report HTML at
 // the PROJECT ROOT (outName defaults to <project>_report.html). prepared = {
@@ -633,6 +674,7 @@ export function genReportFromSpec(projectDir, prepared) {
     fs.writeFileSync(path.join(dataDir, `${rd.round}.js`), 'var ROUND_DATA = ' + JSON.stringify(rd) + ';', 'utf8')
     entries.push({ id: rd.round, title: rd.title || rd.round, file: `SimResults/${rd.round}.js`, n_points: rd.n_points })
   }
+  entries.sort((a, b) => naturalCompare(b.id, a.id))
 
   const projectName = path.basename(project.replace(/[\\/]+$/, ''))
   const title = prepared.title || projectName

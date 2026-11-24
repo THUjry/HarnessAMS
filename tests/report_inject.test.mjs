@@ -1,8 +1,9 @@
 // Tests for the gen_sweep_report tool (D-006, 2026-11-21): spec-driven report
 // rendering, the new D-006 file layout (report at the project root, data JS in
-// SimResults/, PNGs in Figs/), the guarded single-session merge-write of
-// sessions.json (v2), and the full tool.execute(args, exec) flow — the calling
-// session comes from exec.agent.id.
+// SimResults/, PNGs in Figs/ — opt-in via the report_figs setting since
+// 2026-11-24), the guarded single-session merge-write of sessions.json (v2),
+// and the full tool.execute(args, exec) flow — the calling session comes from
+// exec.agent.id.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -105,6 +106,10 @@ test('inject: registerReportIntoSession appends, selects, dedupes by path, prese
 test('gen_sweep_report e2e — spec renders at the project root, registers into the CALLING session, exports PNGs', async () => {
   const { ws, storeDir } = await makeWorkspace()
   try {
+    // PNG export is opt-in (report_figs): this e2e fixture enables it
+    await writeFile(path.join(storeDir, 'workspace_config.json'), JSON.stringify({
+      version: 1, workspace: {}, settings: { report_figs: true },
+    }, null, 2) + '\n', 'utf8')
     const proj = path.join(ws, 'projX')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
@@ -161,6 +166,10 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     for (const f of ['SimResults/Sim0_20260805_batch1.js', 'SimResults/Sim0_20260805_batch2.js']) {
       assert.ok(html.includes(JSON.stringify(f).slice(1, -1)), `manifest must reference ${f}`)
     }
+    // newest-first manifest: batch2 precedes batch1 (natural id order, desc)
+    const mLine = html.split('\n').find((l) => l.includes('const MANIFEST')) ?? ''
+    assert.ok(mLine.includes('Sim0_20260805_batch2') && mLine.indexOf('Sim0_20260805_batch2') < mLine.indexOf('Sim0_20260805_batch1'),
+      'manifest must list the newest round first')
     // the D-006 empty-table fix: the param branch reads p.params, not the root
     assert.ok(html.includes('c.kind === "param") return { txt: esc(show(p.params ? p.params[c.key] : null))'),
       'cellVal must carry the param branch')
@@ -183,17 +192,20 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     assert.deepEqual(rd.metric_names, ['s21_at_10g'])
     assert.deepEqual(rd.summary.s21_at_10g, { min: -0.61, max: -0.49, mean: -0.55, n: 2 })
     assert.equal(rd.points[1].label, 'cpf=40f') // label derived from params
-    // charts specs embedded (single source of truth for page + PNG): the
-    // metric chart on batch1, the curve chart on batch2 (which carries curves)
-    assert.ok(rd.charts.some((c) => c.id === 'chart-metric-0' && c.kind === 'metric'))
+    // charts specs embedded (single source of truth for page + PNG): curve
+    // charts ONLY — the points-only batch1 renders no charts at all (scalars
+    // live in the table), batch2's curves yield exactly one curve chart with
+    // the trace-order -> point-index map
+    assert.deepEqual(rd.charts, [])
     const rd2 = JSON.parse((await readFile(path.join(simres, 'Sim0_20260805_batch2.js'), 'utf8'))
       .replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
-    assert.ok(rd2.charts.some((c) => c.id === 'chart-curve-0' && c.kind === 'curve'))
-    assert.ok(rd2.charts.some((c) => c.id === 'chart-metric-0' && c.kind === 'metric'))
-    assert.deepEqual(rd2.charts.find((c) => c.kind === 'curve').indices, [0, 1])
+    assert.equal(rd2.charts.length, 1)
+    assert.equal(rd2.charts[0].id, 'chart-curve-0')
+    assert.equal(rd2.charts[0].kind, 'curve')
+    assert.deepEqual(rd2.charts[0].indices, [0, 1])
 
-    // PNG export: one per chart (metric charts per round + the curve chart)
-    assert.ok(Array.isArray(res.figs) && res.figs.length >= 3, `figs: ${JSON.stringify(res.figs)}`)
+    // PNG export (report_figs on): one PNG per curve chart — exactly one here
+    assert.ok(Array.isArray(res.figs) && res.figs.length === 1, `figs: ${JSON.stringify(res.figs)}`)
     for (const f of res.figs) {
       const buf = await readFile(f.file)
       assert.equal(buf.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', f.file)
@@ -232,11 +244,11 @@ test('gen_sweep_report: spec errors are actionable; project root derives from a 
     const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
     assert.equal(res.ok, true)
     assert.equal(res.report_dir, proj)
-    // metric-only round: one metric chart, no curves
+    // points-only round: a table-only round now — zero charts (curve charts
+    // only; scalar metrics render in the table, never as charts)
     const rd = JSON.parse((await readFile(path.join(simres, 'Sim1_20261121_batch1.js'), 'utf8'))
       .replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
-    assert.equal(rd.charts.length, 1)
-    assert.equal(rd.charts[0].kind, 'metric')
+    assert.equal(rd.charts.length, 0)
 
     // unknown $file → path resolves against the project root, message says so
     await writeFile(path.join(simres, 'bad.json'), JSON.stringify({
@@ -263,8 +275,12 @@ test('gen_sweep_report: spec errors are actionable; project root derives from a 
 })
 
 test('gen_sweep_report: PNG export fails open — no charts or a broken renderer never fails the report', async () => {
-  const { ws } = await makeWorkspace()
+  const { ws, storeDir } = await makeWorkspace()
   try {
+    // export enabled, but the round has nothing chartable
+    await writeFile(path.join(storeDir, 'workspace_config.json'), JSON.stringify({
+      version: 1, workspace: {}, settings: { report_figs: true },
+    }, null, 2) + '\n', 'utf8')
     const proj = path.join(ws, 'projZ')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
@@ -290,6 +306,45 @@ test('gen_sweep_report: PNG export fails open — no charts or a broken renderer
     })
     assert.deepEqual(out.figs, [])
     assert.match(out.error, /no local plotly\.min\.js/)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('gen_sweep_report: PNG export is opt-in — report_figs off (default) skips Figs entirely', async () => {
+  const { ws } = await makeWorkspace()
+  try {
+    // NO workspace_config.json at all → defaults apply → report_figs off
+    const proj = path.join(ws, 'projW')
+    const simres = path.join(proj, 'SimResults')
+    await mkdir(simres, { recursive: true })
+    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
+    await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
+      project_dir: proj,
+      rounds: [{
+        id: 'Sim0_20260805_batch1',
+        points: [
+          { index: 0, params: { a: 1 }, metrics: { m: 1 } },
+          { index: 1, params: { a: 2 }, metrics: { m: 2 } },
+        ],
+        curves: {
+          x_signal: 'f (GHz)', signals: [{ name: 's21', dB: true }],
+          points: [
+            { index: 0, label: 'a=1', x: [1, 2], y: { s21: [-1, -2] } },
+            { index: 1, label: 'a=2', x: [1, 2], y: { s21: [-2, -3] } },
+          ],
+        },
+      }],
+    }), 'utf8')
+    const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
+    assert.equal(res.ok, true)
+    assert.match(res.output, /\[figs\] skipped: disabled/)
+    assert.match(res.figs_note ?? '', /disabled/)
+    assert.equal(res.figs, undefined)
+    // a chartable round still produced a report; the Figs/ directory never
+    // appears (export is gated before any directory is created)
+    const { stat } = await import('node:fs/promises')
+    await assert.rejects(() => stat(path.join(proj, 'Figs')), (e) => e.code === 'ENOENT')
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

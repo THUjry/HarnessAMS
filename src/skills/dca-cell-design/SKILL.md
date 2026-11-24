@@ -176,7 +176,7 @@ Assembling and analysing a cascade is the **analysis-cascade-dca** skill's job (
 <project>/
   RawResults/Sim<N>_<YYYYMMDD>_batch<M>/   # raw run dirs (remote batches / debug fetches)
   SimResults/                  # compact results + report spec JSONs
-  Figs/                        # exported chart PNGs (gen-sweep-report)
+  Figs/                        # exported chart PNGs (gen_sweep_report; only when report_figs is on)
   <name>_report.html           # the generated report (project root)
 ```
 

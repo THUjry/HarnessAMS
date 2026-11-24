@@ -47,7 +47,7 @@ export function agentsMdPath(workspacePath) {
 // included), so Windows paths round-trip without hand-rolling a quoter. Nulls
 // (no self-check run yet) are the YAML null literal.
 const q = (v) => JSON.stringify(String(v))
-const scalar = (v) => (v === null || v === undefined ? 'null' : q(v))
+const scalar = (v) => (v === null || v === undefined ? 'null' : typeof v === 'boolean' ? String(v) : q(v))
 
 // Single-level projection: meta + workspace root + the settings mirror + local
 // env facts + the latest finished self-check verdict. Machine ALIASES are
@@ -68,6 +68,7 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   row('simulator', s.simulator)
   row('compute_local', s.compute_script_local)
   row('compute_remote', s.compute_script_remote)
+  row('report_figs', s.report_figs === true)
   row('remote_dir', s.remote_dir)
   row('remote_root', s.remote_root)
   row('remote_scripts_dir', s.remote_root

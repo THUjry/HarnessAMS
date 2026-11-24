@@ -3,14 +3,15 @@
 // MODEL's job (remote analysis by default; only compact results are pulled
 // back), so this tool consumes a model-written spec JSON (points/curves inline
 // or via {"$file"} references), renders the sweep dashboard at the project
-// root with data JS in SimResults/, exports one PNG per chart into Figs/
-// (headless jsdom+plotly+resvg, fail-open), and registers the report into the
-// CALLING session's dashboard.
+// root with data JS in SimResults/, and registers the report into the CALLING
+// session's dashboard. Chart PNGs go into Figs/ ONLY when the workspace
+// setting report_figs is on (Overview toggle, default off — 2026-11-24;
+// headless jsdom+plotly+resvg, fail-open when enabled).
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { resolveDir } from '../py.js'
-import { readJsonBom, chartSpecs, curveMids, genReportFromSpec } from '../report_render.js'
+import { readJsonBom, chartSpecs, curveMids, genReportFromSpec, findProjectConfigFrom } from '../report_render.js'
 import { exportFigs } from '../figs_export.js'
 
 // --- report auto-registration target: the calling session's HarnessAMS ----
@@ -116,21 +117,6 @@ function buildRoundData(specRound, projectRoot, at) {
   })
   const paramNames = [...new Set(points.flatMap((p) => Object.keys(p.params)))]
   const metricNames = [...new Set(points.flatMap((p) => Object.keys(p.metrics)))]
-  // group_by: the first param with >1 distinct value (first-seen order)
-  let groupBy = null
-  let groupValues = []
-  for (const k of paramNames) {
-    const vals = []
-    for (const p of points) {
-      const v = p.params[k]
-      if (!vals.includes(v)) vals.push(v)
-    }
-    if (vals.length > 1 && groupBy === null) { groupBy = k; groupValues = vals }
-  }
-  if (groupBy === null && paramNames.length) {
-    groupBy = paramNames[0]
-    groupValues = [points[0].params[paramNames[0]]]
-  }
   const ok = points.filter((p) => p.status === 'success' || p.status === 'partial')
   const summary = {}
   for (const k of metricNames) {
@@ -157,8 +143,6 @@ function buildRoundData(specRound, projectRoot, at) {
     title: typeof specRound.title === 'string' && specRound.title ? specRound.title : id,
     param_names: paramNames,
     metric_names: metricNames,
-    group_by: groupBy || '',
-    group_values: groupValues,
     n_points: points.length,
     n_success: points.filter((p) => p.status === 'success').length,
     n_partial: points.filter((p) => p.status === 'partial').length,
@@ -195,9 +179,12 @@ export function genReportTools() {
         + 'project root (write big curve arrays to files, keep the spec small); each point is {index?, label?, '
         + 'params:{}, metrics:{}, status?}; curves is {x_signal, signals:[{name, dB?}], points:[{index, label?, '
         + 'x:[], y:{}}]}. project_dir defaults to the spec location\'s parent when the spec sits in '
-        + '<project>/SimResults/. Outputs: report at <project>/<name>_report.html (data JS in SimResults/), one '
-        + 'PNG per chart in Figs/ (headless render; skipped with a visible reason when unavailable), conclusions '
-        + 'rendered as a text card (paragraphs, **bold**, `code`, "- " lists). Charts and table cross-highlight.',
+        + '<project>/SimResults/. Outputs: report at <project>/<name>_report.html (data JS in SimResults/); '
+        + 'chart PNGs into Figs/ ONLY when the workspace setting report_figs is on (Overview toggle, default '
+        + 'off — disk; headless render, skipped with a visible reason when unavailable); conclusions rendered '
+        + 'as a text card (paragraphs, **bold**, `code`, "- " lists). Curve charts only (one trace per '
+        + 'parameter combination — scalar metrics render in the table, not as charts) and the in-report batch '
+        + 'dropdown lists rounds newest-first; charts and table cross-highlight.',
       parameters: {
         spec: { type: 'string', required: true, description: 'Path to the report spec JSON (see description for the schema)' },
       },
@@ -241,12 +228,18 @@ export function genReportTools() {
         }
         const gen = genReportFromSpec(project, prepared)
 
-        // One PNG per chart, fail-open: a missing renderer never fails the report.
-        const figs = await exportFigs({
-          rounds: roundData,
-          plotlyFile: gen.plotlyLocal,
-          figsDir: path.join(project, 'Figs'),
-        })
+        // PNG export is OPT-IN via the workspace setting report_figs (the
+        // Overview toggle; default off since 2026-11-24 — continuously saved
+        // chart images consume significant disk). When enabled it stays
+        // fail-open: a missing renderer never fails the report.
+        const figsOn = findProjectConfigFrom(project)?.settings?.report_figs === true
+        const figs = figsOn
+          ? await exportFigs({
+              rounds: roundData,
+              plotlyFile: gen.plotlyLocal,
+              figsDir: path.join(project, 'Figs'),
+            })
+          : { figs: [], error: 'disabled: enable "Report figures" in the Overview settings to export PNGs (they consume disk)' }
         const lines = [`[report] ${roundData.length} round(s) -> ${gen.reportPath}`]
         lines.push(figs.figs.length
           ? `[figs] ${figs.figs.length} png -> ${path.join(project, 'Figs')}`

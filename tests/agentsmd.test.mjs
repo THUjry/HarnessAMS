@@ -73,6 +73,7 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
     assert.ok(md.includes('  run_mode: "remote"'))
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
     assert.ok(md.includes('  remote_scripts_dir: "/home/op/sim/.harnessams/scripts"'), 'the remote scripts path rides along')
+    assert.ok(md.includes('  report_figs: false'), 'the PNG-export gate mirrors the config (untyped default)')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
     // 2026-11-24: aliases never render — the machine rows are gone entirely
     assert.ok(!md.includes('remote_node:'), 'the alias row is gone')
