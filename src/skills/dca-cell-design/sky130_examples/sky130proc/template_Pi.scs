@@ -34,4 +34,4 @@ X1 (in out sw vswb) att_pi
 VSW  (sw 0)   vsource dc=(1.8*SW)
 VSWB (vswb 0) vsource dc=(1.8*(1-SW))
 
-sp1 sp start=1e9 stop=40e9 step=100e6
+sp sp start=1e9 stop=40e9 step=100e6

@@ -13,6 +13,10 @@ A real-simulation example for the cascade analysis flow: four designed ATT cells
 
 Reference-state IL @1 GHz ≈ −1.75 dB (the sum of the four cells' reference states); single-bit steps @1 GHz ≈ −1.15 / −2.04 / −4.07 / −8.06 dB against the 1 / 2 / 4 / 8 dB nominal; the all-ones state ≈ ref IL + Σ bits (interaction < 0.3 dB). The consistency check (Section 5) passes for every cell.
 
+## Recorded cross-check references
+
+These anchors were removed from the SKILL.md method text when it was generalized — they are recorded here instead. Verified sweep grid of this example: `cascade.scs` sweeps 1 MHz..40 GHz; performance metrics use the generator's built-in metrics band. Single-bit increments from an earlier 5-bit reference cascade (cross-check at a low-frequency point): 0.5 dB cell ≈ −0.58, 1 dB ≈ −1.17, 2 dB ≈ −2.09, 4 dB ≈ −4.11, 8 dB ≈ −8.09 dB. RMS attenuation error growth on that reference cascade: ≈ 0.17 dB @ 1 GHz → 0.42 dB @ 30 GHz.
+
 ## Regenerating
 
 Re-run the 16 simulations (one per control word — set the four SW levels in `cascade.scs`, run ngspice, convert the wrdata CSV columns `f,s11re,f,s11im,f,s21re,f,s21im,f,s22re,f,s22im` into psfascii `sp_XXXX.sp` files under `Results/Round1/`), write a `cascade_cells.json` (four cells, `control_bit` 0..3 per the wiring above) plus per-cell `cells/<folder>/top/bestPoints.json`, then:

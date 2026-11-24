@@ -1,0 +1,38 @@
+{
+  "design": "ST1",
+  "architecture": "SimpleT",
+  "target_db": 1.0,
+  "device": {
+    "model": "sky130_fd_pr__nfet_01v8",
+    "model_cards": "nshort_model__* (flattened)",
+    "ron_w_ohm_um": 789.6,
+    "coff_ff_per_um": 0.494,
+    "l_um": 0.15,
+    "vgs_v": 1.8
+  },
+  "params": {
+    "r0": 172.10511410045055,
+    "cpf_fF": 28.0,
+    "w0": 24.08644287920755,
+    "nf0": 12
+  },
+  "switch_ron_ohm": { "M0": 32.781926495323916 },
+  "sim": {
+    "states": { "ref": "vsw=0", "att": "vsw=1.8" },
+    "temperature_c": 27.0,
+    "freq_hz": [1000000.0, 15000000000.0],
+    "points_per_state": 210
+  },
+  "results": {
+    "delta_s21_mean_db": -1.0014,
+    "delta_s21_pkpk_db_15G": 0.0047,
+    "delta_phase_pkpk_deg": 1.17,
+    "il_ref_db_dc_to_15G": [0.0, -0.0309],
+    "s11_db_at_15G": { "ref": -33.1, "att": -18.5 }
+  },
+  "files": {
+    "ref": "sp_ref.sp",
+    "att": "sp_att.sp",
+    "note": "verbatim spectre psfascii sp outputs, renamed only"
+  }
+}

@@ -27,4 +27,4 @@ V2 (out 0) port num=2 z0=50
 X1 (in out sw) att_st
 VSW (sw 0) vsource dc=(1.8*SW)
 
-sp1 sp start=1e9 stop=40e9 step=100e6
+sp sp start=1e9 stop=40e9 step=100e6

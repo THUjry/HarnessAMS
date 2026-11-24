@@ -1,0 +1,7 @@
+device,model_card,w_um,nf,l_um,vgs_v,ron_ohm,coff_ff,ron_w_ohm_um,coff_w_ff_per_um,source_netlist
+nfet,nshort_model__w20nf10,20,10,0.15,1.8,39.4821,9.8833,789.6,0.4942,fet_char2.scs
+nfet,nshort_model__w50nf25,50,25,0.15,1.8,15.7928,24.7028,789.6,0.4941,fet_char2.scs
+nfet,nshort_model__w100nf50,100,50,0.15,1.8,7.8964,49.4041,789.6,0.4940,fet_char2.scs
+nfet,nshort_model__w100nf50,200,100,0.15,1.8,3.9482,98.8074,789.6,0.4940,fet_char2.scs
+nfet,nshort_model__w100nf50,80,40,0.15,1.8,9.8705,,789.6,,fet_char.scs
+lvt,nlowvt_model__w20nf10,20,10,0.15,1.8,37.2103,10.8144,744.2,0.5407,fet_char.scs

@@ -13,7 +13,7 @@ import { bundledSkills, readSkillManifest, registerSkills } from '../src/skills.
 test('skills: the packaged skills register with catalog metadata and a directory resourceBase', () => {
   const reg = []
   const names = registerSkills({ skills: { register: (s) => reg.push(s) } })
-  assert.deepEqual(names, ['analysis-cascade-dca', 'batch-sweep', 'cluster-setup', 'dca-cell-design'])
+  assert.deepEqual(names, ['batch-sweep', 'cluster-setup', 'dca-cascade-analysis', 'dca-cell-design'])
   assert.equal(reg.length, 4)
   for (const s of reg) {
     assert.match(s.name, /^[a-z0-9]+(?:-[a-z0-9]+)*$/) // the kebab-case grammar
@@ -32,15 +32,19 @@ test('skills: the resources referenced by each skill body all exist', () => {
   const cell = byName['dca-cell-design']
   assert.ok(cell && !cell.error, cell?.error ?? 'dca-cell-design missing')
   for (const rel of [
-    'sky130_examples/template_ST.scs', 'sky130_examples/template_T.scs',
-    'sky130_examples/template_Pi.scs', 'sky130_examples/sky130_fd_pr__nfet_01v8_lvt.scs',
-    'sky130_examples/nfet_switch.json',
+    'sky130_examples/sky130proc/template_ST.scs', 'sky130_examples/sky130proc/template_T.scs',
+    'sky130_examples/sky130proc/template_Pi.scs', 'sky130_examples/sky130proc/sky130_fd_pr__nfet_01v8_lvt.scs',
+    'sky130_examples/sky130proc/nfet_switch.json', 'sky130_examples/sky130proc/nfet_ron_coff.csv',
+    'sky130_examples/Example.md',
+    'sky130_examples/ST1/design.json', 'sky130_examples/ST1/sp_ref.sp', 'sky130_examples/ST1/sp_att.sp',
+    'sky130_examples/T4/design.json', 'sky130_examples/T4/sp_ref.sp', 'sky130_examples/T4/sp_att.sp',
+    'sky130_examples/Pi8/design.json', 'sky130_examples/Pi8/sp_ref.sp', 'sky130_examples/Pi8/sp_att.sp',
     'scripts/calc_simplet.py', 'scripts/calc_t_type.py', 'scripts/calc_pi.py',
   ]) {
     assert.ok(fs.existsSync(path.join(cell.dir, rel)), `missing resource ${rel}`)
   }
-  const cascade = byName['analysis-cascade-dca']
-  assert.ok(cascade && !cascade.error, cascade?.error ?? 'analysis-cascade-dca missing')
+  const cascade = byName['dca-cascade-analysis']
+  assert.ok(cascade && !cascade.error, cascade?.error ?? 'dca-cascade-analysis missing')
   for (const rel of [
     'scripts/gen_cascade_report.py',
     'example/cell_st1.scs', 'example/cell_t2.scs', 'example/cell_t4.scs',
@@ -93,7 +97,7 @@ test('skills: folded (>) frontmatter descriptions join into one line', () => {
 
 test('skills: gen_cascade_report smoke — synthetic 2-bit cascade in both input modes', () => {
   const gen = path.join(import.meta.dirname, '..', 'src', 'skills',
-    'analysis-cascade-dca', 'scripts', 'gen_cascade_report.py')
+    'dca-cascade-analysis', 'scripts', 'gen_cascade_report.py')
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'hams-cascgen-'))
   const spText = (att) => {
     const lines = ['HEADER', '"number of ports" 2',

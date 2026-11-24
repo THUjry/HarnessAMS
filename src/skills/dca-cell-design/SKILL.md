@@ -11,9 +11,9 @@ description: >
 
 # dca-cell-design — ATT Cell Design (sky130, ideal RC, direct Ron)
 
-Unit-cell design flow: dimension calculation (three architectures), cluster verification sweeps (the batch-sweep workflow; spectre template/config rules in the **smart-spectre** skill) and the cell design report (`gen_sweep_report`). Cascade analysis and reporting live in the **analysis-cascade-dca** skill.
+Unit-cell design flow: dimension calculation (three architectures), cluster verification sweeps (the batch-sweep workflow; spectre template/config rules in the **smart-spectre** skill) and the cell design report (`gen_sweep_report`). Cascade analysis and reporting live in the **dca-cascade-analysis** skill.
 
-**Design method:** the arm total resistance comes from the ideal network formulas, then the **switch Ron is a direct input** (suggested **1/3 ~ 1/5 of the arm total** — a larger Ron wastes arm resistance on the switch, a smaller one grows the device and its off-capacitance); the resistive part is the remainder. Temperature-coefficient targeting (ZTC) is retired — residual drift is measured in the mandatory final temperature sweep and recorded, not compensated.
+**Design method:** the arm total resistance comes from the ideal network formulas, then the **switch Ron is a direct input** (suggested **1/3 ~ 1/5 of the arm total** — a larger Ron wastes arm resistance on the switch, a smaller one grows the device and its off-capacitance); the resistive part is the remainder. Temperature-coefficient targeting (ZTC) is retired — temperature is neither compensated nor swept by default (single-point, template default 27 °C); run a temperature sweep only when the user asks for one.
 
 **Ideal RC:** the templates realize R and C as IDEAL elements; only the switches are real sky130 devices. Analytic flatness predictions from the calculators are therefore advisory — **actual simulation results are authoritative**.
 
@@ -25,20 +25,21 @@ Unit-cell design flow: dimension calculation (three architectures), cluster veri
 | **architecture** | `T-type`, `SimpleT`, or `Pi` | — |
 | **target_db** | Target attenuation in dB | — |
 | **ron** | Direct input: shunt switch Ron [Ω] (arm total /4 by default; keep within 1/3 ~ 1/5 of the arm total) | derived |
-| **ron1** | Direct input: bypass switch Ron [Ω] (T/Pi only; 12 Ω class by default) | derived |
-| **freq_start / freq_stop** | Sweep band (GHz) | 1 / 40 |
+| **ron1** | Direct input: bypass switch Ron [Ω] (T/Pi only; keep well below the series path it shorts) | derived |
+| **freq_start / freq_stop** | Sweep band (GHz) | set per design |
 
-**Frequency bands.** The S-parameter sweep and reports run to **40 GHz max**. Design metrics — `delta_db_range`, `delta_db_avg`, `delta_phase_range_deg`, `worst_match_db`, `ref_state_il_db_range`, `temp_span_0_100C` — are characterized over the **DC~30 GHz** band (the 1 GHz sweep point represents DC; the resistive network is near-flat below 1 GHz). Do not truncate the sweep to 30 GHz just because the metric band is DC~30 GHz.
+**Frequency bands.** The sweep band and the (usually narrower) characterization band for the design metrics — `delta_db_range`, `delta_db_avg`, `delta_phase_range_deg`, `worst_match_db`, `ref_state_il_db_range` — are set per design; the lowest sweep points represent DC for these resistive networks. Do not truncate the sweep to the characterization band. For a verified reference (bands, values, results) see `sky130_examples/Example.md`.
 
 ## sky130_examples (`sky130_examples/`)
 
-Self-contained example set — every netlist runs as-is against the bundled model file:
+Two layers: a verified **example** (design values + raw two-state results) and the **sky130proc** process kit that keeps the skill self-contained.
 
-- `template_Pi.scs` — Pi template with the verified 8 dB worked values (reproduced by `calc_pi.py 8`).
-- `template_T.scs` — 4 dB T-type class defaults (`calc_t_type.py 4`).
-- `template_ST.scs` — 1 dB SimpleT class defaults (`calc_simplet.py 1`).
-- `sky130_fd_pr__nfet_01v8_lvt.scs` — the transcribed sky130 switch model (per-geometry flattened `nlowvt_model__w<W>p<N>f<N>` cards; MIT-licensed sky130-spectre-models repo). In a real project point the `include` at the project's own transcribed-library copy.
-- `nfet_switch.json` — switch data for the calculators: Ron·W ≈ 740 Ω·µm (l=0.15, Vgs=1.8) with the verified sizing points, Coff·W ≈ 0.92 fF/µm (estimate).
+- `Example.md` — the verified example (one cell per architecture: ST1/T4/Pi8): design values, verified frequency band and result summary; the concrete numbers live there, not in this SKILL.md.
+- `ST1/`, `T4/`, `Pi8/` — per-design `design.json` (final parameters at full precision) plus the two-state raw S-parameter outputs `sp_ref.sp` (SW=0) / `sp_att.sp` (SW=1).
+- `sky130proc/template_{Pi,T,ST}.scs` — the runnable architecture templates with calculator class defaults (the `sp` analysis uses the bare instance name `sp`, so the raw output is `sp.sp` as the parsers expect).
+- `sky130proc/sky130_fd_pr__nfet_01v8_lvt.scs` — the transcribed sky130 switch model (per-geometry flattened `nlowvt_model__w<W>p<N>f<N>` cards; MIT-licensed sky130-spectre-models repo). In a real project point the `include` at the project's own transcribed-library copy.
+- `sky130proc/nfet_switch.json` — lvt switch FOM data for the calculators (Ron·W, Coff·W, verified sizing points).
+- `sky130proc/nfet_ron_coff.csv` — measured plain-nfet switch characterization (Ron/Coff per geometry — the device generation the example cells use).
 
 Switch instances use the flattened model card names — when the calculator picks a new w/nf, take the nearest existing card from the transcribed library (or extend its generator) and update `l/w/nf/nrd/nrs` together.
 
@@ -47,10 +48,10 @@ Switch instances use the flattened model card names — when the calculator pick
 Every architecture realizes its shunt path the same way — a resistive part in series with a shunt switch — and for SimpleT the whole cell is exactly this path:
 
 1. **Arm total from the ideal formulas** (per architecture below): `R_arm = R0/(2/|S21| − 2)` for SimpleT; `R3` for T-type; `Rsh` per side for Pi.
-2. **Ron direct input** — the shunt switch on-resistance is GIVEN (suggested 1/3 ~ 1/5 of `R_arm`; default `R_arm/4`). Switch sizing: `W_tot = 740 Ω·µm / Ron` (`sky130_fd_pr__nfet_01v8_lvt`, l=0.15, Vgs=1.8), per-finger width ≈ 2 µm (`nf = round(W_tot/2)`); Coff ≈ 0.92 fF/µm (estimate — see `sky130_examples/nfet_switch.json`).
+2. **Ron direct input** — the shunt switch on-resistance is GIVEN (suggested 1/3 ~ 1/5 of `R_arm`; default `R_arm/4`). Switch sizing from the device FOM data — `W_tot = (Ron·W)/Ron`, per-finger width per the data file (lvt: `sky130_examples/sky130proc/nfet_switch.json`; plain nfet: `sky130_examples/sky130proc/nfet_ron_coff.csv`).
 3. **Resistive remainder**: `Rp = R_arm − Ron`. Report the achieved step against the target (with ideal RC the DC step is exact; the flatness is simulation's business).
 
-For T-type and Pi the series arm(s) come from the same ideal formulas (`Rs`), and the bypass switch Ron1 is a direct input (default 12 Ω class; keep Ron1 ≪ the series path it shorts, or the bypass fails).
+For T-type and Pi the series arm(s) come from the same ideal formulas (`Rs`), and the bypass switch Ron1 is a direct input (keep Ron1 well below the series path it shorts, or the bypass fails).
 
 ## Architecture: Pi
 
@@ -74,7 +75,7 @@ IL_ref = 20·log10[1+(Ron1‖Rs)/(2R0)]                      Rsh = R0·(K+1)/(K�
 A'  = attn + IL_ref           (iterate to convergence)
 ```
 
-Worked anchor (verified): 8 dB → A'=8.828, Rs=60.03 Ω, Rsh=106.72 Ω/side = Rp 89.64 + Ron2 17.07; M1 w=61.7 nf=31 (12 Ω), M2/M3 w=43.3 nf=22 (17.1 Ω); Cp scan optimum 40 fF/side. (Reproduced by `calc_pi.py 8 --ron 17.07`.)
+Worked anchor: the verified Pi design and its values (arm split, switch sizing, Cp optimum) are recorded in `sky130_examples/Example.md` (`Pi8/`); reproduce them with the calculator using the recorded Ron inputs.
 
 Tradeoffs: **M1** is the dominant matching limiter — Ron sets the reference-state DC floor, junction cap drives the HF rolloff; keep Ron ≪ R0 and balance the size (Ron×Coff ≈ const). **Rp** plus the switch off-cap sets the reference-state HF matching (hangs directly on the ports). **M2/M3** off-cap sits behind Rp (shielded) — secondary. Worst matching is the reference state at every frequency; the attenuation state rolls toward it at the band top.
 
@@ -124,7 +125,7 @@ Formulas (this IS the shared shunt-arm section for SimpleT):
 R_shunt(ideal) = R0/(2/|S21|−2)  with |S21| = 10^(−attn/20)
 ```
 
-Examples: 1 dB → R_shunt ≈ 205 Ω; 0.5 dB → ≈ 435 Ω. Best suited to small attenuation steps.
+The shunt resistance grows rapidly as the target attenuation shrinks — best suited to small attenuation steps (worked values in `sky130_examples/Example.md`).
 
 ## Cp Compensation (shared, final parameter)
 
@@ -140,43 +141,42 @@ A compensation capacitor Cp parallels the shunt resistor Rp in every architectur
 4. **Switch geometry moves as one unit.** The flattened model card name, `l/w/nf` and `nrd/nrs` change together (see sky130_examples).
 5. **Cp local scan (last parameter).** See the Cp section above.
 6. **Reference-state IL is NOT an optimization metric** — but it MUST be presented in the report (ΔS21 charts pair the SW=0/SW=1 states).
-7. **Design metrics DC~30 GHz; sims/plots to 40 GHz max.**
-8. **Device-usage compliance check (mandatory, after every design).** Verify every switch instance against the transcribed library rules (l=0.15, per-finger w ≈ 2 µm, card name consistent with geometry) and the include path against the project's library copy; report the per-instance PASS/FAIL table before declaring the cell done.
+7. **Design metrics over the design's characterization band; sims/plots over the full sweep band** (both set per design — verified reference in `sky130_examples/Example.md`).
+8. **Device-usage compliance check (mandatory, after every design).** Verify every switch instance against the transcribed-library geometry rules (see `sky130_examples/sky130proc/nfet_switch.json` and the model-file card list) and the include path against the project's library copy; report the per-instance PASS/FAIL table before declaring the cell done.
 
 ## Shared Simulation Workflow
 
-1. Run the architecture calculator: `python calc_<arch>.py <target_db> [--ron R] [--ron1 R] [--json design.json]` (from this skill's `scripts/`; switch data from `sky130_examples/` or `--data-dir`).
+1. Run the architecture calculator: `python calc_<arch>.py <target_db> [--ron R] [--ron1 R] [--json design.json]` (from this skill's `scripts/`; switch data from `sky130_examples/sky130proc/` or `--data-dir`).
 2. Verify sub-circuits — 5×5 local sweep (Rule 2), one `Sim*` batch per verification unit.
 3. Create the run directory: copy the architecture template in as `template.scs` (fill the calculator values first), write `sweep_config.json` (`SW: [0,1]`, `cpf` candidates, ≤100 points).
-4. Submit: `batch_submit {run_dir, worker: "spectre/spectre_sweep_worker.py", worker_args: ["--config", "sweep_config.json", "--max-parallel", "8"], scheduler: "lsf"|"ssh"}` — machine/root/remote_dir resolve from the project config (omit them; `remote_dir` omit also gives the next auto `Sim<N>_<YYYYMMDD>_batch<M>` under `RawResults/`; Spectre on this host: `scheduler: "local"` instead).
+4. Submit: `batch_submit {run_dir, worker: "spectre/spectre_sweep_worker.py", worker_args: ["--config", "sweep_config.json", "--max-parallel", "8"], scheduler: "lsf"|"ssh", machine_id, remote_root}` — omit `remote_dir` for the next auto `Sim<N>_<YYYYMMDD>_batch<M>` under `RawResults/` (Spectre on this host: `scheduler: "local"` instead, no machine/root).
 5. Poll: `batch_poll {run_dir, wait_sec}` — completion by the point count; a terminal poll auto-fetches sweep_progress.json + errlog.txt (the raw sp.sp curves stay remote; analyze them there per batch-sweep step 4).
 6. Report: analyze (remote-first), write the spec into `SimResults/`, then `gen_sweep_report {spec}`.
-9. **Cp scan batch** (Rule 5) — pick the phase optimum, re-run 5–6.
-10. **Final temperature sweep (mandatory).** All parameters fixed, sweep `temperature: [0,20,40,60,80,100]` × `SW: [0,1]` = 12 points; the final report view shows the 6 temperature curves.
-11. Write `top/bestPoints.json` (schema below).
-12. **Final file-structure check (mandatory).** Confirm the layout below; report the checklist in the final summary.
+7. **Cp scan batch** (Rule 5) — pick the phase optimum, re-run 5–6.
+8. Write `top/bestPoints.json` (schema below).
+9. **Final file-structure check (mandatory).** Confirm the layout below; report the checklist in the final summary.
 
 ## PSS IP1dB Characterization (Reference State)
 
-Optional large-signal characterization of the **reference state** (T-type, SimpleT and Pi: SW=0 — do NOT infer it from the netlist). Copy the template as `template_thorough.scs`, replace the `sp` analysis with the `sweeppss` block and follow the smart-spectre skill's PSS companion page (pin sweep −20..+30 dBm, `dbm=pin` on PORT0, `pin` kept in the parameters line — both pitfalls documented there). Extract Pout = |V_OUT|²/(2·Rport) from the parsed curves, small-signal gain from the first 10 low-power points, IP1dB at the 1 dB gain-drop crossing (interpolated; nearest-neighbour frequency lookup).
+Optional large-signal characterization of the **reference state** (T-type, SimpleT and Pi: SW=0 — do NOT infer it from the netlist). Copy the template as `template_thorough.scs`, replace the `sp` analysis with the `sweeppss` block and follow the smart-spectre skill's swept-PSS section (`spectre-grammar.md`: pin swept over the design's linear-to-compression range, `dbm=pin` on PORT0, `pin` kept in the parameters line — the pitfalls are documented there). Extract Pout = |V_OUT|²/(2·Rport) from the parsed curves, small-signal gain from the first 10 low-power points, IP1dB at the 1 dB gain-drop crossing (interpolated; nearest-neighbour frequency lookup).
 
 ## Cascade Analysis
 
-Assembling and analysing a cascade is the **analysis-cascade-dca** skill's job (assembly mechanics in the smart-spectre skill's cascade companion page). Write `cascade_cells.json` next to the results (per cell: `name`, `architecture`, `target_att_db`, `control_bit`, `bestPoints_params`) — that file feeds the cascade report.
+Assembling and analysing a cascade is the **dca-cascade-analysis** skill's job (assembly mechanics in the smart-spectre skill's cascade section, `spectre-cli.md`). Write `cascade_cells.json` next to the results (per cell: `name`, `architecture`, `target_att_db`, `control_bit`, `bestPoints_params`) — that file feeds the cascade report.
 
 ## File Organization
 
 ```
 <CellName>/
   top/
-    template.scs               # from sky130_examples/template_{ST,T,Pi}.scs, values filled
+    template.scs               # from sky130_examples/sky130proc/template_{ST,T,Pi}.scs, values filled
     template_thorough.scs      # PSS variant (optional)
     bestPoints.json
   verify/                      # Sub-circuit verification run dirs
 <project>/
   RawResults/Sim<N>_<YYYYMMDD>_batch<M>/   # raw run dirs (remote batches / debug fetches)
   SimResults/                  # compact results + report spec JSONs
-  Figs/                        # exported chart PNGs (gen_sweep_report; only when report_figs is on)
+  Figs/                        # exported chart PNGs (gen-sweep-report)
   <name>_report.html           # the generated report (project root)
 ```
 
@@ -184,13 +184,13 @@ Assembling and analysing a cascade is the **analysis-cascade-dca** skill's job (
 
 ## bestPoints.json
 
-Canonical schema: `generated`, `targetSpec` (incl. freq range), `params`, `designNotes` (record the direct inputs: `ron`, `ron1`, and the derived arm split), `targetCoverage`, `ref_state_il_db_range` ([min,max] dB — presented, NOT optimized), `delta_db_range`, `delta_db_avg`, `delta_phase_range_deg`, `worst_match_db`, `temp_span_0_100C` (`temperatures` + `delta_db_avg` [6] + `drift_db`), `source`, `dataRef`, `tempDataRef`, and (when characterized) `ip1dB_ref` = `freq_GHz_ip1dB_dBm` map + `source` + `dataRef`. All band-dependent metrics over the DC~30 GHz characterization band.
+Canonical schema: `generated`, `targetSpec` (incl. freq range), `params`, `designNotes` (record the direct inputs: `ron`, `ron1`, and the derived arm split), `targetCoverage`, `ref_state_il_db_range` ([min,max] dB — presented, NOT optimized), `delta_db_range`, `delta_db_avg`, `delta_phase_range_deg`, `worst_match_db`, `source`, `dataRef`, and (when characterized) `ip1dB_ref` = `freq_GHz_ip1dB_dBm` map + `source` + `dataRef`. All band-dependent metrics over the design's characterization band.
 
 ## Dependencies
 
 - **batch-sweep** — the submit/poll/report workflow (schedulers, Sim naming, remote-first analysis, the spec flow).
 - **smart-spectre** — spectre template/config rules, the parser CLIs, cascade assembly, PSS pitfalls.
-- **analysis-cascade-dca** — cascade analysis and the cascade design report.
+- **dca-cascade-analysis** — cascade analysis and the cascade design report.
 - Plugin tools: `spectre_assemble` / `snp_guide` -> `snp_read` / `snp_extract` (SmartAnaSim), `batch_submit` / `batch_poll` / `gen_sweep_report` (HarnessAMS).
 
 ## References & Copyright

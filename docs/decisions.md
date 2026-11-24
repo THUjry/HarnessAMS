@@ -74,10 +74,10 @@ Design decisions for the `dsh-harnessams` plugin and the HarnessAMS suite, order
 - The block is English + ASCII; unknown settings normalize to defaults. Rendered on VALUES builds only (the first-fill template carries constraints + an empty yaml, no table); both save paths (save_agentsmd and the finalize auto-sync) share one change point.
 - When the workflow or tool parameter surface changes, `workflowTable` changes in the same commit: those strings are what agents read in the project AGENTS.md, and a silent drift misleads them.
 
-## D-011 — dca-design split into dca-cell-design + analysis-cascade-dca; the AsymATT generator absorbed; scrub rules for the skills tree
+## D-011 — dca-design split into dca-cell-design + dca-cascade-analysis; the AsymATT generator absorbed; scrub rules for the skills tree
 
-- `dca-cell-design/` holds unit-cell design (calculators, sky130 example set); `analysis-cascade-dca/` holds cascade analysis plus the absorbed generator: asymmetry removed, ideal RC + switch l/w/nf vocabulary, `--run-dir` mode where NN is the binary control word and the width is the max index's `bit_length`.
-- `templates/` is `sky130_examples/`; the transcribed switch model is bundled beside the templates (PUBLISH's no-PDK-models carve-out); the 4-bit cascade example comes from real sky130 simulations (16 control words) and is carried as cell netlists + results + report only.
+- `dca-cell-design/` holds unit-cell design (calculators, sky130 example set) — its SKILL.md method text carries no concrete frequency limits or device values; `dca-cascade-analysis` holds cascade analysis plus the absorbed generator: asymmetry removed, ideal RC + switch l/w/nf vocabulary, `--run-dir` mode where NN is the binary control word and the width is the max index's `bit_length`.
+- The sky130 example set splits in two: `sky130proc/` (the runnable process kit — templates with the bare `sp` analysis name, the transcribed switch model per PUBLISH's no-PDK-models carve-out, lvt switch FOM data, plain-nfet Ron/Coff characterization csv) and the verified example layer (`Example.md` + `ST1/T4/Pi8/` per-design `design.json` + two-state raw `sp_ref.sp`/`sp_att.sp`, renamed only); the 4-bit cascade example comes from real sky130 simulations (16 control words) and is carried as cell netlists + results + report only.
 - Skills-tree scrub rules: no asymmetric vocabulary, no dates (two TMTT citations excepted), no machine paths, accounts or IPs (pre-commit hook enforced).
 - The cascade report keeps its own `Analysis/` + CDN-plotly convention, separate from `gen_sweep_report`'s layout.
 

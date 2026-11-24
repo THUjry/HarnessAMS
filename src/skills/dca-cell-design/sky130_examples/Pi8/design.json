@@ -1,0 +1,42 @@
+{
+  "design": "Pi8",
+  "architecture": "Pi",
+  "target_db": 8.0,
+  "device": {
+    "model": "sky130_fd_pr__nfet_01v8",
+    "model_cards": "nshort_model__* (flattened)",
+    "ron_w_ohm_um": 789.6,
+    "coff_ff_per_um": 0.494,
+    "l_um": 0.15,
+    "vgs_v": 1.8
+  },
+  "params": {
+    "r0": 60.02956975284768,
+    "rp": 89.64347169439552,
+    "cpf_fF": 60.0,
+    "w1": 65.8,
+    "nf1": 33,
+    "w2": 46.24318895336992,
+    "nf2": 23
+  },
+  "switch_ron_ohm": { "M1": 12.0, "M2": 17.07494698940867, "M3": 17.07494698940867 },
+  "sim": {
+    "states": { "ref": "vsw=0", "att": "vsw=1.8" },
+    "temperature_c": 27.0,
+    "freq_hz": [1000000.0, 15000000000.0],
+    "points_per_state": 210
+  },
+  "results": {
+    "delta_s21_mean_db": -8.012,
+    "delta_s21_pkpk_db_15G": 0.0301,
+    "delta_s21_pkpk_db_14p45G": 0.0204,
+    "delta_phase_pkpk_deg": 4.42,
+    "il_ref_db_dc_to_15G": [-0.8184, -1.2397],
+    "s11_db_at_15G": { "ref": -14.4, "att": -15.2 }
+  },
+  "files": {
+    "ref": "sp_ref.sp",
+    "att": "sp_att.sp",
+    "note": "verbatim spectre psfascii sp outputs, renamed only"
+  }
+}
