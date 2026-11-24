@@ -1,70 +1,106 @@
 ---
 name: cluster-setup
 description: >
-  First-use cluster pre-flight for batch sweeps: how the login shell
-  startup chain (/etc/profile.d modules, ~/.bashrc, SSH_SOURCE_BASHRC)
-  delivers the EDA toolchain to non-interactive remote commands, why
-  remote_python must be an absolute path (bare python3 may be
-  tool-vendored), the module-as-function gotcha, and the shared-NFS-home
-  assumption. Trigger when configuring a cluster, when a remote command
-  cannot find spectre or module, or when choosing the worker interpreter.
+  Cluster toolchain bootstrap, run once per cluster and when a remote command
+  cannot find spectre, python3 or module: harvest where the login startup
+  files (/etc/profile.d, ~/.bash_profile, ~/.bashrc: module loads, PATH
+  exports, alias lines) really put each key command, verify the candidates
+  as absolute paths with ssh_exec, then pin remote_python /
+  remote_spectre_cmd in the project settings so no job depends on PATH
+  order or an alias. Also when a self-check fails on its environment leg.
 ---
 
-# cluster-setup — the remote login environment, checked once per cluster
+# cluster-setup - harvest, verify, pin: the cluster toolchain as absolute paths
 
-All three batch schedulers (local, ssh, lsf) end up running a command on a cluster node: a worker over ssh, a bsub job, or a local spawn on the host. This skill is the once-per-cluster check that those commands land in a working EDA environment, and the diagnosis path when they don't. Run it before the first sweep on a new cluster or a new dsh-ssh alias; the submission flow itself lives in the `batch-sweep` skill.
+Every batch scheduler ends up launching a command on a cluster node under a bare name: `python3` runs the worker, `spectre` runs the simulation. A bare name resolves through PATH, and PATH is whatever the shell startup chain left behind. On an EDA cluster that is not stable: the same name can be a different program in an interactive login shell and in a non-interactive job. This skill turns each key command into one verified absolute path and pins it in the project settings. Run it before the first sweep on a new cluster, when the cluster's environment changed, and when a remote command cannot find `spectre`, `python3` or `module`. Once the pins are in place they do the work: a session passes no interpreter argument at all, and no job depends on an alias. The submission flow itself lives in the `batch-sweep` skill.
 
-## What runs when you ssh
+**Never guess a path and never choose an interpreter by taste.** A path enters the settings only after stages 1 and 2 measured it, and when candidates disagree the user decides.
 
-Two different shell startup chains decide everything:
+## The moving parts (why a bare name is not enough)
 
-- An **interactive login shell** (a human typing `ssh node`) runs `/etc/profile` -> `/etc/profile.d/*.sh` -> `~/.bash_profile` -> `~/.bashrc`. On RHEL/Rocky-style clusters `/etc/profile.d/modules.sh` defines the `module` function (Environment Modules; Lmod clusters have their own profile.d entry), and the scheduler's profile script prepends its `bin/` (bsub) to PATH.
-- A **non-interactive ssh command** (`ssh node "..."` — every exec the plugin issues) skips `/etc/profile` entirely. Mainstream distros build bash with `SSH_SOURCE_BASHRC`, so `~/.bashrc` still runs: an EDA environment assembled there reaches every remote command and every worker, with nothing extra to source.
+- **Interactive login shell** (a human typing `ssh node`): `/etc/profile` -> `/etc/profile.d/*.sh` -> `~/.bash_profile` -> `~/.bashrc`. On RHEL/Rocky-style clusters `/etc/profile.d/modules.sh` defines the `module` function (Environment Modules; Lmod clusters ship their own profile.d entry), and every `module load <mod>` prepends that tool's absolute `bin/` directory to PATH.
+- **Non-interactive command** (every exec the plugin issues, every worker): skips `/etc/profile` entirely. Whether `~/.bashrc` runs depends on how the remote shell is invoked (distros built with `SSH_SOURCE_BASHRC` run it for `ssh host cmd`): measure it in stage 2, never assume it.
+- **An alias binds a command for humans only.** `alias python3=/abs/path` never expands in a non-interactive shell. It says where the user's interactive `python3` lives, and that is all it says: a lead to harvest, never a path a job can use.
+- **`module` is a shell function, not a binary**: it exists in a command only if the chain that command ran defines it. Inside worker scripts do not call `module` at all; the pinned absolute paths make it unnecessary.
+- bsub jobs inherit the environment of the shell that submitted them.
 
-Verified on the reference cluster, in a bare non-interactive exec (sanitized paths): `module` resolved as a shell function and `spectre` was on PATH — and a bare `python3` resolved to the interpreter vendored inside the calibre module (3.8, not the cluster's 3.12), because the cluster publishes its real python only as `alias python3=...` and aliases never expand in non-interactive shells.
+## Stage 1 - harvest: read the startup files (read-only)
 
-## Pre-flight: four probes, once per cluster
+Run on the host the project submits through (the machine in the Overview settings table), every command through dsh-ssh `ssh_exec`, never raw shell ssh; in-cluster, run them on this host.
 
-    ssh <node> 'command -v spectre'             # toolchain reaches non-interactive commands?
-    ssh <node> 'command -v python3'             # what a bare python3 would be
-    ssh <node> 'bash -lc "module list"'         # the interactive-login module set
-    ssh <node> 'bash -lc "type -a python3"'     # every python the login PATH sees
+    ls -1 /etc/profile /etc/profile.d/ ~/.bash_profile ~/.bashrc 2>/dev/null
+    cat /etc/profile ~/.bash_profile ~/.bashrc
+    grep -nE 'module (load|purge|switch)|PATH|alias (python3?|spectre|bsub|bjobs)=' /etc/profile /etc/profile.d/*.sh ~/.bash_profile ~/.bashrc
+
+Follow every `source` or `.` line into the file it names. Collect four kinds of leads for each key command (`spectre`, `python3`, `bsub` / `bjobs`):
+
+- `module load <mod>`: the modulefile states the absolute directories. `bash -lc "module show <mod>"` prints the modulefile's path; `cat` it and read its `prepend-path PATH /abs/tools/bin` line.
+- `export PATH=...`: the absolute directories prepended, in order.
+- `alias <cmd>=/abs/path`: where the user chose to bind that command. Record it as a CANDIDATE, the user's own answer for that command, still to be verified.
+- `source` lines: follow them; the chain is as long as it is.
+
+Where a line sits matters as much as what it says: unconditional in `~/.bashrc` reaches non-interactive commands; `~/.bash_profile`, or anything behind an "interactive only" guard, is for humans only.
+
+Startup files are the user's. Read them, never edit them. If one of them is the reason a command is missing, report the exact line and let the user decide.
+
+Result of stage 1, shown to the user: a table `command | where it comes from (file and line: module, export, alias or source) | candidate absolute path`.
+
+## Stage 2 - verify: measure what a job really gets (ssh_exec)
+
+    command -v spectre; command -v python3                      # what a non-interactive exec resolves: the job's view
+    bash -lc "command -v spectre; command -v python3"           # what a login shell's PATH resolves (aliases do not expand here: stage 1 harvested them)
+    ls -l <candidate>                                          # exists? a real binary, a symlink or a wrapper script
+    <python candidate> -c "import sys; print(sys.version)"      # the worker needs Python >= 3.7
+    <python candidate> -c "import numpy"                       # optional: the snp tools use it, else the staged numfallback
 
 Reading the results:
 
-- **spectre found** by the bare probe — the environment reaches non-interactive commands; ssh and lsf submits will work as-is.
-- **spectre missing bare, found under `bash -lc`** — the module loads live only in `~/.bash_profile` (or behind an interactive guard), so remote commands get a bare PATH. Fix at the source: move the exports and `module load` lines into `~/.bashrc`, unconditionally.
-- **python3 inside an EDA install** (e.g. `/.../calibre.../bin/python3`) — a tool-vendored interpreter, usually older than the cluster's real one; pick the absolute path for `remote_python` instead.
+- Both `command -v` rows print the same absolute path: that is the command's real path. Pin the path `command -v` printed, as printed; do not "improve" it with `readlink -f` (a wrapper script needs its own location).
+- The rows disagree: typical on a cluster that publishes `python3` as an alias while the non-interactive PATH finds a tool-vendored python first. Both are candidates. Report each with its version (and numpy or not) and let the user choose.
+- A candidate that neither row resolves (an alias target, for instance) is checked by the last two probes alone: it is the path the user chose for their interactive shell.
+- `spectre` is missing from the non-interactive row: its module loads sit behind an interactive guard. An absolute path only helps if spectre also finds the libraries its module sets up (`LD_LIBRARY_PATH` and friends); the self-check in stage 3 is the test that decides.
 
-## remote_python: absolute path, always
+Result of stage 2: `command | absolute path | version`, plus every disagreement spelled out.
 
-`batch_submit`'s `remote_python` names the interpreter that runs the worker on the target node. The default is a bare `python3` — safe only where nothing shadows it. EDA clusters frequently publish their real python as an alias (to coexist with tool pythons), and since aliases never expand non-interactively the bare name hits whichever tool python comes first on PATH. Pass the absolute path the probes found, e.g. `remote_python: "/opt/GNU/python3.12/bin/python3"`, and use the same absolute form when `ssh_exec`-ing analyzers over remote result data.
+## Stage 3 - pin: write the absolute paths into the project
 
-## `module` is a shell function, not a binary
+After the user confirms the paths:
 
-`module` is defined by the login chain (profile.d), so it exists inside a remote command only if the chain that command ran defines it — directly in `~/.bashrc`, or via an explicit `source /etc/profile` there (the trick the reference cluster uses to make module work everywhere). To run module-dependent setup in one command, wrap it in a login shell:
+    harnessams_selfcheck { action: "run", settings: { remote_python: "<abs path>", remote_spectre_cmd: "<abs path>" } }
 
-    ssh <node> 'bash -lc "module load <mod> && <cmd>"'
+The settings payload is a partial merge: only the keys named change, nothing else in the table moves. The self-check then runs the whole pipeline under exactly those two paths (assemble -> batch_submit -> batch_poll -> parse -> verify); when it passes, the pin is proven. Its finalize re-syncs AGENTS.md, whose yaml now carries `remote_python` and `remote_spectre_cmd` as the rows every later session reads.
 
-Inside worker scripts, don't call `module` at all: rely on the inherited environment or export the variables you need.
+From then on:
+
+- `batch_submit`: omit `remote_python`. The pinned interpreter runs the worker, and for the bundled worker `spectre/spectre_sweep_worker.py` the pinned spectre is passed as `--spectre-cmd` unless `worker_args` names one.
+- Remote parsers: `ssh_exec` them with the interpreter named by the `remote_python` row.
+- An explicit `remote_python` argument must be an absolute path. Bare names are rejected: they resolve to whatever the startup chain left first on PATH.
+- `null` in a row means not pinned: the bare default (`python3`, `spectre` on PATH) applies, which is exactly what the self-check verified for the project. Pinning is optional hardening while that default holds, and it is what protects the project when the PATH order changes.
+
+Re-run the three stages when the cluster changes (a module default, a new tool version).
 
 ## Shared NFS home
 
-Login and compute nodes normally mount one NFS home, so every node reads the same `~/.bashrc`: one pre-flight covers the whole cluster and module versions cannot drift between the submit node and the execution nodes. Probe per node only when homes are node-local (rare — ask the admin). bsub jobs inherit the submitting shell's environment, and submitting through the ssh node inherits that node's `~/.bashrc` chain.
+Login and compute nodes normally mount one NFS home, so every node reads the same `~/.bashrc`: one harvest covers the whole cluster and module versions cannot drift between the submit node and the execution nodes. Verify per node only when homes are node-local (rare: ask the admin). Software trees are shared the same way, so one absolute path holds on every node.
 
 ## Reference-cluster ~/.bashrc skeleton (sanitized)
 
     # ~/.bashrc on the reference cluster (sanitized)
     [ -f /etc/bashrc ] && . /etc/bashrc
-    # unconditional: non-interactive ssh commands stop here, not at /etc/profile
+    # unconditional: a non-interactive command stops here, not at /etc/profile
     export MODULEPATH=/opt/env/module/cadence:/opt/env/module/synopsys:/opt/env/module/GNU
     module purge
     module load calibre_2024.4
-    # re-runs /etc/profile.d — makes `module` self-contained for non-interactive shells
+    # re-runs /etc/profile.d: makes `module` self-contained for non-interactive shells
     source /etc/profile
     module load IC618            # virtuoso + spectre family
     module load SPECTRE21.1
-    # the cluster's real python — an ALIAS: invisible to remote jobs
     alias python3=/opt/GNU/python3.12/bin/python3
 
-The skeleton shows both halves of the contract: why everything works remotely (unconditional exports and module loads inside `~/.bashrc`) and why `remote_python` must spell the alias target out in full.
+What the three stages found on this cluster:
+
+- `spectre`: stage 1, `module load SPECTRE21.1`, unconditional in `~/.bashrc`. Stage 2, `command -v spectre` resolves inside that module for non-interactive commands; that absolute path is the pin.
+- `python3`: stage 1, no export names it, and the alias line is the user's binding (a 3.12 install). Stage 2, the non-interactive row resolves `python3` inside the calibre module's install first (a tool-vendored 3.8, which carries numpy), and the alias target carries no numpy. Two candidates, two versions: both go to the user. The 3.8 is the one the self-check passed with under the bare default.
+- `module`: a function, available in every command because `~/.bashrc` re-runs `/etc/profile`.
+
+The skeleton is a pointer, not a template: another cluster's files differ, and the stages, not this listing, decide what gets pinned.

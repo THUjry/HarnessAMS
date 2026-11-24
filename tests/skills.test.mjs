@@ -27,6 +27,31 @@ test('skills: the packaged skills register with catalog metadata and a directory
   }
 })
 
+test('skills: cluster-setup is harvest, verify, pin: read-only, through ssh_exec, no path to guess', () => {
+  const s = bundledSkills().find((x) => x.name === 'cluster-setup')
+  assert.ok(s && !s.error, s?.error ?? 'cluster-setup missing')
+  const { description, content } = s.manifest
+  assert.match(description, /harvest/i)
+  // the three stages, in order
+  const i1 = content.indexOf('Stage 1')
+  const i2 = content.indexOf('Stage 2')
+  const i3 = content.indexOf('Stage 3')
+  assert.ok(0 <= i1 && i1 < i2 && i2 < i3, 'harvest, verify, pin: in that order')
+  // stage 1 keeps the whole startup chain including the alias line (a lead to
+  // harvest, not something to delete); stage 2 probes with command -v; stage 3
+  // pins through the self-check's partial settings write
+  for (const needle of ['~/.bashrc', '~/.bash_profile', '/etc/profile.d', 'alias python3=',
+    'command -v spectre', 'remote_python', 'remote_spectre_cmd', 'ssh_exec', 'never raw shell ssh',
+    'harnessams_selfcheck { action: "run", settings: { remote_python:']) {
+    assert.ok(content.includes(needle), `cluster-setup lost "${needle}"`)
+  }
+  // probes go through ssh_exec: no raw shell ssh, no host placeholder to guess
+  assert.ok(!/ssh <[a-z]+>/.test(content), 'no raw shell ssh probe')
+  assert.ok(!/absolute path, always/.test(content), 'the old always-absolute stance is gone')
+  assert.ok(!content.includes('module list'), 'the interactive-only module list probe is gone')
+  assert.ok(/^[\x00-\x7F]*$/.test(content), 'ASCII-only skill body')
+})
+
 test('skills: the resources referenced by each skill body all exist', () => {
   const byName = Object.fromEntries(bundledSkills().map((s) => [s.name, s]))
   const cell = byName['dca-cell-design']
