@@ -23,7 +23,7 @@ import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { resolveMachine } from '../src/remote.js'
-import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
+import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginAssets, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
 
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
 
@@ -223,6 +223,61 @@ test('worker scripts root: env override resolves, bad values and pluginScripts l
   ])
   for (const s of pluginScripts(SCRIPTS_ROOT)) {
     assert.equal(s.local, path.join(SCRIPTS_ROOT, ...s.rel.split('/')))
+  }
+
+  // The sibling assets bucket (D-015): snp_common resolves its numfallback
+  // import at <scripts root>/../assets, so that is the one probe — absent in
+  // the bare fixture, listed when planted next to a scripts root.
+  assert.deepEqual(pluginAssets(SCRIPTS_ROOT), [], 'no sibling assets dir in the bare fixture')
+  const base = tmp('hams-assets-')
+  const aRoot = path.join(base, 'scripts')
+  fs.mkdirSync(path.join(aRoot, 'spectre'), { recursive: true })
+  fs.mkdirSync(path.join(base, 'assets'), { recursive: true })
+  fs.writeFileSync(path.join(base, 'assets', 'numfallback.py'), '# fallback\n')
+  fs.writeFileSync(path.join(base, 'assets', 'notes.txt'), 'ignored\n')
+  const assets = pluginAssets(aRoot)
+  assert.deepEqual(assets.map((a) => a.rel), ['numfallback.py'])
+  assert.equal(assets[0].local, path.join(base, 'assets', 'numfallback.py'))
+})
+
+test('batch_submit resolves machine/root from the project settings and uploads the sibling assets bucket', async () => {
+  const base = tmp('hams-fb-')
+  const scriptsRoot = path.join(base, 'scripts')
+  fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
+  fs.mkdirSync(path.join(base, 'assets'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), '# worker\n')
+  fs.writeFileSync(path.join(base, 'assets', 'numfallback.py'), '# fallback\n')
+  process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
+  const root = tmp('hams-proj-')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
+      remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+      compute_script_local: 'python', compute_script_remote: 'python',
+    },
+  }, null, 2))
+  try {
+    const run = makeRunDir({ under: root })
+    const ctx = makeCtx()
+    // machine_id and remote_root deliberately omitted: both must resolve from
+    // the project settings the run dir walks up to (2026-11-24)
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.remote_dir, '/home/op/sim/batch1')
+    const uploads = ctx.calls.filter((c) => c.name === 'ssh_upload')
+      .map((c) => c.arguments.remotePath)
+    assert.ok(uploads.includes('/home/op/sim/.harnessams/scripts/spectre/spectre_sweep_worker.py'),
+      'worker uploaded from the configured scripts root')
+    assert.ok(uploads.includes('/home/op/sim/.harnessams/assets/numfallback.py'),
+      'the sibling assets bucket uploads beside the scripts root (D-015)')
+  } finally {
+    restoreEnv()
+    fs.rmSync(base, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
   }
 })
 
@@ -605,12 +660,12 @@ test('batch tools reject escaped paths and unresolvable machines', async () => {
       remote_scripts_dir: '/tmp/elsewhere', sync_scripts: true,
     }, {}), /remote_scripts_dir must be under the remote workspace/)
 
-    // machine_id is required for every remote scheduler (local is the only
-    // one that omits it); the rejection now comes from machine resolution
+    // machine_id falls back to the project settings first (2026-11-24); with
+    // no configured machine either, the rejection comes from machine resolution
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1',
       worker: 'spectre/spectre_sweep_worker.py',
-    }, {}), /machine_id \(a dsh-ssh alias\) is required/)
+    }, {}), /no machine configured for this project/)
 
     await assert.rejects(() => resolveMachine(makeCtx(), 'ghost', REMOTE_ROOT), /no such dsh-ssh host: ghost/)
 

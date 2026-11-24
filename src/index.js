@@ -59,15 +59,16 @@ export const name = 'dsh-harnessams'
 // cannot save that, live-caught 2026-11-21.)
 export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills', 'shell']
 
-// Remote waiting policy injected into the system prompt while this plugin is
-// enabled (2026-11-21, the "no dumb sleep" wave): bounded sleeps, progress-
-// driven polling, and an ask-first gate before any improvised ssh fallback —
-// which must still go through the dsh-ssh tools, never a raw shell ssh.
-// Static text, registered once at plugin load, so the KV prefix stays stable.
-// Prose, not bullets: the assembled host prompt is plain paragraphs (its core
-// sections and dsh-ssh's guidance carry no markdown block structure), so the
-// lone "##" heading was restyled into this paragraph the same day.
-export const REMOTE_WAIT_POLICY = 'HarnessAMS remote waiting policy: poll status (batch_poll, optionally with wait_sec for a bounded blocking wait; harnessams_selfcheck "status" for self-checks) instead of blind-sleeping a guessed duration. Sleep <=30 s per command, re-check after each, repeat until the run finishes (prefer 10 s -> 20 s -> 40 s backoff with ETA from completed/total); while a progress card is displayed, refresh it at least once every 5 s (poll, do not sleep); if the standard chain cannot proceed (repeated failures, stuck run, missing capability), stop and ask the user first; any improvised fallback requires explicit approval and must still use the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download), never raw ssh commands from the shell. Projects run in one of two working environments (cluster_env): each project\'s AGENTS.md config block states which one holds ("This is an in-cluster / out-of-cluster project") and the scheduler semantics follow it — read that block before choosing scheduler="local"/"ssh"/"lsf".'
+// Execution safety rules injected into the system prompt while this plugin is
+// enabled. 2026-11-24 rework (the "prompts carry SAFETY only" ruling): the
+// operational cadence that used to live here (bounded sleeps, backoff steps,
+// progress-card refresh rates) moved to the project AGENTS.md workflow table
+// and the batch-sweep skill; what stays is the safety core — ask-first on a
+// broken chain, no improvised fallbacks, dsh-ssh tools only, never raw shell
+// ssh — plus the pointer to the project config block. Static text, registered
+// once at plugin load, so the KV prefix stays stable. Prose, not bullets: the
+// assembled host prompt is plain paragraphs.
+export const REMOTE_WAIT_POLICY = 'HarnessAMS execution safety rules: if the standard chain cannot proceed (repeated tool failures, stuck run, missing capability), stop and ask the user first — never improvise a workaround on your own; any improvised fallback requires explicit user approval and must still go through the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download), never raw ssh commands from the shell; prefer the SAS/HA plugin tools for every simulation step. Projects run in one of two working environments (cluster_env): read the cluster_env row of the project\'s AGENTS.md config block before choosing scheduler="local"/"ssh"/"lsf". Operational cadence (poll intervals, backoff) lives in that block\'s workflow table, not here.'
 
 // Model-source discipline (2026-11-23, the schematic round-trip wave): the agent
 // never reads PDK/model-library files; model sections and simulator setup come

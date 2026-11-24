@@ -18,6 +18,7 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
+import { ensureProjectScripts } from './scriptStage.js'
 
 const PKG_ROOT = path.resolve(import.meta.dirname ?? '.', '..') // src/
 const STORE_DIR = '.harnessams'
@@ -63,6 +64,16 @@ function defaultSimScriptsDir() {
     try { if (fs.statSync(c).isDirectory()) return path.resolve(c) } catch { /* probe next */ }
   }
   return path.resolve(candidates[0])
+}
+
+// Source root for the one-time project script staging (scriptStage.js):
+// HARNESSAMS_SIM_SCRIPTS_DIR -> the configured sim_scripts_dir (pre-flip —
+// the dev sibling for a fresh project) -> the dev-sibling default. Resolution
+// only; existence is the stager's problem (it fails open).
+export function resolveScriptsSource(workspacePath) {
+  const env = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
+  if (env) return path.resolve(env)
+  return resolveWorkspacePaths(workspacePath).sim_scripts_dir
 }
 
 export function defaultWorkspaceSection() {
@@ -242,14 +253,22 @@ export function validateSettings(input) {
 // Read-modify-write of the settings section only — the workspace section
 // survives untouched. Fresh file: workspace defaults are laid down (the
 // "initialize with npm-default plotly / sibling scripts" ruling) and the
-// AGENTS.md config-table template rides the .harnessams creation moment.
+// AGENTS.md config-table template rides the .harnessams creation moment —
+// which also stages the project's reusable simulation scripts and points
+// sim_scripts_dir at the project-local copy (2026-11-24: what the self-check
+// exercises must stay usable afterwards; existing projects keep their
+// explicit value, no migration).
 export async function writeSettings(workspacePath, settings) {
   const dir = path.join(workspacePath, STORE_DIR)
   const finalPath = configPath(workspacePath)
   const fresh = !fs.existsSync(dir)
   const cur = await readConfig(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
-  if (fresh) await ensureAgentsMdTemplate(workspacePath)
+  if (fresh) {
+    await ensureAgentsMdTemplate(workspacePath)
+    await ensureProjectScripts(workspacePath, resolveScriptsSource(workspacePath))
+    cur.config.workspace.sim_scripts_dir = path.join(dir, 'scripts')
+  }
   const tmp = finalPath + '.tmp'
   await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings }, null, 2) + '\n', 'utf8')
   await fsp.rename(tmp, finalPath)

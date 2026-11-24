@@ -20,7 +20,7 @@ import { readSettingsFor } from '../server/settings.js'
 import {
   DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildSshCommand, buildSubmitCommand,
   collectRunFiles,
-  defaultRemoteScriptsDir, nextSimDir, parseJobId, parsePollOutput, pluginScripts,
+  defaultRemoteScriptsDir, nextSimDir, parseJobId, parsePollOutput, pluginAssets, pluginScripts,
   pollCommand, postSubmitCommand, readJob, remoteJoin,
   resolveRemoteDir, sanitizeRel, submitScriptsRoot, templateUploadPlan, writeJob,
 } from '../batch.js'
@@ -180,8 +180,8 @@ export function batchTools(ctx) {
     {
       name: 'batch_submit',
       description: 'Submit a batch through the suite\'s worker scripts under one of three schedulers, with '
-        + 'semantics set by the project\'s working environment (cluster_env in workspace_config.json, mirrored in '
-        + 'the AGENTS.md config block). scheduler="local" runs the worker on THIS host detached and returns '
+        + 'semantics set by the project\'s working environment (read the cluster_env row of the project\'s AGENTS.md '
+        + 'config block — .harnessams/ is plugin storage, do not read it). scheduler="local" runs the worker on THIS host detached and returns '
         + 'immediately — poll with batch_poll (in-cluster only; an out-of-cluster host cannot run it). '
         + 'scheduler="lsf" (default) runs it under bsub: in-cluster bsub runs right on this host and the run '
         + 'directory stages as a local copy on the shared filesystem; out-of-cluster the directory and the worker '
@@ -197,14 +197,14 @@ export function batchTools(ctx) {
           + 'Omit to auto-generate the next Sim<N>_<YYYYMMDD>_batch<M> directory under <remote_root>/RawResults '
           + '(the D-006 raw-simulation-data convention; mirror the same name locally under <project>/RawResults). '
           + 'Unused for scheduler="local"' },
-        remote_root: { type: 'string', description: 'Absolute run root that fences remote_dir — the project\'s '
-          + 'workspace_config.json settings.remote_root (shown in the AGENTS.md config table): a shared-filesystem '
-          + 'path in-cluster, the ssh host\'s path out-of-cluster. Required unless scheduler="local"' },
+        remote_root: { type: 'string', description: 'Absolute run root that fences remote_dir — a shared-filesystem '
+          + 'path in-cluster, the ssh host\'s path out-of-cluster. Omit to use the project\'s configured remote_root '
+          + '(mirrored in the AGENTS.md config block); explicit values are for one-off overrides' },
         worker: { type: 'string', required: true, description: 'Worker script relative to the scripts root (e.g. spectre/spectre_sweep_worker.py) or an absolute remote path' },
         worker_args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed to the worker (e.g. --config sweep_config.json --max-parallel 8)' },
-        machine_id: { type: 'string', description: 'dsh-ssh host alias (ssh_list / the machine card) — the node to '
-          + 'run on. Required for scheduler="ssh" and for out-of-cluster lsf; unused by in-cluster lsf (bsub runs '
-          + 'on this host)' },
+        machine_id: { type: 'string', description: 'dsh-ssh host alias to run on — omit to use the project\'s '
+          + 'configured machine (the normal case; pass one only to spread a sweep across nodes, together with '
+          + 'repeated submits). Unused by in-cluster lsf (bsub runs on this host)' },
         remote_python: { type: 'string', description: 'Remote Python executable (default python3; use the full path on clusters)' },
         remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remote_root>/.harnessams/scripts)' },
         sim_scripts_dir: { type: 'string', description: 'Worker scripts root: an existing directory IS the root (override); any other value only anchors the '
@@ -258,7 +258,7 @@ export function batchTools(ctx) {
           }
           target = { machine: null, alias: null, remoteRoot: root }
         } else {
-          target = await resolveMachine(ctx, args.machine_id, remoteRootArg)
+          target = await resolveMachine(ctx, args.machine_id || settings.machine_id, remoteRootArg)
         }
         const channel = {
           alias: target.alias,
@@ -314,8 +314,8 @@ export function batchTools(ctx) {
           const localWorker = path.join(submitScriptsRoot(args.sim_scripts_dir, runDir), ...workerRel.split('/'))
           if (!fs.existsSync(localWorker)) {
             throw new Error(`worker script not found under the project sim_scripts_dir: ${workerRel} `
-              + '(set workspace.sim_scripts_dir in the project\'s .harnessams/workspace_config.json '
-              + 'to the SmartAnaSim scripts directory, or pass sim_scripts_dir)')
+              + '(fix the worker scripts root in the project settings table — the Overview settings UI or the '
+              + 'harnessams_selfcheck settings argument — or pass sim_scripts_dir)')
           }
           remoteWorker = remoteJoin(scriptsRoot, workerRel)
         }
@@ -333,10 +333,21 @@ export function batchTools(ctx) {
           collectRunFiles(runDir, args.files), sweepConfig)
 
         if (syncScripts) {
-          for (const script of pluginScripts(submitScriptsRoot(args.sim_scripts_dir, runDir))) {
+          const scriptsRootLocal = submitScriptsRoot(args.sim_scripts_dir, runDir)
+          for (const script of pluginScripts(scriptsRootLocal)) {
             const remote = remoteJoin(scriptsRoot, script.rel)
             const up = await channel.upload(script.local, remote)
             if (!up.ok) throw new Error(`upload failed for ${script.rel}: ${up.text}`)
+          }
+          // sibling assets bucket (numfallback): lands at <scripts root>/../assets
+          // so snp_common's here.parents[1]/assets resolution finds it remotely
+          for (const asset of pluginAssets(scriptsRootLocal)) {
+            const remote = remoteJoin(scriptsRoot, '..', 'assets', asset.rel)
+            if (!underRoot(target.remoteRoot, remote)) {
+              throw new Error(`assets upload escapes the remote workspace: ${remote}`)
+            }
+            const up = await channel.upload(asset.local, remote)
+            if (!up.ok) throw new Error(`upload failed for assets/${asset.rel}: ${up.text}`)
           }
         }
 

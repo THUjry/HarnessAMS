@@ -59,12 +59,19 @@ test('apply injects both system prompt sections (fail-open)', async () => {
   assert.match(discipline.text, /stop and ask the user instead of inspecting PDK trees/)
   assert.ok(policy, 'wait-policy section registered')
   assert.equal(policy.order, 5500)
-  assert.match(policy.text, /Sleep <=30 s per command/)
-  assert.match(policy.text, /at least once every 5 s/)
+  // 2026-11-24 safety-core-only rework: the operational cadence moved to the
+  // project AGENTS.md workflow table and the batch-sweep skill — what stays
+  // in the prompt is the ask-first/no-fallback/no-raw-ssh safety core
   assert.match(policy.text, /stop and ask the user first/)
+  assert.match(policy.text, /never improvise a workaround on your own/)
+  assert.match(policy.text, /explicit user approval/)
   assert.match(policy.text, /dsh-ssh tools \(ssh_exec\/ssh_upload\/ssh_download\)/)
   assert.match(policy.text, /never raw ssh commands from the shell/)
+  assert.match(policy.text, /prefer the SAS\/HA plugin tools/)
   assert.match(policy.text, /two working environments/, 'the env-dichotomy pointer rides the policy')
+  assert.doesNotMatch(policy.text, /Sleep <=30 s/, 'cadence left the prompt')
+  assert.doesNotMatch(policy.text, /at least once every 5 s/, 'card-refresh cadence left the prompt')
+  assert.match(policy.text, /cluster_env row of the project.s AGENTS\.md config block/, 'points at the yaml row, not the retired prose statement')
   // fail-open: without the service, apply still mounts routes/tools quietly
   const bare = {
     effect: (fn) => fn(),

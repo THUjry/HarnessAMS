@@ -42,9 +42,9 @@ export function simScriptsDir(anchor = process.cwd()) {
   }
   const { sim_scripts_dir: dir } = resolveWorkspacePaths(anchor)
   if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) return path.resolve(dir)
-  throw new Error(`no worker scripts root: ${dir} does not exist — set workspace.sim_scripts_dir `
-    + 'in the project\'s .harnessams/workspace_config.json (the SmartAnaSim plugin\'s scripts/ '
-    + 'directory) or set HARNESSAMS_SIM_SCRIPTS_DIR')
+  throw new Error(`no worker scripts root: ${dir} does not exist — fix the worker scripts root in the `
+    + 'project settings table (the Overview settings UI or the harnessams_selfcheck settings argument) '
+    + 'or set HARNESSAMS_SIM_SCRIPTS_DIR')
 }
 
 // Every Python script under the worker scripts root (relative POSIX paths).
@@ -62,6 +62,27 @@ export function pluginScripts(root = simScriptsDir()) {
   }
   walk(root, '')
   return out.sort((a, b) => a.rel.localeCompare(b.rel))
+}
+
+// The sibling assets bucket: snp_common.py resolves its pure-stdlib fallback
+// at <scripts root>/../assets/numfallback.py (here.parents[1]/assets) — the
+// SmartAnaSim package layout where scripts/ and assets/ are siblings. Both
+// the dev-sibling scripts root and the staged project copy
+// (.harnessams/scripts + .harnessams/assets) resolve through this one probe,
+// so the upload carries the fallback the remote host needs when numpy is
+// missing (2026-11-24: the live incident had to patch it in by hand).
+export function pluginAssets(root = simScriptsDir()) {
+  const dir = path.join(path.resolve(root), '..', 'assets')
+  let entries
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return []
+  }
+  return entries
+    .filter((e) => e.isFile() && e.name.endsWith('.py'))
+    .map((e) => ({ rel: e.name, local: path.join(dir, e.name) }))
+    .sort((a, b) => a.rel.localeCompare(b.rel))
 }
 
 // Worker scripts root for one submit call. The tool's `sim_scripts_dir`

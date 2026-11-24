@@ -539,14 +539,18 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(missing.settings.run_mode, 'local') // missing file = defaults
   await writeSettings(tmp, v.settings)
   const raw = JSON.parse(await fsp.readFile(configPath(tmp), 'utf8'))
-  // fresh file: single config carries the workspace section with resolved defaults
+  // fresh file: single config carries the workspace section; D-015 — the
+  // scripts root is the project's OWN staged copy, laid down at creation
   assert.equal(raw.version, 1)
-  assert.ok(raw.workspace.sim_scripts_dir, 'workspace defaults laid down at creation')
-  // the scripts default must be a RESOLVED sibling path (path.join folds '..',
-  // so a wrong parent level silently produces <plugin>\SmartAnaSim\scripts)
-  assert.ok(!raw.workspace.sim_scripts_dir.includes('..'), 'default sim_scripts_dir must be resolved: ' + raw.workspace.sim_scripts_dir)
+  assert.equal(raw.workspace.sim_scripts_dir, path.join(tmp, '.harnessams', 'scripts'))
+  assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'scripts')), 'staged scripts dir exists')
+  assert.ok(fs.existsSync(path.join(tmp, 'script', 'analysis', 'gen_selfcheck_rc.py')), 'staged gen script (D-015)')
   const sibling = path.resolve(REPO, '..', 'HarnessAMS-SmartAnaSim', 'scripts')
-  if (fs.existsSync(sibling)) assert.equal(raw.workspace.sim_scripts_dir, sibling)
+  if (fs.existsSync(path.join(sibling, 'spectre', 'spectre_sweep_worker.py'))) {
+    assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'scripts', 'spectre', 'spectre_sweep_worker.py')),
+      'worker tree copied from the source root')
+    assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'assets', 'numfallback.py')), 'assets bucket staged')
+  }
   assert.equal(raw.workspace.trash_dir, '.harnessams/trash')
   assert.ok(path.isAbsolute(raw.workspace.plotly_asset))
   const back = await readSettings(tmp)
@@ -852,10 +856,12 @@ test('flow: simulator=spectre + local', async () => {
     assert.equal(byCol['spectre_psf_parse.py (LPF+HPF)'].ok, true)
     assert.equal(byCol['pointwise verify (python, LPF+HPF)'].ok, true)
     assert.match(byCol['pointwise verify (python, LPF+HPF)'].result, /9 pts/)
-    // the assemble step really ran the bundled gen script through the tool shell
+    // the assemble step ran against the REAL project root (D-015: the staged
+    // gen script, never a throwaway run-dir copy) through the tool shell
     const asm = f.ctx.__execLog.find((x) => x.name === 'spectre_assemble')
     assert.ok(asm, 'spectre_assemble was not called through ctx.tools')
-    assert.ok(asm.arguments.project_dir.endsWith(path.join('project')))
+    assert.equal(path.resolve(asm.arguments.project_dir), path.resolve(f.projectPath))
+    assert.ok(fs.existsSync(path.join(f.projectPath, 'script', 'analysis', 'gen_selfcheck_rc.py')), 'project owns its gen script')
     // local chain: submit + poll both went through the tool shell, and not a
     // single ssh_* call happened
     assert.ok(f.ctx.__execLog.some((x) => x.name === 'batch_submit' && x.arguments.scheduler === 'local'))

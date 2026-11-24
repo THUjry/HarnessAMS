@@ -215,12 +215,13 @@ export async function downloadFile(ctx, machine, remotePath, localPath) {
 // settings.remote_root (or a per-call remote_root argument).
 export async function resolveMachine(ctx, machineId, remoteRoot) {
   if (!machineId) {
-    throw new Error('machine_id (a dsh-ssh alias) is required — see the machine card or ssh_list')
+    throw new Error('no machine configured for this project (machine_id) — set one in the Overview '
+      + 'settings table or the AGENTS.md config block, or see the machine card / ssh_list')
   }
   const root = typeof remoteRoot === 'string' ? remoteRoot.trim().replace(/\\/g, '/') : ''
   if (!root || !root.startsWith('/')) {
-    throw new Error(`remote_root is required for host ${machineId} (an absolute remote path — `
-      + 'the project\'s workspace_config.json settings.remote_root, shown in the AGENTS.md config table)')
+    throw new Error(`remote_root is required for host ${machineId} (an absolute remote path — the `
+      + 'project\'s configured remote_root, shown in the AGENTS.md config block)')
   }
   const list = await listMachines(ctx)
   if (!list.ok) throw new Error(`dsh-ssh hosts unavailable: ${list.reason}`)

@@ -1,45 +1,43 @@
-// AGENTS.md project-config block (2026-11-18; flattened 2026-11-19 D-004).
-// Per the front-of-house rule (the DSHstudy context-sync note: AGENTS.md
-// is the reviewable, diff-able sync vehicle — plugins must not assemble
-// injections in the back half), this module only maintains ONE marked block at
-// the head of the workspace's own AGENTS.md:
-//   - .harnessams creation (writeSettings/writeSessionConfig) also lays down
-//     the block as an EMPTY table plus a first-fill instruction — any session
-//     that starts in the workspace sees the prompt and fills the table from
-//     measured checks before working (the user may explicitly waive the
-//     self-check; the agent judges that itself);
-//   - the harnessams_selfcheck tool (action=save_agentsmd — the Overview
-//     buttons and the self-check finalize both land there) writes the same
-//     block with plugin-measured values; that rewrite carries no instruction
-//     line, so a stale first-fill prompt is removed with it;
-//   - values builds also render the self-check WORKFLOW branch for the saved
-//     settings (selfcheckWorkflow.js), so the block documents how this
-//     workspace runs; the first-fill template has no settings and renders none;
-//   - plugin writes are external writes (no watcher): the block enters context
-//     on the next session or after the next first-party fs call, as an
-//     appended instruction delta — prefix cache intact.
-// The yaml is pure English by ruling, single-level (no nested sections; the
-// retired family remote_machines registry stays out — the one node-ish fact
-// that rides along is the flat other_nodes name list, D-002) and mirrors
-// workspace_config.json: UI table = config file = AGENTS.md by construction
-// (the same tool writes both). The .harnessams pointer paragraph rides BOTH
-// the template and the values build, so it always tells the agent where the
-// real state lives.
+// AGENTS.md project-config block (2026-11-18; flattened 2026-11-19 D-004;
+// reshaped 2026-11-24). Per the front-of-house rule (the DSHstudy context-sync
+// note: AGENTS.md is the reviewable, diff-able sync vehicle — plugins must not
+// assemble injections in the back half), this module only maintains ONE marked
+// block at the head of the workspace's own AGENTS.md. The block is tables and
+// bullets only, NO prose paragraphs (2026-11-24 ruling):
+//   - Core constraints bullets (the ask-first / tools-first / don't-read-
+//     .harnessams rules every session must honor);
+//   - the yaml table mirroring workspace_config.json plus measured facts and
+//     the latest self-check verdict (aliases are NOT rendered — paths only:
+//     the tools resolve the machine themselves);
+//   - the recommended-workflow .md table (selfcheckWorkflow.js), values builds
+//     only — the first-fill template has no settings and renders no table.
+// Lifecycle unchanged: .harnessams creation (writeSettings/writeSessionConfig)
+// lays the template down; the harnessams_selfcheck tool (action=save_agentsmd
+// — the Overview buttons and the self-check finalize both land there) writes
+// the same block with plugin-measured values. Plugin writes are external
+// writes (no watcher): the block enters context on the next session or after
+// the next first-party fs call, as an appended instruction delta — prefix
+// cache intact. The yaml is pure English by ruling and single-level; UI
+// table = config file = AGENTS.md by construction (the same tool writes
+// both).
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { localEnvFacts } from './checks.js'
-import { envStatement, workflowSection } from './selfcheckWorkflow.js'
-import { listMachines } from '../remote.js'
+import { workflowTable } from './selfcheckWorkflow.js'
 
 const BEGIN = '<!-- hams-config:begin (HarnessAMS plugin-managed block; the harnessams_selfcheck tool overwrites it — keep edits outside the markers) -->'
 const END = '<!-- hams-config:end -->'
 const HEADER = '## Project Config (HarnessAMS)'
-const POINTER = 'Project state lives in `.harnessams/`: workspace_config.json (workspace env + run settings incl. remote_root), '
-  + 'sessions.json (per-session display/reports/confirmed check params), check_params.json (project check-param fallback), '
-  + 'selfcheck/ (run records; artifacts are cleaned after runs — only selfcheck_run.json persists). '
-  + 'The yaml below is the plugin-maintained mirror of workspace_config.json plus measured facts; '
-  + 'the self-check workflow section in between is rendered from the same settings.'
-const INSTRUCTION = 'Before starting any task in this workspace: run the project checks (self-check + local environment), fill the table below with MEASURED values, then proceed with the task. Skip only if the user explicitly asks to skip the self-check.'
+
+// The core constraints (2026-11-24 user ruling) — the ONLY bullets in the
+// block. Ask-first on unclear design input; tools-first execution with
+// consult-on-failure (no improvised bypasses of the plugin chain);
+// .harnessams is storage, not a model-facing surface.
+const CONSTRAINTS = [
+  '- When design constraints are unclear, ask the user before doing anything — never guess or invent them.',
+  '- Execute through the SAS/HA plugin tools (spectre_assemble, batch_submit / batch_poll, snp_*, gen_sweep_report); if a tool call fails, stop and consult the user — no hand-rolled workarounds around the tool chain.',
+  '- `.harnessams/` is plugin-managed project storage (config, sessions, run records): do not read it during normal work — everything you need is in this block and the Overview settings table.',
+]
 
 export function agentsMdPath(workspacePath) {
   return path.join(workspacePath, 'AGENTS.md')
@@ -52,11 +50,12 @@ const q = (v) => JSON.stringify(String(v))
 const scalar = (v) => (v === null || v === undefined ? 'null' : q(v))
 
 // Single-level projection: meta + workspace root + the settings mirror + local
-// env facts + the latest finished self-check verdict. remote_node is the node
-// THIS verification ran against (settings.machine_id — in-cluster LSF-only
-// projects carry none); other_nodes lists the remaining dsh-ssh aliases (D-002:
-// connectivity is dsh-ssh's business, no probing here).
-function yamlLines({ syncedAt, workspaceRoot, settings, env, run, otherNodes }) {
+// env facts + the latest finished self-check verdict. Machine ALIASES are
+// deliberately absent (2026-11-24): the dsh-ssh alias never appears in the
+// block — the batch tools resolve the configured machine themselves, and the
+// remote side is stated as paths only (remote_root, remote_dir,
+// remote_scripts_dir).
+function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   const s = settings ?? {}
   const lines = ['hams_project_config:']
   const row = (k, v) => lines.push(`  ${k}: ${scalar(v)}`)
@@ -65,14 +64,14 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run, otherNodes }) 
   row('workspace_root', workspaceRoot ?? '')
   row('cluster_env', s.cluster_env)
   row('run_mode', s.run_mode)
-  row('remote_node', s.machine_id)
-  row('other_nodes', otherNodes ?? null)
   row('scheduler', s.scheduler)
   row('simulator', s.simulator)
   row('compute_local', s.compute_script_local)
   row('compute_remote', s.compute_script_remote)
   row('remote_dir', s.remote_dir)
   row('remote_root', s.remote_root)
+  row('remote_scripts_dir', s.remote_root
+    ? `${String(s.remote_root).replace(/\/+$/, '')}/.harnessams/scripts` : null)
   row('node_version', env?.node?.version)
   row('node_path', env?.node?.path)
   row('python_version', env?.python?.version)
@@ -85,22 +84,14 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run, otherNodes }) 
   return lines
 }
 
-// The whole block between the markers, header included. withInstruction=true is
-// the first-fill template (empty table + prompt); the values build omits the
-// instruction, so replacing a template block removes a stale prompt with it.
-// The POINTER rides both builds — a values rewrite must not orphan the agent
-// from the .harnessams state it describes.
-function buildSection(facts, { withInstruction = false } = {}) {
-  const parts = [BEGIN, HEADER, '', POINTER]
-  if (withInstruction) parts.push('', INSTRUCTION)
-  // values builds carry settings, so they also carry the working-environment
-  // statement (D-002, "This is an in-cluster / out-of-cluster project") and
-  // the workflow branch that matches them; the first-fill template (no
-  // settings) renders neither
-  if (facts.settings) {
-    parts.push('', envStatement(facts.settings), '', workflowSection(facts.settings))
-  }
-  parts.push('', '```yaml', yamlLines(facts).join('\n'), '```', END)
+// The whole block between the markers, header included: constraints bullets,
+// then the yaml table, then (values builds only — settings present) the
+// recommended-workflow table. The first-fill template renders constraints +
+// an empty yaml; the values rewrite adds the workflow table.
+function buildSection(facts) {
+  const parts = [BEGIN, HEADER, '', ...CONSTRAINTS, '', '```yaml', yamlLines(facts).join('\n'), '```']
+  if (facts.settings) parts.push('', workflowTable(facts.settings))
+  parts.push(END)
   return parts.join('\n')
 }
 
@@ -131,7 +122,7 @@ export async function ensureAgentsMdTemplate(workspacePath) {
     const file = agentsMdPath(workspacePath)
     const existing = await fsp.readFile(file, 'utf8').catch((e) => (e.code === 'ENOENT' ? null : Promise.reject(e)))
     if (existing != null && existing.includes(BEGIN)) return { ok: true, created: false }
-    await atomicWrite(file, spliceSection(existing ?? '', buildSection({}, { withInstruction: true })))
+    await atomicWrite(file, spliceSection(existing ?? '', buildSection({})))
     return { ok: true, created: true }
   } catch (e) {
     return { ok: false, error: String(e?.message ?? e) }
@@ -174,24 +165,12 @@ export async function syncAgentsMd(ctx, { project, settings }) {
     if (!project?.path) return { error: 'project.path is required' }
     const env = await localEnvFacts()
     const run = await latestSelfcheckRun(project.path)
-    // Other usable nodes (D-002): the dsh-ssh host list minus the primary —
-    // connectivity is dsh-ssh's business, no probing here (user ruling
-    // 2026-11-23). Fail-open: no list / no registry -> the row stays null.
-    let otherNodes = null
-    if (ctx?.tools?.get?.('ssh_list')) {
-      const list = await listMachines(ctx).catch(() => null)
-      if (list?.ok) {
-        const rest = list.machines.map((m) => m.id).filter((id) => id && id !== settings?.machine_id)
-        if (rest.length) otherNodes = rest.join(', ')
-      }
-    }
     const section = buildSection({
       syncedAt: new Date().toISOString(),
       workspaceRoot: project.path,
       settings,
       env,
       run,
-      otherNodes,
     })
     const file = agentsMdPath(project.path)
     const existing = await fsp.readFile(file, 'utf8').catch((e) => (e.code === 'ENOENT' ? null : Promise.reject(e)))

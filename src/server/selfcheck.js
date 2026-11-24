@@ -54,7 +54,8 @@ import { runPython } from '../py.js'
 import { callTool, execRemote, uploadFile, downloadFile, shq } from '../remote.js'
 import { execLocal, localCopy } from '../localchannel.js'
 import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
-import { readSettings } from './settings.js'
+import { readSettings, resolveScriptsSource } from './settings.js'
+import { ensureProjectScripts } from './scriptStage.js'
 import { syncAgentsMd } from './agentsmd.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
 import { fetchMachines } from './machines.js'
@@ -75,8 +76,8 @@ export function parserScriptPath(anchor) {
   const p = path.join(simScriptsDir(anchor), 'spectre', 'spectre_psf_parse.py')
   if (!fs.existsSync(p)) {
     throw new Error(`spectre_psf_parse.py not found under the project sim_scripts_dir: ${p} `
-      + '(set workspace.sim_scripts_dir in the project\'s .harnessams/workspace_config.json '
-      + 'to the SmartAnaSim scripts directory)')
+      + '(fix the worker scripts root in the project settings table — the Overview settings UI '
+      + 'or the harnessams_selfcheck settings argument)')
   }
   return p
 }
@@ -347,6 +348,10 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     // historical evidence (a failed/diagnosed run kept its artifacts) is cleaned
     // now, ahead of the new run — bounded disk: at most the live run's artifacts
     await cleanHistoricalArtifacts(project.path).catch(() => {})
+    // one-time script staging: the project's own gen script + worker tree must
+    // exist BEFORE the chain runs, so spectre_assemble works on the project
+    // root exactly as it will after the self-check (2026-11-24)
+    await ensureProjectScripts(project.path, resolveScriptsSource(project.path))
   } catch (e) {
     runningBySession.delete(sessionId)
     return { error: `cannot prepare the self-check run dir: ${e?.message ?? e}`, code: 500 }
@@ -576,9 +581,12 @@ async function orchestrate(run) {
     let prepared = false
     if (sim === 'spectre') {
       const step = await timedStep(run, { item: 'spectre_assemble (RC tb)', settingColumn: 'simulator' }, async () => {
-        await fsp.cp(path.join(SELFCHECK_ASSETS, 'script'), path.join(run.runDir, 'project', 'script'), { recursive: true })
+        // The REAL project root: startSelfcheck staged script/analysis/
+        // gen_selfcheck_rc.py into it, so this exercises the same contract a
+        // post-check spectre_assemble call will hit (2026-11-24 — the run-dir
+        // scratch copy is gone; a passing check must not outlive its scripts)
         const r = await callTool(ctx, 'spectre_assemble', {
-          project_dir: path.join(run.runDir, 'project'),
+          project_dir: run._priv.project.path,
           gen_script: 'gen_selfcheck_rc.py',
           out_dir: run.runDir,
         }, { timeoutMs: 150_000, signal: run._priv.cancel.controller.signal })

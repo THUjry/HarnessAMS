@@ -148,7 +148,7 @@ A compensation capacitor Cp parallels the shunt resistor Rp in every architectur
 1. Run the architecture calculator: `python calc_<arch>.py <target_db> [--ron R] [--ron1 R] [--json design.json]` (from this skill's `scripts/`; switch data from `sky130_examples/` or `--data-dir`).
 2. Verify sub-circuits — 5×5 local sweep (Rule 2), one `Sim*` batch per verification unit.
 3. Create the run directory: copy the architecture template in as `template.scs` (fill the calculator values first), write `sweep_config.json` (`SW: [0,1]`, `cpf` candidates, ≤100 points).
-4. Submit: `batch_submit {run_dir, worker: "spectre/spectre_sweep_worker.py", worker_args: ["--config", "sweep_config.json", "--max-parallel", "8"], scheduler: "lsf"|"ssh", machine_id, remote_root}` — omit `remote_dir` for the next auto `Sim<N>_<YYYYMMDD>_batch<M>` under `RawResults/` (Spectre on this host: `scheduler: "local"` instead, no machine/root).
+4. Submit: `batch_submit {run_dir, worker: "spectre/spectre_sweep_worker.py", worker_args: ["--config", "sweep_config.json", "--max-parallel", "8"], scheduler: "lsf"|"ssh"}` — machine/root/remote_dir resolve from the project config (omit them; `remote_dir` omit also gives the next auto `Sim<N>_<YYYYMMDD>_batch<M>` under `RawResults/`; Spectre on this host: `scheduler: "local"` instead).
 5. Poll: `batch_poll {run_dir, wait_sec}` — completion by the point count; a terminal poll auto-fetches sweep_progress.json + errlog.txt (the raw sp.sp curves stay remote; analyze them there per batch-sweep step 4).
 6. Report: analyze (remote-first), write the spec into `SimResults/`, then `gen_sweep_report {spec}`.
 9. **Cp scan batch** (Rule 5) — pick the phase optimum, re-run 5–6.

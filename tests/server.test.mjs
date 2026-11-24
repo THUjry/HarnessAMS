@@ -343,7 +343,7 @@ test('remote: resolveMachine pins the alias + explicit remote-root contract', as
   assert.equal(t.machine.id, 'node1')
 
   // the root is a required explicit argument (the project's settings.remote_root)
-  await assert.rejects(() => resolveMachine(ctx, undefined), /machine_id .* required/)
+  await assert.rejects(() => resolveMachine(ctx, undefined), /no machine configured for this project/)
   await assert.rejects(() => resolveMachine(ctx, 'node1'), /remote_root is required for host node1/)
   await assert.rejects(() => resolveMachine(ctx, 'node1', 'rel/path'), /remote_root is required for host node1/)
   await assert.rejects(() => resolveMachine(ctx, 'ghost', '/home/op/sim'), /no such dsh-ssh host: ghost \(known: node1, lab9\)/)

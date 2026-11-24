@@ -1,12 +1,12 @@
 // AGENTS.md project-config block (server/agentsmd.js + the .harnessams
-// writers): the .harnessams creation moment lays down an EMPTY flat table with
-// the first-fill instruction; the values sync (the harnessams_selfcheck tool's
-// save_agentsmd action — the buttons and the self-check finalize both land
-// there) rewrites the marked block WITHOUT the instruction (a stale prompt is
-// removed with it); the .harnessams pointer paragraph rides BOTH builds; the
-// block is created fresh / prepended at the head / replaced in place. Route
-// level via the apply()-registered handler; the client half is pinned against
-// the source. Run: bare `node --test` from the repo root.
+// writers), 2026-11-24 shape: the .harnessams creation moment lays down the
+// core-constraints bullets + an EMPTY yaml table (no prose, no instruction
+// any more); the values sync (the harnessams_selfcheck tool's save_agentsmd
+// action — the buttons and the self-check finalize both land there) rewrites
+// the marked block with measured yaml facts PLUS the recommended-workflow
+// table (values builds only). Machine aliases never render — the remote side
+// is paths only. Route level via the apply()-registered handler; the client
+// half is pinned against the source. Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
@@ -18,10 +18,12 @@ import { registerRoutes, callPost, callPut, clientSrc, assertDictKeys } from './
 
 const BEGIN = '<!-- hams-config:begin'
 const END = '<!-- hams-config:end -->'
-const INSTRUCTION = 'Before starting any task in this workspace'
-const POINTER = 'Project state lives in `.harnessams/`'
+const ASK_FIRST = 'When design constraints are unclear, ask the user'
+const TOOLS_FIRST = 'Execute through the SAS/HA plugin tools'
+const NO_STORE_READ = 'do not read it during normal work'
+const WORKFLOW_TABLE = '### Recommended workflow'
 
-test('agentsmd: a fresh workspace gets the empty flat table + pointer + first-fill instruction, idempotent', async () => {
+test('agentsmd: a fresh workspace gets constraints + the empty yaml table, no workflow table, idempotent', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-'))
   try {
     assert.deepEqual(await ensureAgentsMdTemplate(ws), { ok: true, created: true })
@@ -29,14 +31,17 @@ test('agentsmd: a fresh workspace gets the empty flat table + pointer + first-fi
     assert.ok(md1.startsWith(BEGIN), 'the block sits at the head of the file')
     assert.ok(md1.includes(END))
     assert.ok(md1.includes('## Project Config (HarnessAMS)'))
-    assert.ok(md1.includes(INSTRUCTION), 'first-fill instruction present')
-    assert.ok(md1.includes(POINTER), '.harnessams pointer rides the template too')
+    assert.ok(md1.includes(ASK_FIRST), 'ask-first constraint present')
+    assert.ok(md1.includes(TOOLS_FIRST), 'tools-first constraint present')
+    assert.ok(md1.includes(NO_STORE_READ), '.harnessams do-not-read constraint present')
     assert.ok(md1.includes('hams_project_config:'))
     // flat single-level fields, nulls for the not-yet-measured facts
     assert.ok(md1.includes('  last_selfcheck_run_id: null'))
     assert.ok(md1.includes('  last_selfcheck_overall: null'))
     assert.ok(md1.includes('  run_mode: null'), 'unmeasured fields are the YAML null literal in the template')
-    assert.ok(!md1.includes('Self-check workflow'), 'the first-fill template (no settings yet) renders no workflow section')
+    assert.ok(!md1.includes(WORKFLOW_TABLE), 'the first-fill template (no settings yet) renders no workflow table')
+    assert.ok(!md1.includes('Project state lives in'), 'the old pointer prose is gone')
+    assert.ok(!md1.includes('Before starting any task'), 'the old first-fill instruction is gone')
 
     // a later call never rewrites — an agent-filled table survives
     await writeFile(agentsMdPath(ws), md1.replace('  run_mode: null', '  run_mode: "agent-filled"'), 'utf8')
@@ -45,7 +50,7 @@ test('agentsmd: a fresh workspace gets the empty flat table + pointer + first-fi
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: values sync fills measured flat facts, keeps the pointer, REMOVES the stale instruction', async () => {
+test('agentsmd: values sync fills measured yaml facts, adds the workflow table, keeps outside content', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-sync-'))
   try {
     await ensureAgentsMdTemplate(ws)
@@ -54,14 +59,11 @@ test('agentsmd: values sync fills measured flat facts, keeps the pointer, REMOVE
 
     const settings = { cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
-    // no dsh-ssh in ctx at all anymore: the machines section is gone, the sync
-    // never touches the tool shell
+    // no dsh-ssh in ctx at all anymore: the sync never touches the tool shell
     const r = await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings })
     assert.equal(r.ok, true)
     assert.equal(r.created, false) // block already existed → in-place replace
     const md = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(!md.includes(INSTRUCTION), 'the values rewrite drops the first-fill instruction')
-    assert.ok(md.includes(POINTER), 'the pointer survives the values rewrite')
     assert.ok(md.includes('# Project notes'), 'content below the block survives')
     assert.ok(md.indexOf(BEGIN) < md.indexOf('# Project notes'), 'block stays at the head')
     assert.ok(md.includes(`  workspace_root: ${JSON.stringify(ws)}`), 'workspace root, JSON-escaped for yaml')
@@ -69,18 +71,22 @@ test('agentsmd: values sync fills measured flat facts, keeps the pointer, REMOVE
     assert.ok(md.includes(`  node_path: ${JSON.stringify(process.execPath)}`), 'node absolute path as a flat field')
     assert.ok(md.includes('  cluster_env: "out-of-cluster"'), 'the working environment mirrors the config')
     assert.ok(md.includes('  run_mode: "remote"'))
-    assert.ok(md.includes('  remote_node: "node1"'), 'the node used for this verification')
-    assert.ok(md.includes('  other_nodes: null'), 'no dsh-ssh registry in ctx → the row stays null (fail-open)')
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
+    assert.ok(md.includes('  remote_scripts_dir: "/home/op/sim/.harnessams/scripts"'), 'the remote scripts path rides along')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
-    assert.ok(md.includes('This is an out-of-cluster project'), 'the env statement rides the values build')
-    assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre (out-of-cluster))'), 'the values sync renders the settings-matched workflow branch')
-    assert.ok(md.includes('ok-via-fallback'), 'the LSF branch carries the fallback rule')
+    // 2026-11-24: aliases never render — the machine rows are gone entirely
+    assert.ok(!md.includes('remote_node:'), 'the alias row is gone')
+    assert.ok(!md.includes('other_nodes:'), 'the alias-list row is gone')
+    assert.ok(!md.includes('This is an out-of-cluster project'), 'the env prose statement is gone (yaml carries it)')
+    // the workflow table rides the values build
+    assert.ok(md.includes(WORKFLOW_TABLE), 'the values sync renders the workflow table')
+    assert.ok(md.includes('| Submit | batch_submit |'))
+    assert.ok(md.includes('"local" is unavailable out-of-cluster'), 'the scheduler cell forks on cluster_env')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block after the sync')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: re-syncing under different settings switches the workflow branch without residue', async () => {
+test('agentsmd: re-syncing under different settings switches the table wording without residue', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-workflow-'))
   try {
     await ensureAgentsMdTemplate(ws)
@@ -90,17 +96,18 @@ test('agentsmd: re-syncing under different settings switches the workflow branch
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: remoteLsf })
     let md = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(md.includes('### Self-check workflow (remote / LSF / spectre (out-of-cluster))'))
+    assert.ok(md.includes('"local" is unavailable out-of-cluster'))
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: localSpectre })
     md = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(md.includes('### Self-check workflow (local / spectre)'), 'branch switched to the saved settings')
-    assert.ok(md.includes('This is an in-cluster project'), 'the env statement switched with it')
-    assert.ok(!md.includes('LSF'), 'old branch fully replaced (uppercase LSF only lives in the workflow text)')
+    assert.ok(!md.includes('unavailable out-of-cluster'), 'cell switched to the in-cluster wording')
+    assert.ok(md.includes('bsub on this host'), 'in-cluster scheduler semantics')
+    assert.ok(md.includes('| Analyze | python (direct) |'), 'analyze switched to direct python')
+    assert.ok(!md.includes('| Analyze | ssh_exec'), 'old analyze wording fully replaced')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: other_nodes lists the remaining dsh-ssh aliases (D-002, no probing)', async () => {
+test('agentsmd: machine aliases never render even with a dsh-ssh registry in ctx', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-nodes-'))
   try {
     await ensureAgentsMdTemplate(ws)
@@ -111,7 +118,7 @@ test('agentsmd: other_nodes lists the remaining dsh-ssh aliases (D-002, no probi
         get: (name) => (name === 'ssh_list' ? { name } : undefined),
         execute: async (input) => {
           const call = input.calls[0]
-          if (JSON.parse(call.arguments || '{}') && call.name !== 'ssh_list') throw new Error('unexpected tool ' + call.name)
+          if (call.name !== 'ssh_list') throw new Error('unexpected tool ' + call.name)
           return { results: [{ callId: call.id, result: { isError: false, value: { hosts: [
             { alias: 'node1', host: '192.0.2.11' }, { alias: 'lab9', host: '192.0.2.99' }, { alias: 'node2', host: '192.0.2.12' },
           ] } } }] }
@@ -121,8 +128,9 @@ test('agentsmd: other_nodes lists the remaining dsh-ssh aliases (D-002, no probi
     const r = await syncAgentsMd(ctx, { project: { path: ws, title: 'demo' }, settings })
     assert.equal(r.ok, true)
     const md = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(md.includes('  other_nodes: "lab9, node2"'), 'the other aliases minus the primary, connectivity left to dsh-ssh')
-    assert.ok(md.includes('  remote_node: "node1"'))
+    assert.ok(!md.includes('remote_node:'), 'no alias row')
+    assert.ok(!md.includes('other_nodes:'), 'no alias-list row')
+    assert.ok(!md.includes('lab9') && !md.includes('node2') && !md.includes('192.0.2'), 'no alias names or hosts leak into the block')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
@@ -166,13 +174,14 @@ test('agentsmd route+writers: .harnessams creation lays the template; /api/tool 
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     })
     const md1 = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(md1.includes(INSTRUCTION), 'template with the first-fill instruction')
+    assert.ok(md1.includes(ASK_FIRST), 'template carries the core constraints')
+    assert.ok(!md1.includes(WORKFLOW_TABLE), 'template carries no workflow table')
     // a second settings write stays idempotent (block present → untouched)
     await writeSettings(ws, {
       cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     })
-    assert.ok((await readFile(agentsMdPath(ws), 'utf8')).includes(INSTRUCTION), 'later writes never rewrite the block')
+    assert.ok(!(await readFile(agentsMdPath(ws), 'utf8')).includes(WORKFLOW_TABLE), 'later writes never rewrite the block')
 
     // the SESSION-CONFIG writer also lays the template when IT creates
     // .harnessams first (the common case now: a session opening its sidebar)
@@ -186,13 +195,13 @@ test('agentsmd route+writers: .harnessams creation lays the template; /api/tool 
         sessionId: 's2', state: { display: 'overview', reports: [], dashboard_selected: null },
       })
       assert.equal(c.code, 200)
-      assert.ok((await readFile(agentsMdPath(ws2), 'utf8')).includes(INSTRUCTION), 'session-config creation lays the template')
+      assert.ok((await readFile(agentsMdPath(ws2), 'utf8')).includes(ASK_FIRST), 'session-config creation lays the template')
     } finally {
       await rm(ws2, { recursive: true, force: true })
     }
 
-    // POST /api/tool {action:save_agentsmd} → values rewrite without the
-    // instruction; pending settings ride along (the table's confirm button)
+    // POST /api/tool {action:save_agentsmd} → values rewrite with the
+    // workflow table; pending settings ride along (the table's confirm button)
     const r = await callPost(handler, base + '/tool', {
       sessionId: 's1', action: 'save_agentsmd',
       settings: { cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
@@ -203,10 +212,9 @@ test('agentsmd route+writers: .harnessams creation lays the template; /api/tool 
     assert.equal(r.body.created, false)
     assert.equal(r.body.path, path.join(ws, 'AGENTS.md'))
     const md2 = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(!md2.includes(INSTRUCTION))
+    assert.ok(md2.includes(WORKFLOW_TABLE), 'save_agentsmd renders the workflow table')
     assert.ok(md2.includes('  run_mode: "remote"'), 'settings snapshot comes from workspace_config.json')
     assert.ok(md2.includes('  scheduler: "ssh"'), 'the riding settings landed before the sync')
-    assert.ok(md2.includes('### Self-check workflow (remote / ssh / spectre (out-of-cluster))'), 'save_agentsmd renders the workflow for the riding settings')
 
     // a second POST keeps exactly one block
     await callPost(handler, base + '/tool', { sessionId: 's1', action: 'save_agentsmd' })
