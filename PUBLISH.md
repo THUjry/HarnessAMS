@@ -26,7 +26,9 @@ Checklist (per package, run from the package directory):
      ladder; report_render holds the shared chart-spec/HTML templates, figs_export
      the headless PNG pipeline with its jsdom/@napi-rs/canvas/@resvg/resvg-js runtime
      deps), `skills/` (the
-     three bundled skills: `batch-sweep/SKILL.md` (the generic scan methodology);
+     four bundled skills: `batch-sweep/SKILL.md` (the generic scan methodology);
+     `cluster-setup/SKILL.md` (the once-per-cluster login-environment
+     pre-flight: shell startup chains, remote_python absolute path);
      `dca-cell-design/` — SKILL.md,
      `scripts/` ×3 calc scripts, `sky130_examples/` (template ×3 sky130 ATT netlists +
      `sky130_fd_pr__nfet_01v8_lvt.scs` + `nfet_switch.json`); `analysis-cascade-dca/` —
