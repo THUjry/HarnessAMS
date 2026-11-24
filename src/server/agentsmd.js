@@ -8,7 +8,9 @@
 //     .harnessams rules every session must honor);
 //   - the yaml table mirroring workspace_config.json plus measured facts and
 //     the latest self-check verdict (aliases are NOT rendered — paths only:
-//     the tools resolve the machine themselves);
+//     the tools resolve the machine themselves; the cluster toolchain pins
+//     remote_python / remote_spectre_cmd render as the two rows a session
+//     reads to run remote parsers without passing an interpreter);
 //   - the recommended-workflow .md table (selfcheckWorkflow.js), values builds
 //     only — the first-fill template has no settings and renders no table.
 // Lifecycle unchanged: .harnessams creation (writeSettings/writeSessionConfig)
@@ -54,7 +56,8 @@ const scalar = (v) => (v === null || v === undefined ? 'null' : typeof v === 'bo
 // deliberately absent (2026-11-24): the dsh-ssh alias never appears in the
 // block — the batch tools resolve the configured machine themselves, and the
 // remote side is stated as paths only (remote_root, remote_dir,
-// remote_scripts_dir).
+// remote_scripts_dir, and the toolchain pins remote_python /
+// remote_spectre_cmd — D-016: null = not pinned yet, the bare defaults).
 function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   const s = settings ?? {}
   const lines = ['hams_project_config:']
@@ -68,6 +71,8 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   row('simulator', s.simulator)
   row('compute_local', s.compute_script_local)
   row('compute_remote', s.compute_script_remote)
+  row('remote_python', s.remote_python ?? null)
+  row('remote_spectre_cmd', s.remote_spectre_cmd ?? null)
   row('report_figs', s.report_figs === true)
   row('remote_dir', s.remote_dir)
   row('remote_root', s.remote_root)

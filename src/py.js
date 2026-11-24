@@ -30,9 +30,11 @@ export async function runPython(scriptRel, args, timeoutMs = 900_000, options = 
   const abs = scriptPath(scriptRel)
   if (!fs.existsSync(abs)) throw new Error(`pipeline script missing: ${abs}`)
   // options.env MERGES into the child env (a full replacement would drop PATH
-  // and PYTHONUTF8) — the same shape as the SmartAnaSim copy.
-  const { env: extraEnv, ...rest } = options
-  return execFileAsync('python', [abs, ...args], {
+  // and PYTHONUTF8) — the same shape as the SmartAnaSim copy. options.python
+  // swaps the interpreter (the self-check's in-cluster chain runs under the
+  // project's remote_python pin — D-016); the host's bare python by default.
+  const { env: extraEnv, python = 'python', ...rest } = options
+  return execFileAsync(python, [abs, ...args], {
     timeout: timeoutMs,
     maxBuffer: 32 * 1024 * 1024,
     windowsHide: true,

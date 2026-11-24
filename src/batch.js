@@ -124,9 +124,11 @@ export function resolveRemoteDir(remoteRoot, remoteDir) {
   return candidate
 }
 
-// Remote interpreter defaults (the retired harnessams.json remote_python /
-// remote_node / remote_scripts_dir keys are gone — per-call args and these
-// constants are the whole surface now).
+// Bare interpreter defaults — what a worker runs under while the project has
+// no toolchain pin (D-016: settings.remote_python / remote_spectre_cmd hold
+// absolute paths; the pins sit between a per-call argument and these
+// constants). The retired harnessams.json remote_python / remote_node /
+// remote_scripts_dir keys are gone.
 export const DEFAULT_REMOTE_PYTHON = 'python3'
 export const DEFAULT_REMOTE_NODE = 'node'
 

@@ -503,10 +503,15 @@ async function startFlow({ scenario = {}, settings = {} }) {
 // 1) settings
 // ---------------------------------------------------------------------------
 
+// D-016 toolchain pins — placeholder paths (the fixture gate: no real cluster paths)
+const PIN_PY = '/opt/tools/python3/bin/python3'
+const PIN_SPECTRE = '/opt/tools/spectre/bin/spectre'
+
 test('settings: defaults, validation, persistence, workspace section', async () => {
   assert.deepEqual(defaultSettings(), {
     cluster_env: 'out-of-cluster', run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
     scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
+    remote_python: null, remote_spectre_cmd: null,
     report_figs: false,
   })
   // valid full object round-trips
@@ -515,6 +520,30 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.ok(!v.error, v.error)
   assert.equal(v.settings.compute_script_remote, 'js')
   assert.equal(v.settings.report_figs, true)
+  // D-016 toolchain pins: an absolute path to the executable file, or null.
+  // (positive cases need a valid base: out-of-cluster + local + spectre is refused)
+  const ok = { ...defaultSettings(), cluster_env: 'in-cluster' }
+  const pinned = validateSettings({ ...ok, remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE })
+  assert.ok(!pinned.error, pinned.error)
+  assert.equal(pinned.settings.remote_python, PIN_PY)
+  assert.equal(pinned.settings.remote_spectre_cmd, PIN_SPECTRE)
+  assert.equal(validateSettings({ ...ok, remote_python: '' }).settings.remote_python, null, 'empty = unpinned')
+  assert.equal(validateSettings({ ...ok }).settings.remote_spectre_cmd, null, 'an omitted key = unpinned')
+  assert.equal(validateSettings({ ...ok, remote_python: '/opt/tools/python3\\bin\\python3' }).settings.remote_python,
+    '/opt/tools/python3/bin/python3', 'backslashes normalize to the POSIX form')
+  // bare names are the incident's failure mode: refused with guidance, both keys
+  for (const bare of ['python3', 'python', 'spectre', 'rel/python3']) {
+    assert.match(validateSettings({ ...defaultSettings(), remote_python: bare }).error, /remote_python must be an ABSOLUTE path to the executable/)
+    assert.match(validateSettings({ ...defaultSettings(), remote_spectre_cmd: bare }).error, /remote_spectre_cmd must be an ABSOLUTE path/)
+  }
+  // the value is joined into a remote command line: no spaces, no shell characters, a file not a directory
+  assert.match(validateSettings({ ...defaultSettings(), remote_python: '/opt/my python/bin/python3' }).error, /remote_python must name the executable file/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_spectre_cmd: '/opt/tools/bin/spectre;id' }).error, /must name the executable file/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_python: '/opt/$(whoami)/python3' }).error, /must name the executable file/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_python: '/opt/tools/bin/' }).error, /must name the executable file/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_spectre_cmd: '/a/../b/spectre' }).error, /remote_spectre_cmd must not contain/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_python: '/' + 'a'.repeat(400) }).error, /too long/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_python: 42 }).error, /absolute path to the executable, or null/)
   // report_figs is strictly boolean (the gen_sweep_report PNG-export gate);
   // an omitted key falls back to the default off (partial payloads are legal)
   assert.match(validateSettings({ ...defaultSettings(), report_figs: 'on' }).error, /report_figs must be a boolean/)
@@ -591,6 +620,18 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal((await readSettings(tmp)).settings.scheduler, 'lsf')
   await fsp.writeFile(configPath(tmp), '{"settings":{"scheduler":"direct"}}', 'utf8')
   assert.equal((await readSettings(tmp)).settings.scheduler, 'lsf')
+  // D-016: a hand-edited invalid pin (a bare name) reads as UNPINNED — the
+  // worker then runs under the bare default, never under junk; a valid pin
+  // beside it survives
+  await fsp.writeFile(configPath(tmp), JSON.stringify({ settings: { remote_python: 'python3', remote_spectre_cmd: PIN_SPECTRE } }), 'utf8')
+  const halfPinned = (await readSettings(tmp)).settings
+  assert.equal(halfPinned.remote_python, null)
+  assert.equal(halfPinned.remote_spectre_cmd, PIN_SPECTRE)
+  // and a validated write persists both pins
+  await writeSettings(tmp, pinned.settings)
+  const storedPins = (await readSettings(tmp)).settings
+  assert.equal(storedPins.remote_python, PIN_PY)
+  assert.equal(storedPins.remote_spectre_cmd, PIN_SPECTRE)
 })
 
 // ---------------------------------------------------------------------------
@@ -750,6 +791,38 @@ test('routes: GET project-settings defaults + the /api/tool funnel + guards', as
   assert.ok(put.body.path.endsWith('AGENTS.md'))
   assert.equal((await readSettings(projectPath)).settings.machine_id, 'm1')
   assert.equal((await readSettings(projectPath)).settings.scheduler, 'lsf')
+
+  // D-016: a PARTIAL settings payload merges over the STORED settings — an
+  // agent pins one value without echoing the whole table, and every untouched
+  // key keeps its stored value
+  const post = (settings) => driveRoute(routes, {
+    method: 'POST', url: '/harnessams/api/tool', headers: {},
+    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1', action: 'save_agentsmd', settings })) },
+  })
+  const partial = await post({ remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE })
+  assert.equal(partial.code, 200, JSON.stringify(partial.body))
+  const merged = (await readSettings(projectPath)).settings
+  assert.equal(merged.remote_python, PIN_PY)
+  assert.equal(merged.remote_spectre_cmd, PIN_SPECTRE)
+  assert.equal(merged.machine_id, 'm1', 'untouched keys keep their stored values')
+  assert.equal(merged.run_mode, 'remote')
+  assert.equal(merged.report_figs, false)
+  assert.ok((await fsp.readFile(path.join(projectPath, 'AGENTS.md'), 'utf8')).includes(`  remote_python: "${PIN_PY}"`),
+    'the merged pin reached the AGENTS.md yaml through the same action')
+  // clearing one pin is a partial write too
+  const cleared = await post({ remote_spectre_cmd: null })
+  assert.equal(cleared.code, 200, JSON.stringify(cleared.body))
+  assert.equal((await readSettings(projectPath)).settings.remote_spectre_cmd, null)
+  assert.equal((await readSettings(projectPath)).settings.remote_python, PIN_PY)
+  // a bad pin is refused whole: nothing is written
+  const barePin = await post({ remote_python: 'python3' })
+  assert.equal(barePin.code, 400)
+  assert.match(String(barePin.body.error), /remote_python must be an ABSOLUTE path/)
+  assert.equal((await readSettings(projectPath)).settings.remote_python, PIN_PY, 'the stored pin is untouched')
+  // a non-object payload is refused, not silently spread into the merge
+  const notObject = await post('python3')
+  assert.equal(notObject.code, 400)
+  assert.equal((await readSettings(projectPath)).settings.remote_python, PIN_PY)
 
   const badPut = await driveRoute(routes, {
     method: 'POST', url: '/harnessams/api/tool', headers: {},
@@ -1018,6 +1091,90 @@ test('flow: spectre + remote in-cluster LSF (D-002) — local bsub via ctx.shell
   }
 })
 
+test('flow: spectre + remote — the toolchain pins drive the submit AND the remote parse (D-016)', async () => {
+  const f = await startFlow({
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'lsf',
+      remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE },
+  })
+  try {
+    assert.ok(f.start.runId, f.start.error)
+    const run = await waitDone(f.start.runId, f.projectPath)
+    assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result, s.detail])))
+    // the settings-validation row records the exact pair this run used
+    const c2 = run.steps.find((s) => s.item === 'Settings validation')
+    assert.ok(c2.detail.includes(`toolchain python=${PIN_PY}, spectre=${PIN_SPECTRE}`), c2.detail)
+    assert.ok(!c2.detail.includes('unpinned'), c2.detail)
+    // the self-check passed NO interpreter of its own: batch_submit resolved
+    // both pins from the project settings
+    const submit = f.ctx.__execLog.find((x) => x.name === 'batch_submit')
+    assert.equal(submit.arguments.remote_python, undefined)
+    assert.equal(submit.arguments.worker_args, undefined)
+    const flat = (x) => String(x.arguments.command).replace(/\\"/g, '"')
+    const bsubs = f.ctx.__execLog.filter((x) => x.name === 'ssh_exec' && String(x.arguments.command).includes('bsub -q'))
+    assert.equal(bsubs.length, 2, 'lpf + hpf')
+    for (const b of bsubs) {
+      assert.ok(flat(b).includes(`"${PIN_PY}" "/home/op/sim/.harnessams/scripts/spectre/spectre_sweep_worker.py"`), flat(b))
+      assert.ok(flat(b).includes('"--spectre-cmd" "' + PIN_SPECTRE + '"'), flat(b))
+    }
+    // remote parse + verify ran under the pinned interpreter, end to end
+    const verifies = f.ctx.__execLog.filter((x) => x.name === 'ssh_exec' && String(x.arguments.command).includes('spectre_psf_parse.py'))
+    assert.equal(verifies.length, 2)
+    for (const v of verifies) {
+      assert.ok(flat(v).includes(`"${PIN_PY}" "/home/op/sim/.harnessams/scripts/spectre/spectre_psf_parse.py"`), flat(v))
+      assert.ok(flat(v).includes(`"${PIN_PY}" ./selfcheck_verify.py`), flat(v))
+    }
+  } finally { f.restoreAll(); await rmRetry(f.tmp) }
+})
+
+test('flow: none + remote — the golden chain runs its remote compute under the remote_python pin (D-016)', async () => {
+  const f = await startFlow({
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', simulator: 'none',
+      remote_python: PIN_PY },
+  })
+  try {
+    assert.ok(f.start.runId, f.start.error)
+    const run = await waitDone(f.start.runId, f.projectPath)
+    assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result, s.detail])))
+    const c2 = run.steps.find((s) => s.item === 'Settings validation')
+    assert.ok(c2.detail.includes(`toolchain python=${PIN_PY}`), c2.detail)
+    assert.ok(!c2.detail.includes('spectre='), 'no simulator, so no spectre entry in the record')
+    const verifies = f.ctx.__execLog.filter((x) => x.name === 'ssh_exec' && String(x.arguments.command).includes('spectre_psf_parse.py'))
+    assert.equal(verifies.length, 2)
+    for (const v of verifies) {
+      const flat = String(v.arguments.command).replace(/\\"/g, '"')
+      assert.ok(flat.includes(`"${PIN_PY}" ./spectre_psf_parse.py`), flat)
+    }
+  } finally { f.restoreAll(); await rmRetry(f.tmp) }
+})
+
+test('flow: spectre + remote in-cluster — the pins reach the local bsub and the local parse alike (D-016)', async () => {
+  // The shared root is drive-resolved on Windows; the local cross-check runs
+  // as in-process js, so the pinned interpreter (a cluster path this test
+  // host does not have) is never spawned here.
+  const shared = `/hams_sc_pin_${process.pid}_${Date.now()}`
+  const localShared = path.resolve(shared)
+  const f = await startFlow({
+    settings: { cluster_env: 'in-cluster', run_mode: 'remote', machine_id: null, remote_root: shared, scheduler: 'lsf',
+      remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE, compute_script_local: 'js' },
+  })
+  try {
+    assert.ok(f.start.runId, f.start.error)
+    const run = await waitDone(f.start.runId, f.projectPath)
+    assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result, s.detail])))
+    assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0, 'zero dsh-ssh usage')
+    const bsub = f.ctx.__localCommands.find((c) => c.includes('bsub -q'))
+    assert.ok(bsub, 'local bsub ran')
+    assert.ok(bsub.includes(`"${PIN_PY}" `), bsub)
+    assert.ok(bsub.includes('"--spectre-cmd" "' + PIN_SPECTRE + '"'), bsub)
+    const parse = f.ctx.__localCommands.find((c) => c.includes('spectre_psf_parse.py'))
+    assert.ok(parse.includes(`"${PIN_PY}" "`), parse)
+  } finally {
+    f.restoreAll()
+    await rmRetry(f.tmp)
+    fs.rmSync(localShared, { recursive: true, force: true })
+  }
+})
+
 test('flow: none + remote — upload, remote compute (python), download + js cross-check', async () => {
   const f = await startFlow({
     settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', simulator: 'none', compute_script_local: 'js' },
@@ -1038,8 +1195,9 @@ test('flow: none + remote — upload, remote compute (python), download + js cro
     assert.ok(uploads.every((u) => u.remotePath.startsWith(PREFIX)),
       'unexpected upload paths: ' + JSON.stringify(uploads.filter((u) => !u.remotePath.startsWith(PREFIX)).map((u) => u.remotePath)))
     assert.ok(uploads.some((u) => u.remotePath.endsWith('/spectre_psf_parse.py')))
-    // remote verify command used python for compute_script_remote=python
-    const verifyCmd = rwExecCommands.find((c) => c.includes('selfcheck_verify.py'))
+    // remote verify command used python for compute_script_remote=python (the
+    // list is shared across the file's flows: the LAST match is this run's)
+    const verifyCmd = rwExecCommands.findLast((c) => c.includes('selfcheck_verify.py'))
     assert.ok(verifyCmd)
     assert.match(verifyCmd, /spectre_psf_parse\.py --work-dir \. --format csv/)
     // downloads: 9 CSVs per topo

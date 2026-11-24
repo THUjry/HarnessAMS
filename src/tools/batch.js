@@ -9,6 +9,14 @@
 // (auto-retrieving the light result files on completion) — nothing in this
 // file names a simulator; a Spectre run is just a worker choice, and the
 // worker tree comes from the workspace sim_scripts_dir (see ../batch.js).
+//
+// Cluster toolchain pins (D-016): the project settings name the executables
+// this channel launches on the cluster side by ABSOLUTE path —
+// settings.remote_python (the worker interpreter) and settings.remote_spectre_cmd
+// (the spectre executable the bundled worker drives). null = unpinned, the
+// bare defaults apply. The pins bind every scheduler the same way, so the
+// self-check (which enters through batch_submit) verifies exactly the pair a
+// session later runs with.
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
@@ -16,7 +24,7 @@ import { readJsonIfExists, resolveDir } from '../py.js'
 import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
 import { execLocal, localCopy } from '../localchannel.js'
 import { readRunProgress, totalFromConfig } from '../progress_files.js'
-import { readSettingsFor } from '../server/settings.js'
+import { normalizePin, readSettingsFor } from '../server/settings.js'
 import {
   DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildSshCommand, buildSubmitCommand,
   collectRunFiles,
@@ -34,6 +42,33 @@ const AUTO_FETCH_FILES = ['sweep_progress.json', 'errlog.txt']
 // wait. 10 s matches the wait policy's preferred first-backoff step.
 const WAIT_GAP_MS = 10_000
 
+// The suite's own Spectre worker (ships with SmartAnaSim): the only worker
+// the remote_spectre_cmd pin is passed to — custom workers keep their own
+// argument contract.
+const BUNDLED_SPECTRE_WORKER = 'spectre/spectre_sweep_worker.py'
+
+// The interpreter that runs one worker: a per-call remote_python (which must
+// be an absolute path too — a bare name resolves through whatever PATH the
+// shell startup chain left behind, the 2026-11-24 incident) > the project's
+// remote_python pin > the bare `fallback` (python3 remote, python locally).
+function resolvePython(argValue, settings, fallback) {
+  if (argValue != null && argValue !== '') {
+    const p = normalizePin(String(argValue), 'remote_python')
+    if (p.error) throw new Error(p.error)
+    return p.value
+  }
+  return settings.remote_python || fallback
+}
+
+// The pinned spectre reaches the BUNDLED worker as `--spectre-cmd` (its own
+// argument contract); a worker_args entry the caller wrote always wins.
+function withSpectrePin(workerRel, workerArgs, settings) {
+  const args = (workerArgs || []).map(String)
+  if (!workerRel || workerRel !== BUNDLED_SPECTRE_WORKER || !settings.remote_spectre_cmd) return args
+  if (args.some((a) => a === '--spectre-cmd' || a.startsWith('--spectre-cmd='))) return args
+  return [...args, '--spectre-cmd', settings.remote_spectre_cmd]
+}
+
 function underRoot(root, candidate) {
   return candidate === root || candidate.startsWith(root + '/')
 }
@@ -43,8 +78,10 @@ function underRoot(root, candidate) {
 // and return immediately — the model then batch_poll's the run directory
 // (wait_sec for the blocking wait; the session card live-updates off the same
 // files). The worker carries its own global budget, so a forgotten run still
-// terminates by itself.
-async function submitLocal(args, runDir) {
+// terminates by itself. The same toolchain pins as the remote schedulers
+// (D-016) apply here: the pinned interpreter spawns the worker, the pinned
+// spectre rides as --spectre-cmd for the bundled worker.
+async function submitLocal(args, runDir, settings) {
   const rawWorker = String(args.worker)
   if (rawWorker.startsWith('/') || /^[A-Za-z]:[\\/]/.test(rawWorker)) {
     throw new Error('scheduler=local needs a scripts-root-relative worker (e.g. "spectre/spectre_sweep_worker.py"), not an absolute path')
@@ -63,13 +100,14 @@ async function submitLocal(args, runDir) {
   try { sweepConfig = JSON.parse(fs.readFileSync(path.join(runDir, 'sweep_config.json'), 'utf8')) } catch { sweepConfig = null }
   templateUploadPlan(runDir, collectRunFiles(runDir, args.files), sweepConfig)
 
-  const workerArgs = (args.worker_args || []).map(String)
+  const python = resolvePython(args.remote_python, settings, 'python')
+  const workerArgs = withSpectrePin(rel, args.worker_args, settings)
   if (!workerArgs.includes('--work-dir')) workerArgs.push('--work-dir', runDir)
   const out = fs.openSync(path.join(runDir, '.batch_local.out'), 'a')
   const err = fs.openSync(path.join(runDir, '.batch_local.err'), 'a')
   let child
   try {
-    child = spawn('python', [workerAbs, ...workerArgs], {
+    child = spawn(python, [workerAbs, ...workerArgs], {
       cwd: runDir,
       detached: true,
       stdio: ['ignore', out, err],
@@ -88,7 +126,7 @@ async function submitLocal(args, runDir) {
     child.once('error', resolve)
     child.once('spawn', () => resolve(null))
   })
-  if (spawnError) throw new Error(`cannot start the local worker (needs python on PATH): ${spawnError.message}`)
+  if (spawnError) throw new Error(`cannot start the local worker (interpreter ${python}): ${spawnError.message}`)
   child.unref()
   const job = {
     machine_id: null,
@@ -100,7 +138,7 @@ async function submitLocal(args, runDir) {
     worker_args: workerArgs,
     job_id: `local-${Date.now()}`,
     queue: null,
-    remote_python: null,
+    remote_python: python,
     scheduler: 'local',
     pid: child.pid ?? null,
     submitted_at: new Date().toISOString(),
@@ -201,11 +239,14 @@ export function batchTools(ctx) {
           + 'path in-cluster, the ssh host\'s path out-of-cluster. Omit to use the project\'s configured remote_root '
           + '(mirrored in the AGENTS.md config block); explicit values are for one-off overrides' },
         worker: { type: 'string', required: true, description: 'Worker script relative to the scripts root (e.g. spectre/spectre_sweep_worker.py) or an absolute remote path' },
-        worker_args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed to the worker (e.g. --config sweep_config.json --max-parallel 8)' },
+        worker_args: { type: 'array', items: { type: 'string' }, description: 'Arguments passed to the worker (e.g. --config sweep_config.json --max-parallel 8). '
+          + 'The project\'s remote_spectre_cmd pin is appended as --spectre-cmd for the bundled spectre worker unless these already name one' },
         machine_id: { type: 'string', description: 'dsh-ssh host alias to run on — omit to use the project\'s '
           + 'configured machine (the normal case; pass one only to spread a sweep across nodes, together with '
           + 'repeated submits). Unused by in-cluster lsf (bsub runs on this host)' },
-        remote_python: { type: 'string', description: 'Remote Python executable (default python3; use the full path on clusters)' },
+        remote_python: { type: 'string', description: 'Interpreter that runs the worker on the target. Omit it: the project\'s remote_python pin '
+          + 'applies (the AGENTS.md yaml row; null = bare python3). An explicit value must be an ABSOLUTE path — bare names are rejected, '
+          + 'they resolve to whichever tool python comes first on PATH (the cluster-setup skill harvests and verifies real paths)' },
         remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remote_root>/.harnessams/scripts)' },
         sim_scripts_dir: { type: 'string', description: 'Worker scripts root: an existing directory IS the root (override); any other value only anchors the '
           + 'project walk-up (default: the project\'s workspace_config.json workspace.sim_scripts_dir, found by walking up from run_dir)' },
@@ -238,8 +279,11 @@ export function batchTools(ctx) {
             throw new Error('scheduler=local requires cluster_env=in-cluster (an out-of-cluster host cannot run '
               + 'the worker — use scheduler="ssh" or "lsf")')
           }
-          return submitLocal(args, runDir)
+          return submitLocal(args, runDir, settings)
         }
+        // Toolchain pins (D-016): resolved and validated BEFORE anything is
+        // staged — a bare remote_python fails here, not after the uploads.
+        const remotePython = resolvePython(args.remote_python, settings, DEFAULT_REMOTE_PYTHON)
         if (args.lsf_node != null && scheduler !== 'lsf') {
           throw new Error('lsf_node applies to scheduler="lsf" only')
         }
@@ -319,6 +363,7 @@ export function batchTools(ctx) {
           }
           remoteWorker = remoteJoin(scriptsRoot, workerRel)
         }
+        const workerArgs = withSpectrePin(workerRel, args.worker_args, settings)
 
         const probe = await channel.exec(
           `ls -1 ${shq(remoteDir)}/*/point_meta.json 2>/dev/null | wc -l`, { timeoutMs: 30_000 })
@@ -357,7 +402,6 @@ export function batchTools(ctx) {
           if (!up.ok) throw new Error(`upload failed for ${name}: ${up.text}`)
         }
 
-        const remotePython = args.remote_python || DEFAULT_REMOTE_PYTHON
         const queue = args.queue || 'normal'
         const jobName = args.job_name || `hams-${path.basename(runDir)}`
         if (scheduler === 'ssh') {
@@ -371,7 +415,7 @@ export function batchTools(ctx) {
             remoteDir,
             python: remotePython,
             workerPath: remoteWorker,
-            workerArgs: args.worker_args || [],
+            workerArgs,
             overwrite: args.overwrite === true,
           })
           const ran = await channel.exec(command, { timeoutMs: 600_000 })
@@ -383,7 +427,7 @@ export function batchTools(ctx) {
             remote_dir: remoteDir,
             scripts_dir: scriptsRoot,
             worker: remoteWorker,
-            worker_args: args.worker_args || [],
+            worker_args: workerArgs,
             job_id: jobId,
             queue: null,
             remote_python: remotePython,
@@ -416,7 +460,7 @@ export function batchTools(ctx) {
           node: args.lsf_node != null ? String(args.lsf_node) : null,
           python: remotePython,
           workerPath: remoteWorker,
-          workerArgs: args.worker_args || [],
+          workerArgs,
           overwrite: args.overwrite === true,
         })
         const submitted = await channel.exec(command, { timeoutMs: 90_000 })
@@ -447,7 +491,7 @@ export function batchTools(ctx) {
           remote_dir: remoteDir,
           scripts_dir: scriptsRoot,
           worker: remoteWorker,
-          worker_args: args.worker_args || [],
+          worker_args: workerArgs,
           job_id: jobId,
           queue,
           remote_python: remotePython,

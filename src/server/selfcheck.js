@@ -452,13 +452,22 @@ function parseMarkerJson(stdout) {
   try { return JSON.parse(line.slice('[selfcheck] '.length)) } catch { return null }
 }
 
-async function runVerifyLocal(lang, topo, dir) {
+// The interpreter for the local chain's direct script calls (parser, verify).
+// In-cluster the remote_python pin is a path on THIS host and applies — on a
+// cluster whose bare python is 2.x the parsers must agree with the worker
+// the pin just ran; out-of-cluster the pin names a cluster path this host
+// does not have, so the host's own python runs.
+function localChainPython(settings) {
+  return settings.cluster_env === 'in-cluster' && settings.remote_python ? settings.remote_python : 'python'
+}
+
+async function runVerifyLocal(lang, topo, dir, python = 'python') {
   if (lang === 'js') {
     const mod = await import('../scripts/selfcheck/selfcheck_verify.mjs')
     return mod.verifyRun(dir, topo, TOLERANCE)
   }
   const { stdout } = await runPython('selfcheck/selfcheck_verify.py',
-    ['--run-dir', dir, '--topo', topo, '--tolerance', String(TOLERANCE)], 120_000)
+    ['--run-dir', dir, '--topo', topo, '--tolerance', String(TOLERANCE)], 120_000, { python })
   const json = parseMarkerJson(stdout)
   if (!json) throw new Error('verify script produced no [selfcheck] marker line')
   return json
@@ -564,6 +573,11 @@ async function orchestrate(run) {
       : 'local mode'
     c2.detail = `env=${settings.cluster_env}, simulator=${sim}, compute local=${settings.compute_script_local}, remote=${settings.compute_script_remote}`
       + (run.scope.scheduler ? `, scheduler=${run.scope.scheduler}` : '')
+      // the toolchain this run really submits with (D-016): the pins, or the
+      // bare default the batch tools fall back to
+      + `, toolchain python=${settings.remote_python ?? (mode === 'remote' ? DEFAULT_REMOTE_PYTHON : 'python')}`
+      + `${settings.remote_python ? '' : ' (unpinned)'}`
+      + (sim === 'spectre' ? `, spectre=${settings.remote_spectre_cmd ?? 'on PATH'}${settings.remote_spectre_cmd ? '' : ' (unpinned)'}` : '')
     void persistRun(run)
 
     if (!toolsOk) {
@@ -764,7 +778,7 @@ async function runParseStep(run, prerequisiteOk, label) {
       // script-face parsing (2026-11-23): run the standalone parser directly —
       // data processing is not tool-shaped anymore
       try {
-        await execFileAsync('python', [parser, '--work-dir', dir, '--format', 'csv'], {
+        await execFileAsync(localChainPython(run._priv.settings), [parser, '--work-dir', dir, '--format', 'csv'], {
           timeout: 600_000, windowsHide: true, encoding: 'utf8',
           env: { ...process.env, PYTHONUTF8: '1' },
           signal: run._priv.cancel.controller.signal,
@@ -799,7 +813,7 @@ async function runVerifyStep(run, prerequisiteOk) {
     const parts = []
     let ok = true
     for (const topo of TOPOS) {
-      const json = await runVerifyLocal(lang, topo, path.join(run.runDir, topo))
+      const json = await runVerifyLocal(lang, topo, path.join(run.runDir, topo), localChainPython(run._priv.settings))
       const sum = verifySummary(topo, json)
       if (!sum.ok) ok = false
       parts.push(sum.text)
@@ -973,7 +987,9 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
   const { settings } = run._priv
   const ch = runChannel(run)
   const lang = settings.compute_script_remote
-  const remotePython = DEFAULT_REMOTE_PYTHON
+  // the pinned interpreter, else the bare default (the spectre chain takes it
+  // from the job file below, which already resolved the same pin)
+  const remotePython = settings.remote_python || DEFAULT_REMOTE_PYTHON
   const remoteNode = DEFAULT_REMOTE_NODE
 
   // R3 / RN2 — remote parse + verify (one command chain per topology)
@@ -1042,7 +1058,7 @@ async function remoteVerifyAndFetch(run, { parserFromScriptsDir }) {
         parts.push(`${topo}: downloaded ${got}/18 result files (metas + psf CSVs)`)
         continue
       }
-      const localJson = await runVerifyLocal(localLang, topo, staging)
+      const localJson = await runVerifyLocal(localLang, topo, staging, localChainPython(settings))
       const remoteJson = run._priv.remoteVerify?.[topo] ?? null
       const cons = consistency(localJson, remoteJson)
       if (!localJson.ok || !cons.ok) ok = false

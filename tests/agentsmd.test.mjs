@@ -74,6 +74,8 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
     assert.ok(md.includes('  remote_scripts_dir: "/home/op/sim/.harnessams/scripts"'), 'the remote scripts path rides along')
     assert.ok(md.includes('  report_figs: false'), 'the PNG-export gate mirrors the config (untyped default)')
+    assert.ok(md.includes('  remote_python: null'), 'no interpreter pin yet → the YAML null literal')
+    assert.ok(md.includes('  remote_spectre_cmd: null'), 'no spectre pin yet → the YAML null literal')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
     // 2026-11-24: aliases never render — the machine rows are gone entirely
     assert.ok(!md.includes('remote_node:'), 'the alias row is gone')
@@ -84,6 +86,31 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
     assert.ok(md.includes('| Submit | batch_submit |'))
     assert.ok(md.includes('"local" is unavailable out-of-cluster'), 'the scheduler cell forks on cluster_env')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block after the sync')
+  } finally { await rm(ws, { recursive: true, force: true }) }
+})
+
+test('agentsmd: the toolchain pins mirror as yaml rows a session reads for remote parsers (D-016)', async () => {
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-pins-'))
+  try {
+    await ensureAgentsMdTemplate(ws)
+    const settings = { cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '.harnessams/selfcheck',
+      scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
+      remote_python: '/opt/tools/python3/bin/python3', remote_spectre_cmd: '/opt/tools/spectre/bin/spectre' }
+    const r = await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings })
+    assert.equal(r.ok, true)
+    const md = await readFile(agentsMdPath(ws), 'utf8')
+    assert.ok(md.includes('  remote_python: "/opt/tools/python3/bin/python3"'), 'the interpreter pin as a plain path row')
+    assert.ok(md.includes('  remote_spectre_cmd: "/opt/tools/spectre/bin/spectre"'), 'the spectre pin as a plain path row')
+    // right after the compute selectors, before the remote paths — the row
+    // order is part of the block's contract
+    assert.ok(md.indexOf('  compute_remote: "python"') < md.indexOf('  remote_python: ')
+      && md.indexOf('  remote_python: ') < md.indexOf('  remote_spectre_cmd: ')
+      && md.indexOf('  remote_spectre_cmd: ') < md.indexOf('  remote_root: '), 'row order: compute_remote, pins, remote paths')
+    assert.ok(md.includes('the interpreter named by the remote_python row'), 'the workflow table points at the row')
+    // an untyped settings object (no pin keys at all) still renders the rows as null
+    await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: { ...settings, remote_python: undefined, remote_spectre_cmd: undefined } })
+    const md2 = await readFile(agentsMdPath(ws), 'utf8')
+    assert.ok(md2.includes('  remote_python: null') && md2.includes('  remote_spectre_cmd: null'))
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
@@ -263,7 +290,13 @@ test('agentsmd client: button row order and wiring, new keys bilingual', () => {
     'pset.browse', 'pset.browseTitle', 'pset.browsePickDir', 'pset.pickDir', 'pset.pickThisDir', 'pset.pickCurrentDir',
     'pset.colName', 'pset.colValue', 'pset.confirmBtn', 'pset.unsaved', 'pset.stagedHint',
     'pset.envTitle', 'pset.envIn', 'pset.envOut', 'pset.envHint',
+    // D-016: the toolchain pins are two text rows of the settings table
+    'pset.colRemotePython', 'pset.colRemoteSpectre', 'pset.pinPlaceholder', 'pset.pinHint',
     'envc.title', 'envc.bodyIn', 'envc.bodyOut', 'envc.ok',
     'chk.btn.local', 'chk.truncated',
   ])
+  // the two pin rows: text inputs keyed to the settings, empty = unpinned
+  assert.ok(src.includes("id: 'remote_python', labelKey: 'pset.colRemotePython', column: 'scheduler', kind: 'text'"))
+  assert.ok(src.includes("id: 'remote_spectre_cmd', labelKey: 'pset.colRemoteSpectre', column: 'scheduler', kind: 'text'"))
+  assert.ok(src.includes("onChange(c.id, e.target.value.trim() || null)"), 'an emptied pin row writes null, not an empty string')
 })

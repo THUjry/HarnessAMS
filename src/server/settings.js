@@ -8,8 +8,9 @@
 //     or partial section fails open.
 //   settings  — the run settings the Overview table stages + confirms through
 //     the harnessams_selfcheck tool (working environment / mode / machine /
-//     remote_root / remote_dir / scheduler / simulator / compute scripts). The
-//     remote root now lives HERE
+//     remote_root / remote_dir / scheduler / simulator / compute scripts /
+//     the cluster toolchain pins remote_python + remote_spectre_cmd, D-016).
+//     The remote root now lives HERE
 //     (settings.remote_root), not in a family map — the project is the single
 //     authority, so UI / config file / AGENTS.md can never disagree.
 // Per-session check params are NOT here (D-005: sessions.json carries the
@@ -44,6 +45,11 @@ export function defaultSettings() {
     simulator: 'spectre',
     compute_script_local: 'python',
     compute_script_remote: 'python',
+    // cluster toolchain pins (D-016): absolute paths to the executables the
+    // batch channel runs on the cluster side; null = unpinned, the bare
+    // defaults apply (python3 / spectre on PATH)
+    remote_python: null,
+    remote_spectre_cmd: null,
     // gen_sweep_report PNG export gate — off by default: continuously saving
     // one PNG per chart on every report consumes significant disk (2026-11-24)
     report_figs: false,
@@ -134,6 +140,10 @@ function parseConfig(raw) {
         if (typeof v === 'string' && v.trim()) settings.remote_root = v.trim().replace(/\\/g, '/')
       } else if (k === 'remote_dir') {
         if (typeof v === 'string' && v.trim()) settings.remote_dir = v.trim().replace(/\\/g, '/')
+      } else if (PIN_KEYS.includes(k)) {
+        // an invalid stored pin (hand-edited) reads as unpinned — the same
+        // fail-open every other key gets
+        settings[k] = normalizePin(v, k).value
       } else if (k === 'report_figs') {
         if (typeof v === 'boolean') settings.report_figs = v
       } else if (ENUMS[k] && ENUMS[k].includes(v)) {
@@ -205,13 +215,48 @@ export function resolveWorkspacePaths(anchor = process.cwd()) {
   }
 }
 
+// ---- cluster toolchain pins (D-016) -------------------------------------------
+//
+// remote_python / remote_spectre_cmd name the executables the batch channel
+// runs on the cluster side by ABSOLUTE path (the cluster-setup skill harvests
+// and verifies them); null = unpinned, the bare defaults apply (python3 /
+// spectre on PATH). ONE normalizer guards every face — settings file, tool
+// argument, UI row — because the value is joined into a remote command line:
+// absolute POSIX path to the executable FILE, ASCII, no whitespace or shell
+// characters, no "..". A bare name is refused with guidance: it resolves
+// through whatever PATH the startup chain left behind. Returns
+// { value, error } — value is null whenever error is set.
+
+export const PIN_KEYS = ['remote_python', 'remote_spectre_cmd']
+
+export function normalizePin(value, key) {
+  if (value == null || value === '') return { value: null, error: null }
+  if (typeof value !== 'string' || !value.trim()) {
+    return { value: null, error: `${key} must be an absolute path to the executable, or null` }
+  }
+  const norm = value.trim().replace(/\\/g, '/')
+  if (!norm.startsWith('/')) {
+    return { value: null, error: `${key} must be an ABSOLUTE path to the executable (starts with "/"), not the bare name `
+      + `${JSON.stringify(norm)}: a bare name resolves through whatever PATH the shell startup chain left behind — `
+      + 'omit it (null keeps the default) or run the cluster-setup skill to harvest and verify the real path' }
+  }
+  if (norm.length > 400) return { value: null, error: `${key} too long (max 400 chars)` }
+  if (norm.split('/').includes('..')) return { value: null, error: `${key} must not contain ".."` }
+  if (norm.endsWith('/') || !/^\/[A-Za-z0-9._+@/-]+$/.test(norm)) {
+    return { value: null, error: `${key} must name the executable file — absolute, ASCII, no spaces or shell characters `
+      + `(it is joined into a remote command line): ${JSON.stringify(norm)}` }
+  }
+  return { value: norm, error: null }
+}
+
 // ---- validate + write --------------------------------------------------------
 
-// Validate a full settings object (tool `settings` param / staged table
-// confirm). remote_root: absolute POSIX path fencing remote_dir (resolveRemoteDir
-// re-fences at use time); ".." rejected here. remote mode requires remote_root
-// always and machine_id unless in-cluster LSF is the only remote channel;
-// out-of-cluster forbids local spectre (the host cannot run it).
+// Validate a full settings object (the tool `settings` param after the partial
+// merge, or a staged table confirm). remote_root: absolute POSIX path fencing
+// remote_dir (resolveRemoteDir re-fences at use time); ".." rejected here.
+// remote mode requires remote_root always and machine_id unless in-cluster LSF
+// is the only remote channel; out-of-cluster forbids local spectre (the host
+// cannot run it). The toolchain pins go through normalizePin.
 export function validateSettings(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { error: 'settings must be an object' }
@@ -237,6 +282,10 @@ export function validateSettings(input) {
       if (norm.length > 400) return { error: 'remote_dir too long (max 400 chars)' }
       if (norm.split('/').includes('..')) return { error: 'remote_dir must not contain ".."' }
       out.remote_dir = norm
+    } else if (PIN_KEYS.includes(k)) {
+      const p = normalizePin(v, k)
+      if (p.error) return { error: p.error }
+      out[k] = p.value
     } else if (k === 'report_figs') {
       // nullable like machine_id/remote_root: partial settings payloads (the
       // established route/tool usage) omit the key entirely

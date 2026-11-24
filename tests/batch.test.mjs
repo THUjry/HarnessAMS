@@ -931,3 +931,152 @@ test('in-cluster scheduler=ssh (D-002): exec over ssh, staging stays a local cop
     restoreEnv()
   }
 })
+
+// ---- toolchain pins (D-016) ---------------------------------------------------
+//
+// The project settings carry absolute paths for the worker interpreter
+// (remote_python) and the spectre executable (remote_spectre_cmd). Every
+// scheduler resolves the interpreter the same way — a per-call remote_python
+// (absolute only) > the pin > the bare default — and the spectre pin reaches
+// the BUNDLED worker as --spectre-cmd, nothing else. Placeholder paths only.
+
+const PIN_PY = '/opt/tools/python3/bin/python3'
+const PIN_SPECTRE = '/opt/tools/spectre/bin/spectre'
+
+function plantPins(root, pins) {
+  const file = path.join(root, '.harnessams', 'workspace_config.json')
+  const cfg = JSON.parse(fs.readFileSync(file, 'utf8'))
+  Object.assign(cfg.settings, pins)
+  fs.writeFileSync(file, JSON.stringify(cfg, null, 2))
+}
+
+// The command of the one ssh_exec call that carries `needle`, with execRemote's
+// escaped double quotes flattened.
+const flatCommand = (ctx, needle) => {
+  const call = ctx.calls.find((c) => c.name === 'ssh_exec' && String(c.arguments.command).includes(needle))
+  assert.ok(call, `no ssh_exec command carrying ${needle}`)
+  return String(call.arguments.command).replace(/\\"/g, '"')
+}
+
+test('toolchain pins (D-016): remote_python / remote_spectre_cmd resolve from the project settings on every remote scheduler', async () => {
+  const base = tmp('hams-pins-')
+  const root = path.join(base, 'proj')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
+      remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+      compute_script_local: 'python', compute_script_remote: 'python',
+      remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE,
+    },
+  }, null, 2))
+  const WORKER = 'spectre/spectre_sweep_worker.py'
+  const submit = (ctx, extra) => tool(ctx, 'batch_submit').execute({ run_dir: makeRunDir({ under: root }), worker: WORKER, ...extra }, {})
+  try {
+    // LSF: machine_id / remote_root / remote_python / --spectre-cmd all omitted
+    const ctx = makeCtx()
+    const res = await submit(ctx, { remote_dir: 'batch1', worker_args: ['--config', 'sweep_config.json'] })
+    assert.equal(res.ok, true, JSON.stringify(res))
+    const bsub = flatCommand(ctx, 'bsub -q')
+    assert.ok(bsub.includes(`"${PIN_PY}" "/home/op/sim/.harnessams/scripts/spectre/spectre_sweep_worker.py" "--config" "sweep_config.json" `
+      + `"--spectre-cmd" "${PIN_SPECTRE}" "--work-dir" "/home/op/sim/batch1"`), bsub)
+    const job = JSON.parse(fs.readFileSync(res.job_file, 'utf8'))
+    assert.equal(job.remote_python, PIN_PY, 'the job file records the interpreter that ran')
+    assert.deepEqual(job.worker_args, ['--config', 'sweep_config.json', '--spectre-cmd', PIN_SPECTRE])
+
+    // ssh scheduler: the same pair, foreground
+    const sshCtx = makeCtx()
+    const res2 = await submit(sshCtx, { remote_dir: 'fore', scheduler: 'ssh' })
+    assert.equal(res2.ok, true, JSON.stringify(res2))
+    const ssh = flatCommand(sshCtx, '.hams_ssh_done')
+    assert.ok(ssh.includes(`"${PIN_PY}" "/home/op/sim/.harnessams/scripts/spectre/spectre_sweep_worker.py" "--spectre-cmd" "${PIN_SPECTRE}" `), ssh)
+
+    // a per-call remote_python (an absolute path) wins over the pin
+    const ctx3 = makeCtx()
+    await submit(ctx3, { remote_dir: 'batch3', remote_python: '/opt/tools/other/bin/python3' })
+    const bsub3 = flatCommand(ctx3, 'bsub -q')
+    assert.ok(bsub3.includes('"/opt/tools/other/bin/python3" '), bsub3)
+    assert.ok(!bsub3.includes(PIN_PY), 'the pin is overridden')
+    assert.ok(bsub3.includes(`"--spectre-cmd" "${PIN_SPECTRE}"`), 'the spectre pin still rides along')
+
+    // a bare remote_python is refused BEFORE anything is staged — it resolves
+    // to whatever tool python comes first on PATH (the 2026-11-24 incident)
+    for (const bare of ['python3', 'python', 'rel/python3']) {
+      const ctx4 = makeCtx()
+      await assert.rejects(() => submit(ctx4, { remote_dir: 'batch4', remote_python: bare }),
+        /remote_python must be an ABSOLUTE path to the executable/)
+      assert.equal(ctx4.calls.filter((c) => c.name === 'ssh_upload').length, 0, 'rejected before the uploads')
+    }
+
+    // the spectre pin is the BUNDLED worker's contract only
+    const ctx5 = makeCtx()
+    await submit(ctx5, { remote_dir: 'batch5', worker: 'common/common_sweep_engine.py' })
+    assert.ok(!flatCommand(ctx5, 'bsub -q').includes('--spectre-cmd'), 'a custom worker keeps its own argument contract')
+    // ... and a worker_args entry the caller wrote always wins
+    const ctx6 = makeCtx()
+    await submit(ctx6, { remote_dir: 'batch6', worker_args: ['--spectre-cmd', '/opt/tools/legacy/bin/spectre'] })
+    const own = flatCommand(ctx6, 'bsub -q')
+    assert.equal(own.split('--spectre-cmd').length - 1, 1, 'exactly one --spectre-cmd')
+    assert.ok(own.includes('"/opt/tools/legacy/bin/spectre"'))
+
+    // an unpinned project: the bare defaults, the behavior of every earlier test
+    const ctx7 = makeCtx()
+    await tool(ctx7, 'batch_submit').execute({
+      run_dir: makeRunDir(), remote_dir: 'batch7', machine_id: 'node1', remote_root: '/home/op/sim', worker: WORKER,
+    }, {})
+    const plain = flatCommand(ctx7, 'bsub -q')
+    assert.ok(plain.includes('"python3" "/home/op/sim/.harnessams/scripts/spectre/spectre_sweep_worker.py" "--work-dir" "/home/op/sim/batch7"'), plain)
+    assert.ok(!plain.includes('--spectre-cmd'))
+  } finally {
+    restoreEnv()
+    fs.rmSync(base, { recursive: true, force: true })
+  }
+})
+
+test('toolchain pins (D-016): in-cluster — the local bsub carries the pins, the local scheduler spawns the pinned interpreter', async () => {
+  // a runnable fake worker under a private scripts root (the shared fixture
+  // tree is a stub whose upload manifest is pinned by another test)
+  const scriptsRoot = tmp('hams-pin-local-')
+  fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), 'import sys; sys.exit(0)\n')
+  process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
+  const proj = makeProjectRoot('in-cluster')
+  plantPins(proj, { remote_spectre_cmd: PIN_SPECTRE })
+  const shared = makeSharedRoot()
+  const localShared = path.resolve(shared)
+  try {
+    // local bsub through ctx.shell: the same resolution as the ssh schedulers
+    const ctx = makeShellCtx()
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: makeRunDir({ under: proj }), remote_dir: 'batch1', remote_root: shared, worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.equal(res.ok, true, JSON.stringify(res))
+    const bsub = ctx.commands.find((c) => c.includes('bsub -q'))
+    assert.ok(bsub.includes('"python3" '), 'no interpreter pin → the bare default')
+    assert.ok(bsub.includes(`"--spectre-cmd" "${PIN_SPECTRE}"`), bsub)
+
+    // scheduler=local: the pinned spectre reaches the spawned worker, and the
+    // interpreter is the host's bare python while remote_python is unpinned
+    const run = makeRunDir({ under: proj })
+    const local = await tool(ctx, 'batch_submit').execute({
+      run_dir: run, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local',
+    }, {})
+    assert.equal(local.ok, true, JSON.stringify(local))
+    const job = JSON.parse(fs.readFileSync(local.job_file, 'utf8'))
+    assert.equal(job.remote_python, 'python')
+    assert.deepEqual(job.worker_args, ['--spectre-cmd', PIN_SPECTRE, '--work-dir', run])
+
+    // a remote_python pin is what gets spawned: a path this host cannot run
+    // fails the submit before any job file exists
+    plantPins(proj, { remote_python: PIN_PY })
+    const noRun = makeRunDir({ under: proj })
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
+      run_dir: noRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local',
+    }, {}), /cannot start the local worker \(interpreter \/opt\/tools\/python3\/bin\/python3\)/)
+    assert.ok(!fs.existsSync(path.join(noRun, '.batch_job.json')))
+  } finally {
+    fs.rmSync(localShared, { recursive: true, force: true })
+    restoreEnv()
+  }
+})
