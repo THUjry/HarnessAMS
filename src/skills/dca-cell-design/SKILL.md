@@ -30,6 +30,8 @@ Unit-cell design flow: dimension calculation (three architectures), cluster veri
 
 **Frequency bands.** The sweep band and the (usually narrower) characterization band for the design metrics — `delta_db_range`, `delta_db_avg`, `delta_phase_range_deg`, `worst_match_db`, `ref_state_il_db_range` — are set per design; the lowest sweep points represent DC for these resistive networks. Do not truncate the sweep to the characterization band. For a verified reference (bands, values, results) see `sky130_examples/Example.md`.
 
+**Example values are not defaults.** The constraints recorded in `sky130_examples/Example.md` — the frequency band, the Ron/Ron1 inputs, the characterization band, the Cp candidate lists, the gate drive — are illustrative for that worked example. When a required parameter of a NEW design is missing, ask the user for it, or explicitly confirm that the example's value may be carried over; never copy example values silently.
+
 ## sky130_examples (`sky130_examples/`)
 
 Two layers: a verified **example** (design values + raw two-state results) and the **sky130proc** process kit that keeps the skill self-contained.
@@ -37,18 +39,18 @@ Two layers: a verified **example** (design values + raw two-state results) and t
 - `Example.md` — the verified example (one cell per architecture: ST1/T4/Pi8): design values, verified frequency band and result summary; the concrete numbers live there, not in this SKILL.md.
 - `ST1/`, `T4/`, `Pi8/` — per-design `design.json` (final parameters at full precision) plus the two-state raw S-parameter outputs `sp_ref.sp` (SW=0) / `sp_att.sp` (SW=1).
 - `sky130proc/template_{Pi,T,ST}.scs` — the runnable architecture templates with calculator class defaults (the `sp` analysis uses the bare instance name `sp`, so the raw output is `sp.sp` as the parsers expect).
-- `sky130proc/sky130_fd_pr__nfet_01v8_lvt.scs` — the transcribed sky130 switch model (per-geometry flattened `nlowvt_model__w<W>p<N>f<N>` cards; MIT-licensed sky130-spectre-models repo). In a real project point the `include` at the project's own transcribed-library copy.
-- `sky130proc/nfet_switch.json` — lvt switch FOM data for the calculators (Ron·W, Coff·W, verified sizing points).
+- `sky130proc/sky130_fd_pr__nfet_01v8_lvt.scs` — the transcribed sky130 switch model (per-geometry flattened `nlowvt_model__w<W>p<N>f<N>` cards; MIT-licensed sky130-spectre-models repo): the coarse FOM ladder (w10/20/50/100) plus full 5×5 local grids around the two worked design classes (shunt w=43.3/nf=22, bypass w=61.7/nf=31). Extend it with `scripts/gen_lvt_cards.py` (clone-based: shared bin-8 body, `rsh = 89.1*nf/w + 443.5`). In a real project point the `include` at the project's own transcribed-library copy.
+- `sky130proc/nfet_switch.json` — lvt switch FOM data for the calculators (Ron·W, the measured dual-route Coff·W, verified sizing points); the full per-card characterization table is `sky130proc/nfet_lvt_ron_coff.csv`.
 - `sky130proc/nfet_ron_coff.csv` — measured plain-nfet switch characterization (Ron/Coff per geometry — the device generation the example cells use).
 
-Switch instances use the flattened model card names — when the calculator picks a new w/nf, take the nearest existing card from the transcribed library (or extend its generator) and update `l/w/nf/nrd/nrs` together.
+Switch instances use the flattened model card names — when the calculator picks a new w/nf, take the nearest existing card from the transcribed library (extend it with `scripts/gen_lvt_cards.py` when a local grid is needed) and update `l/w/nf/nrd/nrs` together.
 
 ## Shunt-Arm Calculation (shared; for SimpleT this IS the whole design)
 
 Every architecture realizes its shunt path the same way — a resistive part in series with a shunt switch — and for SimpleT the whole cell is exactly this path:
 
 1. **Arm total from the ideal formulas** (per architecture below): `R_arm = R0/(2/|S21| − 2)` for SimpleT; `R3` for T-type; `Rsh` per side for Pi.
-2. **Ron direct input** — the shunt switch on-resistance is GIVEN (suggested 1/3 ~ 1/5 of `R_arm`; default `R_arm/4`). Switch sizing from the device FOM data — `W_tot = (Ron·W)/Ron`, per-finger width per the data file (lvt: `sky130_examples/sky130proc/nfet_switch.json`; plain nfet: `sky130_examples/sky130proc/nfet_ron_coff.csv`).
+2. **Ron direct input** — the shunt switch on-resistance is GIVEN (suggested 1/3 ~ 1/5 of `R_arm`; default `R_arm/4`). Switch sizing from the device FOM data — `W_tot = (Ron·W)/Ron`, per-finger width per the data file (lvt FOM: `sky130_examples/sky130proc/nfet_switch.json`, per-card table `sky130proc/nfet_lvt_ron_coff.csv`; plain nfet: `sky130_examples/sky130proc/nfet_ron_coff.csv`).
 3. **Resistive remainder**: `Rp = R_arm − Ron`. Report the achieved step against the target (with ideal RC the DC step is exact; the flatness is simulation's business).
 
 For T-type and Pi the series arm(s) come from the same ideal formulas (`Rs`), and the bypass switch Ron1 is a direct input (keep Ron1 well below the series path it shorts, or the bypass fails).
@@ -136,8 +138,8 @@ A compensation capacitor Cp parallels the shunt resistor Rp in every architectur
 ## Mandatory Process Rules
 
 1. **Sub-circuit verification first.** Simulate each new sub-component (switch Ron/Coff, shunt arm) before the top-level cell; read Z11 from the parsed curves (Ron = Re(z11), Coff = −1/(2πf·Im(z11)) at the band midpoint).
-2. **5×5 local sweep for sub-circuit verification.** Sizing quantization is unavoidable — verify a 5×5 local sweep around the calculated point (e.g. W × nf, ±2 discrete steps each) in the SAME batch.
-3. **Always generate the report.** After every batch: parse (remote by default — see batch-sweep step 4), then build the spec and call `gen_sweep_report {spec}` — one round per `Sim*_<date>_batch*` run of the project joins the batch dropdown.
+2. **5×5 local sweep for sub-circuit verification.** Sizing quantization is unavoidable — verify a 5×5 local sweep around the calculated point (W × nf, ±2 card steps each) in the SAME batch. The bundled lvt library carries those grids around the two worked design classes; for a different design point extend it first with `scripts/gen_lvt_cards.py` (or fall back to the nearest available cards and say so in the report).
+3. **Always generate the report.** Parse after every batch (remote by default — see batch-sweep step 4); the spec and the `gen_sweep_report {spec}` call may be ONE consolidated report at the end of the design instead of one per batch — every `Sim*_<date>_batch*` run that produced points still joins the report as its own round in the batch dropdown.
 4. **Switch geometry moves as one unit.** The flattened model card name, `l/w/nf` and `nrd/nrs` change together (see sky130_examples).
 5. **Cp local scan (last parameter).** See the Cp section above.
 6. **Reference-state IL is NOT an optimization metric** — but it MUST be presented in the report (ΔS21 charts pair the SW=0/SW=1 states).
@@ -146,9 +148,9 @@ A compensation capacitor Cp parallels the shunt resistor Rp in every architectur
 
 ## Shared Simulation Workflow
 
-1. Run the architecture calculator: `python calc_<arch>.py <target_db> [--ron R] [--ron1 R] [--json design.json]` (from this skill's `scripts/`; switch data from `sky130_examples/sky130proc/` or `--data-dir`).
+1. Run the architecture calculator: `python calc_<arch>.py <target_db> [--ron R] [--ron1 R] [--json design.json]` (from this skill's `scripts/`; the switch data is bundled at `sky130_examples/sky130proc/` — the calculators' default; override with `--data-dir`).
 2. Verify sub-circuits — 5×5 local sweep (Rule 2), one `Sim*` batch per verification unit.
-3. Create the run directory: copy the architecture template in as `template.scs` (fill the calculator values first), write `sweep_config.json` (`SW: [0,1]`, `cpf` candidates, ≤100 points).
+3. Create the run directory: copy the architecture template in as `template.scs` (fill the calculator values first), write `sweep_config.json` (`SW: [0,1]`, `cpf` candidates; total points within the session's Max-points-per-scan field — default 100, `batch_submit` rejects scans above it).
 4. Submit: `batch_submit {run_dir, worker: "spectre/spectre_sweep_worker.py", worker_args: ["--config", "sweep_config.json", "--max-parallel", "8"], scheduler: "lsf"|"ssh", machine_id, remote_root}` — omit `remote_dir` for the next auto `Sim<N>_<YYYYMMDD>_batch<M>` under `RawResults/` (Spectre on this host: `scheduler: "local"` instead, no machine/root).
 5. Poll: `batch_poll {run_dir, wait_sec}` — completion by the point count; a terminal poll auto-fetches sweep_progress.json + errlog.txt (the raw sp.sp curves stay remote; analyze them there per batch-sweep step 4).
 6. Report: analyze (remote-first), write the spec into `SimResults/`, then `gen_sweep_report {spec}`.

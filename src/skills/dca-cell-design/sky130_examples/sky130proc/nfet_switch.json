@@ -2,19 +2,42 @@
   "meta": {
     "process": "sky130 (open PDK)",
     "device": "sky130_fd_pr__nfet_01v8_lvt",
-    "source": "sky130-spectre-models repo Pi8dB worked design (3-testbench/spectre + results/COMPARE_Pi8dB.md; ngspice-47 vs Spectre 21.1, tt 27C)",
+    "source": "sky130-spectre-models repo Pi8dB worked design; re-characterized 2026-11-25 over the full 54-card bundled grid (Spectre 21.1, tt 27C, 210-point sp, series + cell-bias shunt routes; raw at /home/op/simulation/HarnessAMS/CoffVerify20261125)",
     "notes": [
-      "ron_w_ohm_um is the on-resistance x total-width product: two independent sizings from the verified Pi8dB cell both give 740 ohm*um (12 ohm @ w=61.7um, 17.1 ohm @ w=43.3um), so W_tot = ron_w/Ron_target.",
-      "coff_w_ff_um is an ESTIMATE back-extracted from the Pi8dB Cp optimum (Cp = 40 fF compensating a w=43.3 um shunt switch, Cp ~= Coff): 40/43.3 = 0.92 fF/um. Re-characterize with a dedicated off-state Z run before relying on it for flatness prediction.",
-      "Gate drive 1.8 V (SW levels 0/1.8); l = 0.15 um fixed for switch sizing."
+      "ron_w_ohm_um: mean Ron*W over the measured 54-card grid = 736.2 ohm*um (spread 729.2..746.0 from the per-geometry rsh folding); the two Pi8dB sizings gave 740 (0.5% apart). W_tot = ron_w/Ron_target.",
+      "coff_w_ff_um = 0.424: the MEASURED node-to-ground off-capacitance in the cell's shunt-switch bias configuration (drain at the port, source/bulk grounded, gate via 10 kOhm to 0 V), extracted at 10 GHz (converged above 5 GHz; 1 GHz reads high from leakage). This is the Cp-relevant quantity.",
+      "coff_series_w_ff_um = 0.062: the drain-source coupling cap measured in the series two-port route (Z = 2*Z0*(1/S21-1)) -- a different quantity, ~7x lower; the two numbers are both real, not a contradiction.",
+      "The old 0.92 fF/um coff estimate came from back-extracting the Pi8dB Cp optimum (Cp*=40 fF vs w=43.3 um): measured shunt Coff(43.3 um) = 18.3 fF, so the Cp optimum also compensates the bypass switch's off-cap and the arm topology -- the Cp scan stays authoritative, the first estimate is advisory.",
+      "Gate drive 1.8 V (SW levels 0/1.8); l = 0.15 um fixed for switch sizing. Full per-card table: sky130proc/nfet_lvt_ron_coff.csv."
     ]
   },
   "l_um": 0.15,
   "vgs_v": 1.8,
-  "ron_w_ohm_um": 740.0,
-  "coff_w_ff_um": 0.92,
+  "ron_w_ohm_um": 736.2,
+  "coff_w_ff_um": 0.424,
+  "coff_series_w_ff_um": 0.062,
   "measured_points": [
-    {"w_um": 61.7, "nf": 31, "ron_ohm": 12.0, "role": "series/bypass switch M1 (Pi8dB)"},
-    {"w_um": 43.3, "nf": 22, "ron_ohm": 17.1, "role": "shunt switch M2/M3 (Pi8dB, x2)"}
-  ]
+    {
+      "w_um": 61.7,
+      "nf": 31,
+      "ron_ohm": 11.93,
+      "coff_shunt_ff": 26.14,
+      "coff_series_ff": 3.8,
+      "role": "bypass switch M1 (Pi8dB / Pi10dB)"
+    },
+    {
+      "w_um": 43.3,
+      "nf": 22,
+      "ron_ohm": 17.0,
+      "coff_shunt_ff": 18.35,
+      "coff_series_ff": 2.67,
+      "role": "shunt switch M2/M3 (Pi8dB / Pi10dB, x2)"
+    }
+  ],
+  "measured_grid": {
+    "n_cards": 54,
+    "grid": "coarse FOM ladder (w10/20/50/100) + 5x5 grids around the two worked design classes",
+    "csv": "sky130proc/nfet_lvt_ron_coff.csv",
+    "raw_remote": "/home/op/simulation/HarnessAMS/CoffVerify20261125"
+  }
 }

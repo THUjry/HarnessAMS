@@ -218,7 +218,7 @@ When inspecting a cascade netlist to verify the analysis mapping:
 
 ## Example (`example/`)
 
-A real-simulation 4-bit cascade example (ST1 + T2 + T4 + Pi8, 16 control words) lives in `example/`: the four cell netlists + the cascade netlist (sky130 switches, ideal R/C, simulated with ngspice against the fossi sky130 cards), the generated results JSON (`Analysis/data/Round1.js`) and the corresponding HTML report. See `example/README.md` for provenance, the verified sweep grid, the recorded cross-check reference values and how to regenerate.
+A real-simulation 4-bit cascade example (ST1 + T2 + T4 + Pi8, 16 control words) lives in `example/`: the four cell netlists + the cascade netlist (sky130 switches, ideal R/C, simulated with ngspice against the fossi sky130 cards), the generated results JSON (`Analysis/data/Round1.js`) and the corresponding HTML report. See `example/README.md` for provenance, the verified sweep grid, the recorded cross-check reference values and how to regenerate. The example's cells, sweep grid and reference values are illustrative — a new cascade's cells come from the user's own bestPoints/design data; ask before reusing any example value.
 
 ## Constraints
 - **Do NOT modify the dca-cell-design skill** — single-cell ATT design is out of scope; this skill only *analyses* cascade results. Single-cell design workflows belong to **dca-cell-design**; sweep mechanics live in **batch-sweep**, template rules in **smart-spectre**.

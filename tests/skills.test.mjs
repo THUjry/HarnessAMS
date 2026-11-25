@@ -64,11 +64,13 @@ test('skills: the resources referenced by each skill body all exist', () => {
     'sky130_examples/sky130proc/template_ST.scs', 'sky130_examples/sky130proc/template_T.scs',
     'sky130_examples/sky130proc/template_Pi.scs', 'sky130_examples/sky130proc/sky130_fd_pr__nfet_01v8_lvt.scs',
     'sky130_examples/sky130proc/nfet_switch.json', 'sky130_examples/sky130proc/nfet_ron_coff.csv',
+    'sky130_examples/sky130proc/nfet_lvt_ron_coff.csv',
     'sky130_examples/Example.md',
     'sky130_examples/ST1/design.json', 'sky130_examples/ST1/sp_ref.sp', 'sky130_examples/ST1/sp_att.sp',
     'sky130_examples/T4/design.json', 'sky130_examples/T4/sp_ref.sp', 'sky130_examples/T4/sp_att.sp',
     'sky130_examples/Pi8/design.json', 'sky130_examples/Pi8/sp_ref.sp', 'sky130_examples/Pi8/sp_att.sp',
     'scripts/calc_simplet.py', 'scripts/calc_t_type.py', 'scripts/calc_pi.py',
+    'scripts/gen_lvt_cards.py',
   ]) {
     assert.ok(fs.existsSync(path.join(cell.dir, rel)), `missing resource ${rel}`)
   }
@@ -81,6 +83,41 @@ test('skills: the resources referenced by each skill body all exist', () => {
     'example/Analysis/data/Round1.js', 'example/Analysis/Cascade4bit_report.html',
   ]) {
     assert.ok(fs.existsSync(path.join(cascade.dir, rel)), `missing resource ${rel}`)
+  }
+})
+
+// The 2026-11-24 reorganization moved nfet_switch.json down into sky130proc/
+// and every calculator silently kept the old default — a model hit the
+// FileNotFoundError at run time (2026-11-25 session). This guard resolves each
+// DEFAULT_DATA_DIR the way the script would and asserts the data file exists.
+test('skills: the calculators\' default data dir resolves at sky130proc', () => {
+  const byName = Object.fromEntries(bundledSkills().map((s) => [s.name, s]))
+  const cell = byName['dca-cell-design']
+  assert.ok(cell && !cell.error, cell?.error ?? 'dca-cell-design missing')
+  for (const script of ['calc_pi.py', 'calc_t_type.py', 'calc_simplet.py']) {
+    const src = fs.readFileSync(path.join(cell.dir, 'scripts', script), 'utf8')
+    const i = src.indexOf('DEFAULT_DATA_DIR')
+    assert.ok(i >= 0, `${script} lost its DEFAULT_DATA_DIR definition`)
+    // bound the slice by paren depth from normpath( — the expression nests
+    // (abspath(__file__)), so a plain indexOf('))') would cut it open
+    const open = src.indexOf('os.path.normpath(', i)
+    assert.ok(open > i, `${script}: DEFAULT_DATA_DIR is not an os.path.normpath call`)
+    let depth = 0, j = open + 'os.path.normpath('.length - 1
+    for (; j < src.length; j++) {
+      if (src[j] === '(') depth++
+      else if (src[j] === ')') { depth--; if (depth === 0) { j++; break } }
+    }
+    const block = src.slice(i, j)
+    assert.ok(block.includes("os.path.dirname(os.path.abspath(__file__))"),
+      `${script}: the first join segment must anchor at the script dir`)
+    assert.ok(/'sky130proc'/.test(block),
+      `${script}: the default must resolve inside sky130_examples/sky130proc/`)
+    // the quoted join segments resolve relative to the script dir, exactly the
+    // way os.path.join would ('..','sky130_examples','sky130proc')
+    const rel = [...block.matchAll(/'([^']*)'/g)].map((x) => x[1]).join('/')
+    const dataDir = path.resolve(path.join(cell.dir, 'scripts'), rel)
+    assert.ok(fs.existsSync(path.join(dataDir, 'nfet_switch.json')),
+      `${script}: DEFAULT_DATA_DIR has no nfet_switch.json (${dataDir})`)
   }
 })
 
