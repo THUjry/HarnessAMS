@@ -3,15 +3,15 @@
 // MODEL's job (remote analysis by default; only compact results are pulled
 // back), so this tool consumes a model-written spec JSON (points/curves inline
 // or via {"$file"} references), renders the sweep dashboard at the project
-// root with data JS in SimResults/, and registers the report into the CALLING
-// session's dashboard. Chart PNGs go into Figs/ ONLY when the workspace
-// setting report_figs is on (Overview toggle, default off — 2026-11-24;
-// headless jsdom+plotly+resvg, fail-open when enabled).
+// root (its data JS in SimResults/<report name>/ — one directory per report)
+// and registers the report into the CALLING session's dashboard. Chart PNGs go
+// into Figs/ ONLY when that session's "Report figures" option is on (HarnessAMS
+// session panel, default off — headless jsdom+plotly+resvg, fail-open).
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { resolveDir } from '../py.js'
-import { readJsonBom, chartSpecs, curveMids, genReportFromSpec, findProjectConfigFrom } from '../report_render.js'
+import { readJsonBom, chartSpecs, curveMids, genReportFromSpec } from '../report_render.js'
 import { exportFigs } from '../figs_export.js'
 
 // --- report auto-registration target: the calling session's HarnessAMS ----
@@ -62,6 +62,16 @@ export async function registerReportIntoSession(storeDir, sessionId, reportPath)
   const w = await writeSessionConfig(workspacePath, sessionId, state)
   if (w.error) return { error: w.error }
   return { session: sessionId, report }
+}
+
+// The calling session's "Report figures" option — the PNG export gate. It
+// lives on the SESSION (the option sits in the HarnessAMS session panel, above
+// the dashboard), not in the project settings. No session entry, no store or
+// a flag that is not exactly true all mean off.
+export async function sessionReportFigs(storeDir, sessionId) {
+  const { readSessionConfigs } = await import('../server/project.js')
+  const store = await readSessionConfigs(path.dirname(path.resolve(storeDir)))
+  return store.sessions[sessionId]?.report_figs === true
 }
 
 // --- spec loading -----------------------------------------------------------
@@ -179,9 +189,10 @@ export function genReportTools() {
         + 'project root (write big curve arrays to files, keep the spec small); each point is {index?, label?, '
         + 'params:{}, metrics:{}, status?}; curves is {x_signal, signals:[{name, dB?}], points:[{index, label?, '
         + 'x:[], y:{}}]}. project_dir defaults to the spec location\'s parent when the spec sits in '
-        + '<project>/SimResults/. Outputs: report at <project>/<name>_report.html (data JS in SimResults/); '
-        + 'chart PNGs into Figs/ ONLY when the workspace setting report_figs is on (Overview toggle, default '
-        + 'off — disk; headless render, skipped with a visible reason when unavailable); conclusions rendered '
+        + '<project>/SimResults/. Outputs: report at <project>/<name>_report.html, its data JS in SimResults/<report name>/ '
+        + '(reports are isolated — give every distinct report its own "out" name; the same name overwrites); '
+        + 'chart PNGs into Figs/ ONLY when the calling session\'s "Report figures" option is on (HarnessAMS session '
+        + 'panel, default off — disk; headless render, skipped with a visible reason when unavailable); conclusions rendered '
         + 'as a text card (paragraphs, **bold**, `code`, "- " lists). Curve charts only (one trace per '
         + 'parameter combination — scalar metrics render in the table, not as charts) and the in-report batch '
         + 'dropdown lists rounds newest-first; charts and table cross-highlight.',
@@ -228,18 +239,24 @@ export function genReportTools() {
         }
         const gen = genReportFromSpec(project, prepared)
 
-        // PNG export is OPT-IN via the workspace setting report_figs (the
-        // Overview toggle; default off since 2026-11-24 — continuously saved
-        // chart images consume significant disk). When enabled it stays
-        // fail-open: a missing renderer never fails the report.
-        const figsOn = findProjectConfigFrom(project)?.settings?.report_figs === true
+        // The calling session (identity = exec.agent.id, which IS the SessionId
+        // — D-005) and its store: the PNG gate and the registration both key
+        // off them.
+        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        const found = sid ? findSessionsStore(project) : null
+
+        // PNG export is OPT-IN per session: the "Report figures" option of the
+        // calling session in the HarnessAMS session panel (default off —
+        // continuously saved chart images consume significant disk). When
+        // enabled it stays fail-open: a missing renderer never fails the report.
+        const figsOn = found ? await sessionReportFigs(found.storeDir, sid) : false
         const figs = figsOn
           ? await exportFigs({
               rounds: roundData,
               plotlyFile: gen.plotlyLocal,
               figsDir: path.join(project, 'Figs'),
             })
-          : { figs: [], error: 'disabled: enable "Report figures" in the Overview settings to export PNGs (they consume disk)' }
+          : { figs: [], error: 'disabled: turn on "Report figures" in the HarnessAMS session panel (above the dashboard) to export PNGs (they consume disk)' }
         const lines = [`[report] ${roundData.length} round(s) -> ${gen.reportPath}`]
         lines.push(figs.figs.length
           ? `[figs] ${figs.figs.length} png -> ${path.join(project, 'Figs')}`
@@ -259,21 +276,17 @@ export function genReportTools() {
         // Auto-registration into the CALLING session's dashboard (identity =
         // exec.agent.id, which IS the SessionId — D-005). The report is already
         // on disk, so a failure here is reported, never thrown.
-        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
         if (!sid) {
           result.registered = false
           result.register_error = 'no session identity in the tool execution context — report generated at '
             + result.report_path + ' but not registered (add it in the HarnessAMS sidebar dashboard)'
+        } else if (!found) {
+          result.registered = false
+          result.register_error = `no HarnessAMS session store (.harnessams) found above ${project} — open the HarnessAMS sidebar in this workspace once first`
         } else {
-          const found = findSessionsStore(project)
-          if (!found) {
-            result.registered = false
-            result.register_error = `no HarnessAMS session store (.harnessams) found above ${project} — open the HarnessAMS sidebar in this workspace once first`
-          } else {
-            const r = await registerReportIntoSession(found.storeDir, sid, gen.reportPath)
-            if (r.error) { result.registered = false; result.register_error = r.error }
-            else { result.registered = true; result.session = r.session; result.report = r.report }
-          }
+          const r = await registerReportIntoSession(found.storeDir, sid, gen.reportPath)
+          if (r.error) { result.registered = false; result.register_error = r.error }
+          else { result.registered = true; result.session = r.session; result.report = r.report }
         }
         return result
       },

@@ -50,9 +50,6 @@ export function defaultSettings() {
     // defaults apply (python3 / spectre on PATH)
     remote_python: null,
     remote_spectre_cmd: null,
-    // gen_sweep_report PNG export gate — off by default: continuously saving
-    // one PNG per chart on every report consumes significant disk (2026-11-24)
-    report_figs: false,
   }
 }
 
@@ -144,8 +141,6 @@ function parseConfig(raw) {
         // an invalid stored pin (hand-edited) reads as unpinned — the same
         // fail-open every other key gets
         settings[k] = normalizePin(v, k).value
-      } else if (k === 'report_figs') {
-        if (typeof v === 'boolean') settings.report_figs = v
       } else if (ENUMS[k] && ENUMS[k].includes(v)) {
         settings[k] = v
       }
@@ -286,12 +281,6 @@ export function validateSettings(input) {
       const p = normalizePin(v, k)
       if (p.error) return { error: p.error }
       out[k] = p.value
-    } else if (k === 'report_figs') {
-      // nullable like machine_id/remote_root: partial settings payloads (the
-      // established route/tool usage) omit the key entirely
-      if (v === undefined || v === null) out.report_figs = false
-      else if (typeof v !== 'boolean') return { error: 'report_figs must be a boolean (on/off switch)' }
-      else out.report_figs = v
     } else if (ENUMS[k]) {
       if (!ENUMS[k].includes(v)) return { error: `${k} must be one of: ${ENUMS[k].join(', ')}` }
       out[k] = v

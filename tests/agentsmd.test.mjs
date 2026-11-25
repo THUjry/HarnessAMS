@@ -73,7 +73,7 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
     assert.ok(md.includes('  run_mode: "remote"'))
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
     assert.ok(md.includes('  remote_scripts_dir: "/home/op/sim/.harnessams/scripts"'), 'the remote scripts path rides along')
-    assert.ok(md.includes('  report_figs: false'), 'the PNG-export gate mirrors the config (untyped default)')
+    assert.ok(!md.includes('report_figs'), 'the PNG gate is a session option, never a project yaml row')
     assert.ok(md.includes('  remote_python: null'), 'no interpreter pin yet → the YAML null literal')
     assert.ok(md.includes('  remote_spectre_cmd: null'), 'no spectre pin yet → the YAML null literal')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
@@ -290,11 +290,20 @@ test('agentsmd client: button row order and wiring, new keys bilingual', () => {
     'pset.browse', 'pset.browseTitle', 'pset.browsePickDir', 'pset.pickDir', 'pset.pickThisDir', 'pset.pickCurrentDir',
     'pset.colName', 'pset.colValue', 'pset.confirmBtn', 'pset.unsaved', 'pset.stagedHint',
     'pset.envTitle', 'pset.envIn', 'pset.envOut', 'pset.envHint',
+    // the report-figures option: a session option above the dashboard
+    'pset.colFigs', 'pset.figsWarn',
     'envc.title', 'envc.bodyIn', 'envc.bodyOut', 'envc.ok',
     'chk.btn.local', 'chk.truncated',
   ])
-  // the cluster toolchain pins are NOT a settings-table row (by ruling)
-  for (const gone of ['pset.colRemotePython', 'pset.colRemoteSpectre', 'pset.pinPlaceholder', 'pset.pinHint', "kind: 'text'"]) {
+  // the cluster toolchain pins and the PNG gate are NOT settings-table rows
+  // (by ruling): no pin strings, and the session option writes the session entry
+  for (const gone of ['pset.colRemotePython', 'pset.colRemoteSpectre', 'pset.pinPlaceholder', 'pset.pinHint',
+    "kind: 'text'", "kind: 'bool'"]) {
     assert.ok(!src.includes(gone), `the settings table lost "${gone}"`)
   }
+  assert.ok(src.includes("h(SessionOptionFigs, { config, updateConfig }),")
+    && src.indexOf('h(SessionOptionFigs, { config, updateConfig }),') < src.indexOf('h(SessionDashboard, { sessionId, config, updateConfig }),'),
+    'the report-figures option renders above the dashboard')
+  assert.ok(src.includes("updateConfig((c) => ({ ...c, report_figs: e.target.value === '1' }))"), 'the option writes the session entry')
+  assert.ok(src.includes("...(src.report_figs === true ? { report_figs: true } : {})"), 'the session clone carries the option')
 })

@@ -73,7 +73,6 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   row('compute_remote', s.compute_script_remote)
   row('remote_python', s.remote_python ?? null)
   row('remote_spectre_cmd', s.remote_spectre_cmd ?? null)
-  row('report_figs', s.report_figs === true)
   row('remote_dir', s.remote_dir)
   row('remote_root', s.remote_root)
   row('remote_scripts_dir', s.remote_root

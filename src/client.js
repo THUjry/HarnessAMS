@@ -664,6 +664,11 @@ window.__ModuleLoader__.load({
 .hams-dashview { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; min-height: 0; flex: 1; }
 .hams-dashtoolbar { margin: 0; flex-wrap: wrap; }
 .hams-dashtoolbar .hams-select { flex: 0 1 auto; min-width: 80px; max-width: 50%; }
+/* tier 3 session option (the report-figures PNG gate): one line above the dashboard */
+.hams-sessionopt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: none; margin: 0 0 2px;
+  font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
+.hams-sessionopt .hams-select { flex: none; width: auto; }
+.hams-sessionopt .hams-dim { overflow-wrap: anywhere; }
 .hams-btn { text-decoration: none; }
 .hams-dashframe { width: 100%; flex: 1; min-height: 300px;
   border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 8px; }
@@ -1274,7 +1279,7 @@ window.__ModuleLoader__.load({
     // fork parent is not identified, no branch-cut state is reconstructed);
     // a brand-new session starts EMPTY, and its written entry doubles as the
     // tombstone that stops fork re-detection.
-    const sessionConfigState = new Map() // sessionId -> { display, reports[], dashboard_selected, check_params? }
+    const sessionConfigState = new Map() // sessionId -> { display, reports[], dashboard_selected, check_params?, report_figs? }
     const lastActiveSessionId = { id: null }
     const hydratedProjects = new Set() // projectPath values whose sessions.json is already in the map
     const emptySessionConfig = () => ({ display: 'overview', reports: [], dashboard_selected: null })
@@ -1284,6 +1289,8 @@ window.__ModuleLoader__.load({
         display: src.display === 'session' ? 'session' : 'overview',
         reports: Array.isArray(src.reports) ? src.reports.map((r) => ({ ...r })) : [],
         dashboard_selected: typeof src.dashboard_selected === 'string' ? src.dashboard_selected : null,
+        // the session's report-figures option: stored only while on
+        ...(src.report_figs === true ? { report_figs: true } : {}),
         ...(src.check_params && typeof src.check_params === 'object'
           ? { check_params: JSON.parse(JSON.stringify(src.check_params)) }
           : {}),
@@ -1460,11 +1467,10 @@ window.__ModuleLoader__.load({
         visible: (s) => s.run_mode === 'remote',
         options: [['python', 'pset.comp.python'], ['js', 'pset.comp.js']] },
       // NOT rows here, by ruling: the cluster toolchain pins remote_python /
-      // remote_spectre_cmd — the agent writes them through harnessams_selfcheck
-      // and they are kept in the AGENTS.md yaml, never typed in the table.
-      // gen_sweep_report PNG export gate (default off — disk); no selfcheck
-      // verdict column of its own, the row always shows a faint dash
-      { id: 'report_figs', labelKey: 'pset.colFigs', column: null, kind: 'bool' },
+      // remote_spectre_cmd (the agent writes them through harnessams_selfcheck
+      // and they are kept in the AGENTS.md yaml — never typed in the table),
+      // and the gen_sweep_report PNG gate (a session option, see
+      // SessionOptionFigs above the dashboard).
     ]
 
     // Aggregate one settings column from the run's step stream: any failure →
@@ -1498,13 +1504,6 @@ window.__ModuleLoader__.load({
               ? [h('option', { key: 'kept', value: draft.machine_id }, txt(draft.machine_id) + ' ?')] : []),
             machines.map((m) => h('option', { key: m.id, value: m.id },
               txt(m.name || m.host) + (m.host && m.host !== m.name ? ' · ' + txt(m.host) : ''))))
-        }
-        if (c.kind === 'bool') {
-          return h('select', { className: 'hams-select', value: draft[c.id] ? '1' : '0',
-            title: tr('pset.figsWarn'),
-            onChange: (e) => onChange(c.id, e.target.value === '1') },
-            h('option', { value: '1' }, tr('check.on')),
-            h('option', { value: '0' }, tr('check.off')))
         }
         return h('select', { className: 'hams-select', value: draft[c.id] ?? '',
           onChange: (e) => onChange(c.id, e.target.value) },
@@ -1840,9 +1839,6 @@ window.__ModuleLoader__.load({
           remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
             '→ ', txt(dirPreview), ' · ', tr('pset.dirRemoteRel')),
           h(SettingsTable, { draft, settings, machines, run, onChange: updateSetting }),
-          // report_figs warning rides under the settings table (also the row's
-          // tooltip): PNG export is off by default to keep disk usage bounded
-          h('div', { className: 'hams-dim' }, tr('pset.figsWarn')),
           // confirm row: staged edits land in workspace_config.json (and AGENTS.md
           // re-syncs) only here — red "unsaved" cells mark the pending state
           h('div', { className: 'hams-row' },
@@ -2191,6 +2187,7 @@ window.__ModuleLoader__.load({
                 'aria-selected': view === v.id,
                 onClick: () => { rememberTaskView(v.id); setView(v.id) },
               }, tr(v.labelKey)))),
+            view === 'dashboard' && h(SessionOptionFigs, { config, updateConfig }),
             view === 'dashboard' && h(SessionDashboard, { sessionId, config, updateConfig }),
             view === 'check' && h(CheckParams, { sessionId, updateConfig }))),
       )
@@ -2202,6 +2199,25 @@ window.__ModuleLoader__.load({
     // pointer hit-testing, and made the embed diverge from the standalone
     // file; the ↗ open-in-tab link and a direct file open now all render
     // identically.
+
+    // Session option, one line ABOVE the dashboard: the gen_sweep_report PNG
+    // export gate. It belongs to the session, not to the project settings —
+    // it rides beside the reports it applies to — is off unless this session
+    // turned it on, and writes through the same rebased persist channel as
+    // the dashboard edits (gen_sweep_report reads it at execute time).
+    function SessionOptionFigs({ config, updateConfig }) {
+      return h('div', { className: 'hams-sessionopt' },
+        h('label', { className: 'hams-optlabel', title: tr('pset.figsWarn') }, tr('pset.colFigs')),
+        h('select', {
+            className: 'hams-select',
+            value: config.report_figs === true ? '1' : '0',
+            title: tr('pset.figsWarn'),
+            onChange: (e) => void updateConfig((c) => ({ ...c, report_figs: e.target.value === '1' })),
+          },
+          h('option', { value: '1' }, tr('check.on')),
+          h('option', { value: '0' }, tr('check.off'))),
+        h('span', { className: 'hams-dim' }, tr('pset.figsWarn')))
+    }
 
     // Dashboard sub-view: the task's registered local HTML reports. The report
     // list + current selection live in the task store (reports[] /

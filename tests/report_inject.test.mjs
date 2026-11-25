@@ -1,16 +1,17 @@
 // Tests for the gen_sweep_report tool (D-006, 2026-11-21): spec-driven report
-// rendering, the new D-006 file layout (report at the project root, data JS in
-// SimResults/, PNGs in Figs/ — opt-in via the report_figs setting since
-// 2026-11-24), the guarded single-session merge-write of sessions.json (v2),
-// and the full tool.execute(args, exec) flow — the calling session comes from
-// exec.agent.id.
+// rendering, the D-006 file layout (report at the project root, its data JS in
+// SimResults/<report name>/ — one directory per report since 2026-11-25, PNGs
+// in Figs/ gated by the calling SESSION's report_figs option), the guarded
+// single-session merge-write of sessions.json (v2), and the full
+// tool.execute(args, exec) flow — the calling session comes from exec.agent.id.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { genReportTools, findSessionsStore, registerReportIntoSession } from '../src/tools/gen_report.js'
+import { genReportTools, findSessionsStore, registerReportIntoSession, sessionReportFigs } from '../src/tools/gen_report.js'
 import { makeTool } from '../src/tool.js'
 
 const SID_A = 'session-aaaa1111-2222-3332-4444-555555555555'
@@ -31,6 +32,16 @@ async function makeWorkspace() {
     },
   }, null, 2) + '\n', 'utf8')
   return { ws, storeDir }
+}
+
+// The PNG gate is the calling SESSION's option (the "Report figures" switch in
+// the HarnessAMS session panel): a flag on that session's sessions.json entry.
+async function setSessionFigs(storeDir, sid, on) {
+  const file = path.join(storeDir, 'sessions.json')
+  const store = JSON.parse(await readFile(file, 'utf8'))
+  if (on) store.sessions[sid].report_figs = true
+  else delete store.sessions[sid].report_figs
+  await writeFile(file, JSON.stringify(store, null, 2) + '\n', 'utf8')
 }
 
 test('inject: findSessionsStore walks up to the nearest .harnessams and returns null without one', async () => {
@@ -106,12 +117,13 @@ test('inject: registerReportIntoSession appends, selects, dedupes by path, prese
 test('gen_sweep_report e2e — spec renders at the project root, registers into the CALLING session, exports PNGs', async () => {
   const { ws, storeDir } = await makeWorkspace()
   try {
-    // PNG export is opt-in (report_figs): this e2e fixture enables it
-    await writeFile(path.join(storeDir, 'workspace_config.json'), JSON.stringify({
-      version: 1, workspace: {}, settings: { report_figs: true },
-    }, null, 2) + '\n', 'utf8')
+    // PNG export is opt-in (the calling session's report_figs option): this
+    // e2e fixture turns it on for SID_A
+    await setSessionFigs(storeDir, SID_A, true)
     const proj = path.join(ws, 'projX')
     const simres = path.join(proj, 'SimResults')
+    // the report's own data directory (the default report name of project projX)
+    const dataDir = path.join(simres, 'projX_report')
     await mkdir(simres, { recursive: true })
 
     // batch2 data via $file refs (the model's remote-analysis output shape)
@@ -152,18 +164,18 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     assert.equal(res.ok, true)
     assert.equal(res.registered, true)
     assert.equal(res.session, SID_A)
-    // D-006 layout: report at the PROJECT ROOT, data JS under SimResults/
+    // D-006 layout: report at the PROJECT ROOT, its data JS in a directory of
+    // its own under SimResults/ (named after the HTML file)
     assert.match(res.report_path, /projX[\\/]projX_report\.html$/)
     assert.equal(res.report_dir, proj)
     assert.match(res.output, /\[report\] 2 round\(s\) -> /)
     for (const f of ['Sim0_20260805_batch1.js', 'Sim0_20260805_batch2.js']) {
-      await readFile(path.join(simres, f)) // throws if missing
-      assert.ok(res.output.includes(f) || true) // manifest references checked below
+      await readFile(path.join(dataDir, f)) // throws if missing
     }
 
     const html = await readFile(res.report_path, 'utf8')
-    // both batches join the dropdown via the SimResults data scripts
-    for (const f of ['SimResults/Sim0_20260805_batch1.js', 'SimResults/Sim0_20260805_batch2.js']) {
+    // both batches join the dropdown via the report's own data scripts
+    for (const f of ['SimResults/projX_report/Sim0_20260805_batch1.js', 'SimResults/projX_report/Sim0_20260805_batch2.js']) {
       assert.ok(html.includes(JSON.stringify(f).slice(1, -1)), `manifest must reference ${f}`)
     }
     // newest-first manifest: batch2 precedes batch1 (natural id order, desc)
@@ -182,7 +194,7 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     assert.ok(inline.includes('b<\\/script><script>alert(1)<\\/script>'), inline)
     assert.ok(!inline.includes('b</script>'), inline)
     assert.ok(inline.includes('proj &amp; &lt;demo&gt;'), 'project title is html-escaped in the manifest')
-    const dataJs = await readFile(path.join(simres, 'Sim0_20260805_batch1.js'), 'utf8')
+    const dataJs = await readFile(path.join(dataDir, 'Sim0_20260805_batch1.js'), 'utf8')
     assert.ok(dataJs.includes('b</script>'))
 
     const rd = JSON.parse(dataJs.replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
@@ -197,14 +209,14 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     // live in the table), batch2's curves yield exactly one curve chart with
     // the trace-order -> point-index map
     assert.deepEqual(rd.charts, [])
-    const rd2 = JSON.parse((await readFile(path.join(simres, 'Sim0_20260805_batch2.js'), 'utf8'))
+    const rd2 = JSON.parse((await readFile(path.join(dataDir, 'Sim0_20260805_batch2.js'), 'utf8'))
       .replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
     assert.equal(rd2.charts.length, 1)
     assert.equal(rd2.charts[0].id, 'chart-curve-0')
     assert.equal(rd2.charts[0].kind, 'curve')
     assert.deepEqual(rd2.charts[0].indices, [0, 1])
 
-    // PNG export (report_figs on): one PNG per curve chart — exactly one here
+    // PNG export (the calling session's option on): one PNG per curve chart — exactly one here
     assert.ok(Array.isArray(res.figs) && res.figs.length === 1, `figs: ${JSON.stringify(res.figs)}`)
     for (const f of res.figs) {
       const buf = await readFile(f.file)
@@ -246,7 +258,7 @@ test('gen_sweep_report: spec errors are actionable; project root derives from a 
     assert.equal(res.report_dir, proj)
     // points-only round: a table-only round now — zero charts (curve charts
     // only; scalar metrics render in the table, never as charts)
-    const rd = JSON.parse((await readFile(path.join(simres, 'Sim1_20261121_batch1.js'), 'utf8'))
+    const rd = JSON.parse((await readFile(path.join(simres, 'projY_report', 'Sim1_20261121_batch1.js'), 'utf8'))
       .replace(/^var ROUND_DATA = /, '').replace(/;$/, ''))
     assert.equal(rd.charts.length, 0)
 
@@ -277,10 +289,8 @@ test('gen_sweep_report: spec errors are actionable; project root derives from a 
 test('gen_sweep_report: PNG export fails open — no charts or a broken renderer never fails the report', async () => {
   const { ws, storeDir } = await makeWorkspace()
   try {
-    // export enabled, but the round has nothing chartable
-    await writeFile(path.join(storeDir, 'workspace_config.json'), JSON.stringify({
-      version: 1, workspace: {}, settings: { report_figs: true },
-    }, null, 2) + '\n', 'utf8')
+    // export enabled (the calling session's option), but the round has nothing chartable
+    await setSessionFigs(storeDir, SID_A, true)
     const proj = path.join(ws, 'projZ')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
@@ -314,7 +324,12 @@ test('gen_sweep_report: PNG export fails open — no charts or a broken renderer
 test('gen_sweep_report: PNG export is opt-in — report_figs off (default) skips Figs entirely', async () => {
   const { ws } = await makeWorkspace()
   try {
-    // NO workspace_config.json at all → defaults apply → report_figs off
+    // no report_figs on the session entry → off. A legacy project-level
+    // report_figs in workspace_config.json no longer turns it on either.
+    await mkdir(path.join(ws, '.harnessams'), { recursive: true })
+    await writeFile(path.join(ws, '.harnessams', 'workspace_config.json'), JSON.stringify({
+      version: 1, workspace: {}, settings: { report_figs: true },
+    }, null, 2) + '\n', 'utf8')
     const proj = path.join(ws, 'projW')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
@@ -338,13 +353,97 @@ test('gen_sweep_report: PNG export is opt-in — report_figs off (default) skips
     }), 'utf8')
     const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
     assert.equal(res.ok, true)
-    assert.match(res.output, /\[figs\] skipped: disabled/)
-    assert.match(res.figs_note ?? '', /disabled/)
+    assert.match(res.output, /\[figs\] skipped: disabled: turn on "Report figures" in the HarnessAMS session panel/)
+    assert.match(res.figs_note ?? '', /session panel/)
     assert.equal(res.figs, undefined)
     // a chartable round still produced a report; the Figs/ directory never
     // appears (export is gated before any directory is created)
     const { stat } = await import('node:fs/promises')
     await assert.rejects(() => stat(path.join(proj, 'Figs')), (e) => e.code === 'ENOENT')
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('gen_sweep_report: the PNG gate is the CALLING session\'s option — per session, strictly boolean, survives registration', async () => {
+  const { ws, storeDir } = await makeWorkspace()
+  try {
+    // off by default, and only exactly true turns it on
+    assert.equal(await sessionReportFigs(storeDir, SID_A), false)
+    await setSessionFigs(storeDir, SID_A, true)
+    assert.equal(await sessionReportFigs(storeDir, SID_A), true)
+    assert.equal(await sessionReportFigs(storeDir, SID_B), false, 'the option is per session — the sibling stays off')
+    assert.equal(await sessionReportFigs(storeDir, 'session-zzzz0000-0000-0000-0000-000000000000'), false, 'unknown session = off')
+
+    // validateSessionState (the store's single gate): non-boolean refused, false
+    // and absent both drop the key (stored only while on)
+    const { validateSessionState, writeSessionConfig, readSessionConfigs } = await import('../src/server/project.js')
+    assert.match(validateSessionState({ display: 'session', reports: [], report_figs: 'on' }).error, /report_figs must be a boolean/)
+    assert.ok(!('report_figs' in validateSessionState({ display: 'session', reports: [], report_figs: false }).state))
+    assert.ok(!('report_figs' in validateSessionState({ display: 'session', reports: [] }).state))
+    assert.equal(validateSessionState({ display: 'session', reports: [], report_figs: true }).state.report_figs, true)
+    // the route-level writer round-trips it beside check_params
+    const w = await writeSessionConfig(ws, SID_B, {
+      display: 'overview', reports: [], dashboard_selected: null, report_figs: true,
+      check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, unit_check: false, bias_check: true, strict_includes: true },
+    })
+    assert.ok(!w.error, w.error)
+    const back = (await readSessionConfigs(ws)).sessions[SID_B]
+    assert.equal(back.report_figs, true)
+    assert.equal(back.check_params.unit_check, false)
+
+    // registration (the tool's own write into the same entry) preserves the option
+    const r = await registerReportIntoSession(storeDir, SID_A, path.join(ws, 'keep.html'))
+    assert.ok(!r.error, r.error)
+    assert.equal(await sessionReportFigs(storeDir, SID_A), true)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('gen_sweep_report: two reports of one project keep separate data (the v1-shows-v2 regression)', async () => {
+  const { ws, storeDir } = await makeWorkspace()
+  try {
+    const proj = path.join(ws, 'projV')
+    const simres = path.join(proj, 'SimResults')
+    await mkdir(simres, { recursive: true })
+    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
+    // the SAME round id with different numbers: v1 says m=1, v2 says m=2
+    const spec = (metric, out) => JSON.stringify({
+      project_dir: proj, ...(out ? { out } : {}),
+      rounds: [{ id: 'Sim0_20261124_batch1', points: [{ index: 0, params: { a: 1 }, metrics: { m: metric } }] }],
+    })
+    await writeFile(path.join(simres, 'spec_v1.json'), spec(1, 'att_report.html'), 'utf8')
+    await writeFile(path.join(simres, 'spec_v2.json'), spec(2, 'att_report_v2.html'), 'utf8')
+    const dataOf = async (dir) => JSON.parse((await readFile(path.join(simres, dir, 'Sim0_20261124_batch1.js'), 'utf8'))
+      .replace(/^var ROUND_DATA = /, '').replace(/;$/, '')).points[0].metrics.m
+
+    const v1 = await tool.execute({ spec: path.join(simres, 'spec_v1.json') }, { agent: { id: SID_A } })
+    assert.equal(v1.ok, true, JSON.stringify(v1))
+    const v2 = await tool.execute({ spec: path.join(simres, 'spec_v2.json') }, { agent: { id: SID_A } })
+    assert.equal(v2.ok, true, JSON.stringify(v2))
+
+    // each HTML references its own data directory, and v1's numbers survive v2
+    const h1 = await readFile(v1.report_path, 'utf8')
+    const h2 = await readFile(v2.report_path, 'utf8')
+    assert.ok(h1.includes('SimResults/att_report/Sim0_20261124_batch1.js'))
+    assert.ok(h2.includes('SimResults/att_report_v2/Sim0_20261124_batch1.js'))
+    assert.ok(!h1.includes('SimResults/att_report_v2/'))
+    assert.equal(await dataOf('att_report'), 1, 'v1 data intact after v2 was generated')
+    assert.equal(await dataOf('att_report_v2'), 2)
+    assert.ok(!existsSync(path.join(simres, 'Sim0_20261124_batch1.js')), 'no shared flat data file')
+
+    // both reports are registered side by side on the session, newest selected
+    const store = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.deepEqual(store.sessions[SID_A].reports.map((r) => r.path), [path.resolve(v1.report_path), path.resolve(v2.report_path)])
+    assert.equal(store.sessions[SID_A].dashboard_selected, store.sessions[SID_A].reports[1].id)
+
+    // the SAME out name is one report: regenerating overwrites HTML and data
+    await writeFile(path.join(simres, 'spec_v3.json'), spec(3, 'att_report.html'), 'utf8')
+    const v3 = await tool.execute({ spec: path.join(simres, 'spec_v3.json') }, { agent: { id: SID_A } })
+    assert.equal(v3.ok, true)
+    assert.equal(await dataOf('att_report'), 3)
+    assert.equal(await dataOf('att_report_v2'), 2, 'the sibling report is untouched')
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

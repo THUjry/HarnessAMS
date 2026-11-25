@@ -78,6 +78,7 @@ function normalizeReports(raw) {
 // Validate one session's config state. Returns { state } or { error }. The
 // check_params object is validated with the same rules as the retired
 // project-level writer (checkparams.js); it is stored only when confirmed.
+// report_figs is the session's own option (the gen_sweep_report PNG gate).
 export function validateSessionState(state) {
   if (state == null) return { state: null }
   if (typeof state !== 'object' || Array.isArray(state)) return { error: 'state must be an object or null' }
@@ -95,7 +96,19 @@ export function validateSessionState(state) {
     if (v.error) return { error: v.error }
     check_params = v.params
   }
-  return { state: { display, reports: rn.reports, dashboard_selected, ...(check_params ? { check_params } : {}) } }
+  // the session's "Report figures" option (the gen_sweep_report PNG gate):
+  // strictly boolean, stored only when on — absent means off
+  if (state.report_figs != null && typeof state.report_figs !== 'boolean') {
+    return { error: 'report_figs must be a boolean (on/off switch)' }
+  }
+  const report_figs = state.report_figs === true
+  return {
+    state: {
+      display, reports: rn.reports, dashboard_selected,
+      ...(report_figs ? { report_figs: true } : {}),
+      ...(check_params ? { check_params } : {}),
+    },
+  }
 }
 
 export function sessionConfigsPath(workspacePath) {

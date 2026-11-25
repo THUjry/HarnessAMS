@@ -567,9 +567,9 @@ function isFileLoose(p) {
 
 // Walk upward from the report's PROJECT directory for the single project
 // config (.harnessams/workspace_config.json), at most 8 levels. Corrupt
-// configs are skipped and the walk continues. Both sections matter here:
-// workspace (plotly_asset seeding) and settings (report_figs — the PNG export
-// gate gen_sweep_report reads at execute time).
+// configs are skipped and the walk continues. Only the workspace section
+// matters here (plotly_asset seeding); the PNG export gate is a per-session
+// option read from sessions.json (tools/gen_report.js sessionReportFigs).
 export function findProjectConfigFrom(startDir, maxLevels = 8) {
   let d = path.resolve(String(startDir ?? '.'))
   for (let i = 0; i < maxLevels; i++) {
@@ -658,25 +658,31 @@ function naturalCompare(a, b) {
 }
 
 // --- report assembly --------------------------------------------------------
-// D-006 layout: data JS at <project>/SimResults/<round id>.js, report HTML at
-// the PROJECT ROOT (outName defaults to <project>_report.html). prepared = {
-// title, metaLine?, conclusions?, outName?, rounds: [roundData] } where each
-// roundData already carries .charts specs. Returns { reportPath, dataDir,
-// entries, plotlyLocal }.
+// D-006 layout: report HTML at the PROJECT ROOT (outName defaults to
+// <project>_report.html), its data JS at <project>/SimResults/<report base
+// name>/<round id>.js. The data directory is PER REPORT, named after the HTML
+// file: two reports of one project used to share SimResults/<round id>.js, so
+// the later report silently replaced the earlier one's numbers (the session
+// dashboard could list both, but both rendered the newest one's data).
+// prepared = { title, metaLine?, conclusions?, outName?, rounds: [roundData] }
+// where each roundData already carries .charts specs. Returns { reportPath,
+// dataDir, entries, plotlyLocal }.
 export function genReportFromSpec(projectDir, prepared) {
   const project = path.resolve(projectDir)
-  const dataDir = path.join(project, 'SimResults')
+  const projectName = path.basename(project.replace(/[\\/]+$/, ''))
+  const reportFile = prepared.outName || `${projectName}_report.html`
+  const dataRel = `SimResults/${reportFile.replace(/\.html$/i, '')}`
+  const dataDir = path.join(project, dataRel)
   fs.mkdirSync(dataDir, { recursive: true })
 
   const entries = []
   for (const rd of prepared.rounds) {
     // hard rule: data JS is plain utf-8 without BOM, one var line.
     fs.writeFileSync(path.join(dataDir, `${rd.round}.js`), 'var ROUND_DATA = ' + JSON.stringify(rd) + ';', 'utf8')
-    entries.push({ id: rd.round, title: rd.title || rd.round, file: `SimResults/${rd.round}.js`, n_points: rd.n_points })
+    entries.push({ id: rd.round, title: rd.title || rd.round, file: `${dataRel}/${rd.round}.js`, n_points: rd.n_points })
   }
   entries.sort((a, b) => naturalCompare(b.id, a.id))
 
-  const projectName = path.basename(project.replace(/[\\/]+$/, ''))
   const title = prepared.title || projectName
   const roundsJs = entries.map((e) => (
     `{id:${inlineJson(e.id)},title:${inlineJson(e.title)},file:${inlineJson(e.file)},n_points:${e.n_points}}`
@@ -699,7 +705,7 @@ export function genReportFromSpec(projectDir, prepared) {
     .replaceAll('__TITLE__', htmlEscape(title))
     .replaceAll('__ROUNDS__', roundsJs)
   // hard rule: main HTML is utf-8-sig (BOM prevents single-byte-locale misreads)
-  const reportPath = path.join(project, prepared.outName || `${projectName}_report.html`)
+  const reportPath = path.join(project, reportFile)
   fs.writeFileSync(reportPath, '\ufeff' + html, 'utf8')
   return { reportPath, dataDir, entries, plotlyLocal: plotly.localFile }
 }

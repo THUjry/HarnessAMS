@@ -512,14 +512,16 @@ test('settings: defaults, validation, persistence, workspace section', async () 
     cluster_env: 'out-of-cluster', run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
     scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     remote_python: null, remote_spectre_cmd: null,
-    report_figs: false,
   })
   // valid full object round-trips
   const v = validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1',
-    remote_root: '/home/op/sim', remote_dir: '/abs/path', scheduler: 'ssh', compute_script_remote: 'js', report_figs: true })
+    remote_root: '/home/op/sim', remote_dir: '/abs/path', scheduler: 'ssh', compute_script_remote: 'js' })
   assert.ok(!v.error, v.error)
   assert.equal(v.settings.compute_script_remote, 'js')
-  assert.equal(v.settings.report_figs, true)
+  // the gen_sweep_report PNG gate is a SESSION option (sessions.json), not a
+  // project setting: no key, and a legacy payload key is ignored
+  assert.ok(!('report_figs' in v.settings))
+  assert.ok(!validateSettings({ ...defaultSettings(), cluster_env: 'in-cluster', report_figs: 'on' }).error)
   // D-016 toolchain pins: an absolute path to the executable file, or null.
   // (positive cases need a valid base: out-of-cluster + local + spectre is refused)
   const ok = { ...defaultSettings(), cluster_env: 'in-cluster' }
@@ -544,14 +546,12 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.match(validateSettings({ ...defaultSettings(), remote_spectre_cmd: '/a/../b/spectre' }).error, /remote_spectre_cmd must not contain/)
   assert.match(validateSettings({ ...defaultSettings(), remote_python: '/' + 'a'.repeat(400) }).error, /too long/)
   assert.match(validateSettings({ ...defaultSettings(), remote_python: 42 }).error, /absolute path to the executable, or null/)
-  // report_figs is strictly boolean (the gen_sweep_report PNG-export gate);
-  // an omitted key falls back to the default off (partial payloads are legal)
-  assert.match(validateSettings({ ...defaultSettings(), report_figs: 'on' }).error, /report_figs must be a boolean/)
-  assert.match(validateSettings({ ...defaultSettings(), report_figs: 1 }).error, /report_figs must be a boolean/)
+  // a payload that omits every pin key (the established partial usage) is legal
   const partial = validateSettings({ cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
     remote_dir: '.harnessams/selfcheck', scheduler: 'ssh', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' })
   assert.ok(!partial.error, partial.error)
-  assert.equal(partial.settings.report_figs, false)
+  assert.equal(partial.settings.remote_python, null)
+  assert.equal(partial.settings.remote_spectre_cmd, null)
   // enum + mode coupling guards
   assert.match(validateSettings({ ...defaultSettings(), simulator: 'ngspice' }).error, /simulator must be one of/)
   assert.match(validateSettings({ ...defaultSettings(), scheduler: 'none' }).error, /scheduler must be one of/)
@@ -596,7 +596,6 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(back.settings.machine_id, 'm1')
   assert.equal(back.settings.remote_root, '/home/op/sim')
   assert.equal(back.settings.compute_script_remote, 'js')
-  assert.equal(back.settings.report_figs, true)
   // read-modify-write keeps a hand-edited workspace section intact
   raw.workspace.plotly_asset = 'C:/custom/plotly.min.js'
   await fsp.writeFile(configPath(tmp), JSON.stringify(raw, null, 2), 'utf8')
@@ -609,11 +608,11 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.ok(!local.error, local.error)
   assert.equal(local.settings.machine_id, 'm1')
   // hand-edited junk falls back per-key instead of breaking the Overview
-  await fsp.writeFile(configPath(tmp), '{"settings":{"run_mode":"bogus","machine_id":"x","report_figs":"yes"}}', 'utf8')
+  await fsp.writeFile(configPath(tmp), '{"settings":{"run_mode":"bogus","machine_id":"x","report_figs":true}}', 'utf8')
   const dirty = await readSettings(tmp)
   assert.equal(dirty.settings.run_mode, 'local')
   assert.equal(dirty.settings.machine_id, 'x')
-  assert.equal(dirty.settings.report_figs, false) // non-boolean report_figs is dropped, default applies
+  assert.ok(!('report_figs' in dirty.settings), 'a legacy report_figs key is not a setting anymore (the PNG gate is per session)')
   // unknown scheduler values (incl. the retired "direct"/"none") fall back to
   // the default — no migration, the pre-release no-compat ruling (D-002 wave)
   await fsp.writeFile(configPath(tmp), '{"settings":{"scheduler":"none"}}', 'utf8')
@@ -806,7 +805,6 @@ test('routes: GET project-settings defaults + the /api/tool funnel + guards', as
   assert.equal(merged.remote_spectre_cmd, PIN_SPECTRE)
   assert.equal(merged.machine_id, 'm1', 'untouched keys keep their stored values')
   assert.equal(merged.run_mode, 'remote')
-  assert.equal(merged.report_figs, false)
   assert.ok((await fsp.readFile(path.join(projectPath, 'AGENTS.md'), 'utf8')).includes(`  remote_python: "${PIN_PY}"`),
     'the merged pin reached the AGENTS.md yaml through the same action')
   // clearing one pin is a partial write too

@@ -110,12 +110,12 @@ export function selfcheckTools(ctx) {
       + 'Passing "settings" (a full object or a partial one — a partial payload is merged over the stored settings) '
       + 'writes the project config settings section BEFORE the action runs — that is the single config write face '
       + '(cluster_env/run_mode/machine_id/remote_root/remote_dir/scheduler/simulator/compute_script_local/'
-      + 'compute_script_remote/remote_python/remote_spectre_cmd/report_figs; remote mode requires an absolute remote_root and machine_id '
+      + 'compute_script_remote/remote_python/remote_spectre_cmd; remote mode requires an absolute remote_root and machine_id '
       + 'unless in-cluster LSF is the only remote channel; scheduler is lsf/ssh; compute_script_* selects the compute '
       + 'LANGUAGE (python/js), never an interpreter path; remote_python and remote_spectre_cmd are the cluster toolchain '
       + 'pins — absolute paths to the worker interpreter and to the spectre executable, null = the bare defaults: harvest '
-      + 'and verify them with the cluster-setup skill, never guess a path; report_figs is the '
-      + 'boolean gen_sweep_report PNG-export toggle, default off).',
+      + 'and verify them with the cluster-setup skill, never guess a path. The pins are not a settings-table row: this '
+      + 'argument is their write face and the AGENTS.md yaml is where they are kept.',
     parameters: {
       action: { type: 'string', required: true, enum: ['run', 'status', 'stop', 'env', 'save_agentsmd'],
         description: 'run=start a self-check (background, returns run_id) | status=fetch one run | stop=cancel a running self-check | env=local environment listing | save_agentsmd=sync the AGENTS.md config table' },
