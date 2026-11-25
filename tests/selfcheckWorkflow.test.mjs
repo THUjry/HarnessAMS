@@ -2,10 +2,11 @@
 // rendered into the AGENTS.md project-config block on values builds. The
 // 2026-11-24 rework replaced the five prose self-check branches with ONE
 // table: five rows (Write/Submit/Monitor/Analyze/Report — the 2026-11-25
-// wave hand-writes the run directory and validates it with spectre_pre_check),
-// columns Step | Tool | Model fills, cluster_env forking only the scheduler
-// and analyze cells. ASCII-only by the block's language ruling; one line per
-// table row.
+// wave hand-writes the run directory; batch_submit runs the netlist gate
+// itself, so the Write row names the governing tool without prescribing a
+// separate validation call), columns Step | Tool | Model fills, cluster_env
+// forking only the scheduler and analyze cells. ASCII-only by the block's
+// language ruling; one line per table row.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { workflowTable } from '../src/server/selfcheckWorkflow.js'
@@ -30,6 +31,14 @@ test('workflowTable: five rows, three columns, header shape', () => {
   assert.ok(t.includes('| batch_submit |'))
   assert.ok(t.includes('| batch_poll |'))
   assert.ok(t.includes('| gen_sweep_report |'))
+  // the 2026-11-25 weakening: the Write row carries the value-form rules and
+  // the temperature default, and never prescribes a separate validation call
+  const write = t.split('\n').find((l) => l.startsWith('| Write |'))
+  assert.ok(write.includes('never scientific notation'), write)
+  assert.ok(write.includes('never expressions'), write)
+  assert.ok(write.includes('worker fills 27 degC'), write)
+  assert.ok(!write.includes('then validate with'), write)
+  assert.ok(write.includes('no separate validation call is needed'), write)
 })
 
 test('workflowTable: params the yaml already states are deliberately absent, machine/root resolve from config', () => {

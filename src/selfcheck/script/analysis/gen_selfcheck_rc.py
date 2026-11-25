@@ -17,8 +17,9 @@ project root, --out forwarded, HARNESSAMS_SIMULATOR=spectre riding in the
 environment. The template follows the netlist contract the SmartAnaSim
 spectre_pre_check tool enforces — @@P@@ placeholders on the parameters statement
 ONLY, the circuit referencing parameters by name (the worker substitutes the
-per-point values into the parameters line). Self-contained on purpose: no
-imports from the plugin scripts tree.
+per-point values into the parameters line), SI-suffixed numbers only (no
+scientific notation). Self-contained on purpose: no imports from the plugin
+scripts tree.
 """
 import argparse
 import json
@@ -29,8 +30,9 @@ R_VALS = ["1k", "2k", "5k"]
 C_VALS = ["1n", "2n", "5n"]
 # AC grid: 1 kHz .. 100 MHz, 50 points/decade. The extreme fc of the grid
 # (1/(2*pi*1k*1n) ~ 159 kHz, 1/(2*pi*5k*5n) ~ 6.4 kHz) sits well inside.
-AC_START = 1e3
-AC_STOP = 1e8
+# SI-suffixed literals per the netlist contract (never exponent form).
+AC_START = "1k"
+AC_STOP = "100M"
 AC_DECADES = 50
 
 TEMPLATE_LPF = """\
@@ -42,7 +44,7 @@ R1 (vin vout) resistor r=r_val
 C1 (vout 0) capacitor c=c_val
 save vout
 ac ac start=%s stop=%s dec=%d
-""" % ("%.0e" % AC_START, "%.0e" % AC_STOP, AC_DECADES)
+""" % (AC_START, AC_STOP, AC_DECADES)
 
 TEMPLATE_HPF = """\
 // HarnessAMS project self-check - RC high-pass (ideal components, no PDK)
@@ -53,7 +55,7 @@ C1 (vin vout) capacitor c=c_val
 R1 (vout 0) resistor r=r_val
 save vout
 ac ac start=%s stop=%s dec=%d
-""" % ("%.0e" % AC_START, "%.0e" % AC_STOP, AC_DECADES)
+""" % (AC_START, AC_STOP, AC_DECADES)
 
 
 def sweep_config():

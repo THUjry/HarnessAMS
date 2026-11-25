@@ -2,7 +2,8 @@
 // Default values = the 1 dB class from calc_simplet.py 1 (Rpoly 187.79 ohm,
 // Ron 17.10 ohm). Fill-in map from calc_simplet.py:
 //   Rp <- Rpoly (shunt resistor value)   M0 <- shunt switch (ron)
-//   cpf <- Cp first estimate, refined by the Cp scan
+//   cpf <- Cp first estimate, refined by the Cp scan (SI-suffixed strings in
+//   farads: "28f" for 28 fF; "0f" = no compensation)
 // SimpleT has NO SWB (single-ended gate, no complementary drive) -- the cascade
 // assembler relies on this.
 // Switch geometry is baked into the flattened model card name -- update
@@ -10,7 +11,7 @@
 // R/C are IDEAL elements by decision: analytic flatness predictions are
 // advisory -- ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
 simulator lang=spectre
-simulatorOptions options temp=@@temperature@@ reltol=2e-4
+simulatorOptions options temp=@@temperature@@ reltol=200u
 include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model -- in a real project point at the transcribed-library copy
 
 parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
@@ -18,7 +19,7 @@ parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
 subckt att_st (in out sw)
   Rshort (in out) resistor r=0
   Rp  (in n1) resistor r=187.79
-  Cp  (in n1) capacitor c=(cpf*1e-15)
+  Cp  (in n1) capacitor c=cpf
   M0 (n1 gs 0 0) nlowvt_model__w43p3nf22 l=0.15u w=43.3u nf=22 nrd=(0.14/43.3) nrs=(0.14/43.3) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
   Rg (gs sw) resistor r=10k
 ends att_st
@@ -28,4 +29,4 @@ V2 (out 0) port num=2 z0=50
 X1 (in out sw) att_st
 VSW (sw 0) vsource dc=(1.8*SW)
 
-sp sp start=1e9 stop=40e9 step=100e6
+sp sp start=1G stop=40G step=100M

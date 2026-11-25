@@ -616,7 +616,9 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(raw.version, 1)
   assert.equal(raw.workspace.sim_scripts_dir, path.join(tmp, '.harnessams', 'scripts'))
   assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'scripts')), 'staged scripts dir exists')
-  assert.ok(fs.existsSync(path.join(tmp, 'script', 'analysis', 'gen_selfcheck_rc.py')), 'staged gen script (D-015)')
+  // the project script/ folder is retired (2026-11-25): the gen script is
+  // never staged into the project, the self-check runs it from the package
+  assert.ok(!fs.existsSync(path.join(tmp, 'script')), 'no project script/ folder (2026-11-25 retirement)')
   const sibling = path.resolve(REPO, '..', 'HarnessAMS-SmartAnaSim', 'scripts')
   if (fs.existsSync(path.join(sibling, 'spectre', 'spectre_sweep_worker.py'))) {
     assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'scripts', 'spectre', 'spectre_sweep_worker.py')),
@@ -689,7 +691,7 @@ test('gen script emits the 3x3 tb for both topos (grid matches golden)', async (
     assert.doesNotMatch(tpl, /^\./m) // no SPICE dot directives (.ac/.tran/…)
     assert.match(tpl, /vsource dc=0 mag=1/)
     assert.match(tpl, /save vout/)
-    assert.match(tpl, /ac ac start=1e\+?0?3 stop=1e\+?0?8 dec=50/)
+    assert.match(tpl, /ac ac start=1k stop=100M dec=50/)
     assert.match(tpl, /@@r_val@@/)
     assert.match(tpl, /@@c_val@@/)
     if (topo === 'lpf') assert.match(tpl, /R1 \(vin vout\) resistor/) // series R first = LPF
@@ -967,7 +969,10 @@ test('project init (D-015, 2026-11-25): staging at init heals the writeSessionCo
     const r1 = await initProjectStorage(ws)
     assert.deepEqual({ fresh: r1.fresh, flipped: r1.flipped }, { fresh: false, flipped: true })
     assert.ok(fs.existsSync(path.join(ws, '.harnessams', 'scripts')), 'scripts staged at init')
-    assert.ok(fs.existsSync(path.join(ws, 'script', 'analysis', 'gen_selfcheck_rc.py')), 'the RC example stays in script/analysis (user ruling)')
+    // the RC gen script is never staged into the project anymore (2026-11-25:
+    // the project script/ folder is retired; the self-check runs it from the
+    // package install location)
+    assert.ok(!fs.existsSync(path.join(ws, 'script')), 'no project script/ folder (2026-11-25 retirement)')
     let raw = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
     assert.equal(raw.workspace.sim_scripts_dir, path.join(ws, '.harnessams', 'scripts'), 'the suppressed flip lands')
 
@@ -1067,7 +1072,9 @@ test('routes: project-init (D-015) + global-config (D-017) + project facts', asy
     assert.equal(init.code, 200, JSON.stringify(init.body))
     assert.equal(init.body.fresh, true)
     assert.ok(fs.existsSync(path.join(projectPath, '.harnessams', 'scripts')))
-    assert.ok(fs.existsSync(path.join(projectPath, 'script', 'analysis', 'gen_selfcheck_rc.py')))
+    // no project script/ folder since the 2026-11-25 retirement — the gen
+    // script runs from the package install location
+    assert.ok(!fs.existsSync(path.join(projectPath, 'script')))
     assert.equal(init.body.healed.length, 0, 'no node memory yet: nothing to prefill')
     // a page-reload init is a quiet idempotent no-op
     const init2 = await postInit()
@@ -1186,15 +1193,20 @@ test('flow: simulator=spectre + local', async () => {
     assert.equal(byCol['spectre_psf_parse.py (LPF+HPF)'].ok, true)
     assert.equal(byCol['pointwise verify (python, LPF+HPF)'].ok, true)
     assert.match(byCol['pointwise verify (python, LPF+HPF)'].result, /9 pts/)
-    // the gen step is a direct spawn (2026-11-25): a green run cleans its
-    // artifacts (only selfcheck_run.json survives), so the netlist-contract
-    // check reads the STAGED gen script's template (persistent, D-015) —
-    // @@P@@ on the parameters statement only, the circuit by name
-    assert.ok(fs.existsSync(path.join(f.projectPath, 'script', 'analysis', 'gen_selfcheck_rc.py')), 'project owns its gen script')
-    const genSrc = fs.readFileSync(path.join(f.projectPath, 'script', 'analysis', 'gen_selfcheck_rc.py'), 'utf8')
+    // the gen step is a direct spawn from the package install location
+    // (2026-11-25): a green run cleans its artifacts (only selfcheck_run.json
+    // survives) and the project never sees a script/ folder, so the
+    // netlist-contract check reads the PACKAGE gen script's template — @@P@@
+    // on the parameters statement only, the circuit by name, SI-suffixed
+    // numbers (no scientific notation anywhere in the emitted netlist)
+    assert.ok(!fs.existsSync(path.join(f.projectPath, 'script')), 'no project script/ folder (2026-11-25 retirement)')
+    const genPath = path.join(REPO, 'src', 'selfcheck', 'script', 'analysis', 'gen_selfcheck_rc.py')
+    assert.ok(fs.existsSync(genPath), 'the package carries the gen script')
+    const genSrc = fs.readFileSync(genPath, 'utf8')
     assert.match(genSrc, /parameters r_val=@@r_val@@ c_val=@@c_val@@/)
     assert.match(genSrc, /resistor r=r_val/)
     assert.ok(!genSrc.includes('r=@@r_val@@'), 'the circuit body carries no placeholders')
+    assert.ok(!genSrc.includes('%.0e'), 'the ac line is a literal SI-suffixed pair, not %.0e formatting')
     // local chain: submit + poll both went through the tool shell, and not a
     // single ssh_* call happened
     assert.ok(f.ctx.__execLog.some((x) => x.name === 'batch_submit' && x.arguments.scheduler === 'local'))

@@ -58,7 +58,7 @@ import { execLocal, localCopy } from '../localchannel.js'
 import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
 import { healToolchainPins, readSettings, resolveScriptsSource, validateSettings, writeSettings, PIN_KEYS, normalizePin } from './settings.js'
 import { updateNodePins } from './globalstore.js'
-import { ensureProjectScripts } from './scriptStage.js'
+import { ensureProjectScripts, genSelfcheckRcPath } from './scriptStage.js'
 import { syncAgentsMd } from './agentsmd.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
 import { fetchMachines } from './machines.js'
@@ -358,9 +358,10 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     // historical evidence (a failed/diagnosed run kept its artifacts) is cleaned
     // now, ahead of the new run — bounded disk: at most the live run's artifacts
     await cleanHistoricalArtifacts(project.path).catch(() => {})
-    // one-time script staging: the project's own gen script + worker tree must
-    // exist BEFORE the chain runs, so the gen step works on the project root
-    // exactly as it will after the self-check (2026-11-24)
+    // one-time script staging: the worker tree + assets bucket must exist
+    // BEFORE the chain runs so the batch step can upload them (2026-11-24;
+    // 2026-11-25 the gen script left this list — it runs from the package
+    // install location, no project script/ folder anymore)
     await ensureProjectScripts(project.path, resolveScriptsSource(project.path))
   } catch (e) {
     runningBySession.delete(sessionId)
@@ -606,16 +607,17 @@ async function orchestrate(run) {
     let prepared = false
     if (sim === 'spectre') {
       const step = await timedStep(run, { item: 'gen_selfcheck_rc.py (RC tb)', settingColumn: 'simulator' }, async () => {
-        // The REAL project root: startSelfcheck staged script/analysis/
-        // gen_selfcheck_rc.py into it (2026-11-24 — the run-dir scratch copy
-        // is gone; a passing check must not outlive its scripts). The retired
-        // spectre_assemble bridge only spawned this script — the self-check
-        // now runs it directly (2026-11-25): same cwd, same --out, same
-        // HARNESSAMS_SIMULATOR env; the netlist the batch_submit step stages
-        // still passes through the real spectre_pre_check gate. Host python
-        // (not the toolchain pin — the pins name the CLUSTER-side interpreter
-        // that runs the worker; this fixture generator is host-side stdlib).
-        const gen = path.join(run._priv.project.path, 'script', 'analysis', 'gen_selfcheck_rc.py')
+        // The gen script runs straight from THIS package's install location
+        // (2026-11-25 ruling): the project script/ folder is retired —
+        // nothing stages a copy into the project anymore (the earlier
+        // 2026-11-24 staging is gone). cwd stays the REAL project root and
+        // --out / HARNESSAMS_SIMULATOR are unchanged, so the emitted run dir
+        // is exactly what a project-local gen would have written; the netlist
+        // the batch_submit step stages still passes through the real
+        // spectre_pre_check gate. Host python (not the toolchain pin — the
+        // pins name the CLUSTER-side interpreter that runs the worker; this
+        // fixture generator is host-side stdlib).
+        const gen = genSelfcheckRcPath()
         const signal = run._priv.cancel.controller.signal
         const child = execFileAsync('python', [gen, '--out', run.runDir], {
           timeout: 150_000,

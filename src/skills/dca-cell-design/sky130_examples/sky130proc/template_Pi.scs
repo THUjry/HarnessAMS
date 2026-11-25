@@ -3,7 +3,8 @@
 // Fill-in map from calc_pi.py output:
 //   R0  <- Rs (series arm)          Rp1/Rp2 <- Rp (per-side shunt poly value)
 //   M1  <- bypass switch (ron1)     M2/M3   <- shunt switches (ron), x2
-//   cpf <- Cp first estimate, refined by the Cp scan (sweep_config parameter)
+//   cpf <- Cp first estimate, refined by the Cp scan (sweep_config parameter,
+//   SI-suffixed strings in farads: "60f" for 60 fF; "0f" = no compensation)
 // Switch geometry is baked into the flattened model card name
 // (nlowvt_model__w<W>p<N>f<N> for sky130_fd_pr__nfet_01v8_lvt): for a new w/nf
 // pick the nearest existing card from the transcribed library or extend its
@@ -11,7 +12,7 @@
 // R/C are IDEAL elements by decision: analytic flatness predictions are
 // advisory -- ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
 simulator lang=spectre
-simulatorOptions options temp=@@temperature@@ reltol=2e-4
+simulatorOptions options temp=@@temperature@@ reltol=200u
 include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model -- in a real project point at the transcribed-library copy
 
 parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
@@ -19,9 +20,9 @@ parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
 subckt att_pi (in out sw swb)
   R0  (in out) resistor r=60.03
   Rp1 (in n2)  resistor r=89.64
-  Cp1 (in n2)  capacitor c=(cpf*1e-15)
+  Cp1 (in n2)  capacitor c=cpf
   Rp2 (out n3) resistor r=89.64
-  Cp2 (out n3) capacitor c=(cpf*1e-15)
+  Cp2 (out n3) capacitor c=cpf
   M1 (out gb in 0) nlowvt_model__w61p7nf31 l=0.15u w=61.7u nf=31 nrd=(0.14/61.7) nrs=(0.14/61.7) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
   M2 (n2 gs 0 0)   nlowvt_model__w43p3nf22 l=0.15u w=43.3u nf=22 nrd=(0.14/43.3) nrs=(0.14/43.3) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
   M3 (n3 gs 0 0)   nlowvt_model__w43p3nf22 l=0.15u w=43.3u nf=22 nrd=(0.14/43.3) nrs=(0.14/43.3) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
@@ -35,4 +36,4 @@ X1 (in out sw vswb) att_pi
 VSW  (sw 0)   vsource dc=(1.8*SW)
 VSWB (vswb 0) vsource dc=(1.8*(1-SW))
 
-sp sp start=1e9 stop=40e9 step=100e6
+sp sp start=1G stop=40G step=100M

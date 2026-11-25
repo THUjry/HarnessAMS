@@ -1,11 +1,14 @@
-// One-time project script staging (2026-11-24 wave): a project keeps its own
-// reusable copy of the simulation scripts, so everything the self-check
-// exercised stays usable after the run — the self-check's gen step needs
-// <project>/script/analysis/gen_*.py (it runs the staged script directly
-// since 2026-11-25) and the batch channel needs a worker scripts tree plus
-// the sibling assets/ bucket (snp_common resolves its pure-stdlib fallback at
-// <scripts root>/../assets/numfallback.py — the SmartAnaSim package layout,
-// mirrored here as .harnessams/scripts + .harnessams/assets).
+// One-time project script staging (2026-11-24 wave; 2026-11-25 amendment): a
+// project keeps its own reusable copy of the simulation scripts, so everything
+// the self-check exercised stays usable after the run — the batch channel
+// needs a worker scripts tree plus the sibling assets/ bucket (snp_common
+// resolves its pure-stdlib fallback at <scripts root>/../assets/numfallback.py
+// — the SmartAnaSim package layout, mirrored here as .harnessams/scripts +
+// .harnessams/assets). The self-check's gen script is NOT staged anymore
+// (2026-11-25 ruling): the project script folder is retired, the orchestrator
+// runs gen_selfcheck_rc.py straight from the package install location
+// (genSelfcheckRcPath() below — the import.meta.dirname resolution works
+// identically in the dev checkout and an npm-installed package).
 //
 // Copy-if-missing per file: a copy the user edited is never clobbered, a
 // partial tree gets completed, an up-to-date project is a no-op. The source
@@ -20,6 +23,13 @@ import path from 'node:path'
 const PKG_ROOT = path.resolve(import.meta.dirname ?? '.', '..') // src/
 export const GEN_SELFCHECK_RC = 'gen_selfcheck_rc.py'
 const GEN_SRC = path.join(PKG_ROOT, 'selfcheck', 'script', 'analysis', GEN_SELFCHECK_RC)
+
+// The self-check gen script, resolved from THIS package's install location —
+// same mechanism for the dev checkout and an npm-installed bundle (the file
+// ships through package.json "files", which includes src/).
+export function genSelfcheckRcPath() {
+  return GEN_SRC
+}
 
 function listPyTree(root) {
   const out = []
@@ -83,9 +93,5 @@ export async function ensureProjectScripts(workspacePath, srcRoot) {
     }
   }
 
-  let genStaged = false
-  if (fs.existsSync(GEN_SRC)) {
-    genStaged = await copyIfMissing(GEN_SRC, path.join(workspacePath, 'script', 'analysis', GEN_SELFCHECK_RC))
-  }
-  return { scriptsDir, assetsDir, staged, genStaged }
+  return { scriptsDir, assetsDir, staged }
 }

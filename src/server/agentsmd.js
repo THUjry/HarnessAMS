@@ -37,7 +37,7 @@ const HEADER = '## Project Config (HarnessAMS)'
 // .harnessams is storage, not a model-facing surface.
 const CONSTRAINTS = [
   '- When design constraints are unclear, ask the user before doing anything — never guess or invent them.',
-  '- Execute through the SAS/HA plugin tools (spectre_pre_check, batch_submit / batch_poll, snp_*, gen_sweep_report): hand-write the netlist per the skill template rules, validate with spectre_pre_check, submit with batch_submit; if a tool call fails, stop and consult the user — no hand-rolled workarounds around the tool chain.',
+  '- Execute through the SAS/HA plugin tools (spectre_pre_check, batch_submit / batch_poll, snp_*, gen_sweep_report): hand-write the netlist per the skill template rules and submit with batch_submit (it runs the spectre_pre_check netlist gate itself before staging); if a tool call fails, stop and consult the user — no hand-rolled workarounds around the tool chain.',
   '- `.harnessams/` is plugin-managed project storage (config, sessions, run records): do not read it during normal work — everything you need is in this block.',
 ]
 

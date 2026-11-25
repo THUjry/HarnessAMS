@@ -3,13 +3,14 @@
 // Rp 71.22 ohm, ron1 12 ohm, ron 17.07 ohm). Fill-in map from calc_t_type.py:
 //   Rs1/Rs2 <- Rs (per arm)        Rp <- shunt poly value
 //   M1      <- bypass switch (ron1)   M2 <- shunt switch (ron)
-//   cpf     <- Cp first estimate, refined by the Cp scan
+//   cpf     <- Cp first estimate, refined by the Cp scan (SI-suffixed strings
+//   in farads: "88f" for 88 fF; "0f" = no compensation)
 // Switch geometry is baked into the flattened model card name -- update
 // l/w/nf/nrd/nrs together when the geometry changes (see template_Pi.scs note).
 // R/C are IDEAL elements by decision: analytic flatness predictions are
 // advisory -- ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
 simulator lang=spectre
-simulatorOptions options temp=@@temperature@@ reltol=2e-4
+simulatorOptions options temp=@@temperature@@ reltol=200u
 include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model -- in a real project point at the transcribed-library copy
 
 parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
@@ -18,7 +19,7 @@ subckt att_t (in out sw swb)
   Rs1 (in mid)  resistor r=13.18
   Rs2 (mid out) resistor r=13.18
   Rp  (mid n2)  resistor r=71.22
-  Cp  (mid n2)  capacitor c=(cpf*1e-15)
+  Cp  (mid n2)  capacitor c=cpf
   M1 (out gb in 0) nlowvt_model__w61p7nf31 l=0.15u w=61.7u nf=31 nrd=(0.14/61.7) nrs=(0.14/61.7) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
   M2 (n2 gs 0 0)   nlowvt_model__w43p3nf22 l=0.15u w=43.3u nf=22 nrd=(0.14/43.3) nrs=(0.14/43.3) ad=0 as=0 pd=0 ps=0 sa=0 sb=0 sd=0
   Rg1 (gb swb) resistor r=10k
@@ -31,4 +32,4 @@ X1 (in out sw vswb) att_t
 VSW  (sw 0)   vsource dc=(1.8*SW)
 VSWB (vswb 0) vsource dc=(1.8*(1-SW))
 
-sp sp start=1e9 stop=40e9 step=100e6
+sp sp start=1G stop=40G step=100M
