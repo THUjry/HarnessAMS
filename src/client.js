@@ -196,6 +196,8 @@ window.__ModuleLoader__.load({
         'pset.colCompRemote': '远端计算',
         'pset.colFigs': '报告出图',
         'pset.figsWarn': '开启后每次生成报告都会把每张图导出为 PNG 存入 Figs/；持续保存图片会造成较大磁盘占用',
+        'pset.maxPoints': '单次扫描最大点数',
+        'pset.maxPointsHint': 'batch_submit 拒绝点数超过该值的扫描；留空＝默认 100。超限的大网格应拆成多批（自动 Sim 命名）',
         'pset.mode.local': '本地',
         'pset.mode.remote': '远程',
         'pset.sched.lsf': 'LSF 队列',
@@ -408,6 +410,8 @@ window.__ModuleLoader__.load({
         'pset.colCompRemote': 'Remote compute',
         'pset.colFigs': 'Report figures',
         'pset.figsWarn': 'When on, every generated report exports one PNG per chart into Figs/; continuously saving images causes significant disk usage',
+        'pset.maxPoints': 'Max points per scan',
+        'pset.maxPointsHint': 'batch_submit rejects scans above this point count; blank = default 100. Split an oversized grid into multiple batches (auto Sim naming)',
         'pset.mode.local': 'local',
         'pset.mode.remote': 'remote',
         'pset.sched.lsf': 'LSF queue',
@@ -679,6 +683,7 @@ window.__ModuleLoader__.load({
 .hams-sessionopt { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; flex: none; margin: 0 0 2px;
   font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
 .hams-sessionopt .hams-select { flex: none; width: auto; }
+.hams-sessionopt .hams-input { flex: none; width: 6em; }
 .hams-sessionopt .hams-dim { overflow-wrap: anywhere; }
 .hams-btn { text-decoration: none; }
 .hams-dashframe { width: 100%; flex: 1; min-height: 300px;
@@ -1331,6 +1336,10 @@ window.__ModuleLoader__.load({
         dashboard_selected: typeof src.dashboard_selected === 'string' ? src.dashboard_selected : null,
         // the session's report-figures option: stored only while on
         ...(src.report_figs === true ? { report_figs: true } : {}),
+        // the session's scan-size ceiling (D-019): stored only while set
+        ...(Number.isInteger(src.max_points_per_scan) && src.max_points_per_scan > 0
+          ? { max_points_per_scan: src.max_points_per_scan }
+          : {}),
         ...(src.check_params && typeof src.check_params === 'object'
           ? { check_params: JSON.parse(JSON.stringify(src.check_params)) }
           : {}),
@@ -2301,6 +2310,7 @@ window.__ModuleLoader__.load({
                 onClick: () => { rememberTaskView(v.id); setView(v.id) },
               }, tr(v.labelKey)))),
             view === 'dashboard' && h(SessionOptionFigs, { config, updateConfig }),
+            view === 'dashboard' && h(SessionOptionMaxPoints, { config, updateConfig }),
             view === 'dashboard' && h(SessionDashboard, { sessionId, config, updateConfig }),
             view === 'check' && h(CheckParams, { sessionId, updateConfig }))),
       )
@@ -2338,6 +2348,36 @@ window.__ModuleLoader__.load({
           h('option', { value: '1' }, tr('check.on')),
           h('option', { value: '0' }, tr('check.off'))),
         h('span', { className: 'hams-dim' }, tr('pset.figsWarn')))
+    }
+
+    // Session option, second strip line: the scan-size ceiling batch_submit
+    // enforces (D-019). Positive integer commits immediately; blank clears
+    // the field back to the built-in default (100). Uncontrolled on purpose —
+    // the same capture-before-await discipline as the select above (an
+    // invalid draft simply never lands in the store).
+    function SessionOptionMaxPoints({ config, updateConfig }) {
+      return h('div', { className: 'hams-sessionopt' },
+        h('label', { className: 'hams-optlabel', title: tr('pset.maxPointsHint') }, tr('pset.maxPoints')),
+        h('input', {
+          className: 'hams-input',
+          type: 'number',
+          min: '1',
+          step: '1',
+          defaultValue: config.max_points_per_scan ?? '',
+          title: tr('pset.maxPointsHint'),
+          onChange: captureValue((raw) => {
+            const text = String(raw ?? '').trim()
+            if (text === '') {
+              void updateConfig((c) => ({ ...c, max_points_per_scan: undefined }))
+              return
+            }
+            const n = Number(text)
+            if (Number.isInteger(n) && n > 0) {
+              void updateConfig((c) => ({ ...c, max_points_per_scan: n }))
+            }
+          }),
+        }),
+        h('span', { className: 'hams-dim' }, tr('pset.maxPointsHint')))
     }
 
     // Dashboard sub-view: the task's registered local HTML reports. The report

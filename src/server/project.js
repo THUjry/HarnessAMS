@@ -102,10 +102,19 @@ export function validateSessionState(state) {
     return { error: 'report_figs must be a boolean (on/off switch)' }
   }
   const report_figs = state.report_figs === true
+  // the session's "Max points per scan" option (the batch_submit point-count
+  // gate, D-019): positive integer; absent means the built-in default (100)
+  if (state.max_points_per_scan != null
+      && !(Number.isInteger(state.max_points_per_scan) && state.max_points_per_scan > 0)) {
+    return { error: 'max_points_per_scan must be a positive integer' }
+  }
+  const max_points = Number.isInteger(state.max_points_per_scan)
+    && state.max_points_per_scan > 0 ? state.max_points_per_scan : null
   return {
     state: {
       display, reports: rn.reports, dashboard_selected,
       ...(report_figs ? { report_figs: true } : {}),
+      ...(max_points ? { max_points_per_scan: max_points } : {}),
       ...(check_params ? { check_params } : {}),
     },
   }
