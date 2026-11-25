@@ -8,8 +8,9 @@
 //     or partial section fails open.
 //   settings  — the run settings the Overview table stages + confirms through
 //     the harnessams_selfcheck tool (working environment / mode / machine /
-//     remote_root / remote_dir / scheduler / simulator / compute scripts /
-//     the cluster toolchain pins remote_python + remote_spectre_cmd, D-016).
+//     remote_root / selfcheck_remote_dir / scheduler / simulator / compute
+//     scripts / the cluster toolchain pins remote_python + remote_spectre_cmd,
+//     D-016).
 //     The remote root now lives HERE
 //     (settings.remote_root), not in a family map — the project is the single
 //     authority, so UI / config file / AGENTS.md can never disagree.
@@ -20,6 +21,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
 import { ensureProjectScripts } from './scriptStage.js'
+import { getNodePins } from './globalstore.js'
 
 const PKG_ROOT = path.resolve(import.meta.dirname ?? '.', '..') // src/
 const STORE_DIR = '.harnessams'
@@ -40,7 +42,10 @@ export function defaultSettings() {
     run_mode: 'local',
     machine_id: null,
     remote_root: null,
-    remote_dir: '.harnessams/selfcheck',
+    // the self-check's remote artifact dir (renamed 2026-11-25 from remote_dir:
+    // the name collided with batch_submit's remote_dir ARG — the batch output
+    // dir it auto-names under remote_root, a different thing)
+    selfcheck_remote_dir: '.harnessams/selfcheck',
     scheduler: 'lsf',
     simulator: 'spectre',
     compute_script_local: 'python',
@@ -135,8 +140,8 @@ function parseConfig(raw) {
         if (typeof v === 'string' && v.trim()) settings.machine_id = v.trim().slice(0, 120)
       } else if (k === 'remote_root') {
         if (typeof v === 'string' && v.trim()) settings.remote_root = v.trim().replace(/\\/g, '/')
-      } else if (k === 'remote_dir') {
-        if (typeof v === 'string' && v.trim()) settings.remote_dir = v.trim().replace(/\\/g, '/')
+      } else if (k === 'selfcheck_remote_dir') {
+        if (typeof v === 'string' && v.trim()) settings.selfcheck_remote_dir = v.trim().replace(/\\/g, '/')
       } else if (PIN_KEYS.includes(k)) {
         // an invalid stored pin (hand-edited) reads as unpinned — the same
         // fail-open every other key gets
@@ -144,6 +149,13 @@ function parseConfig(raw) {
       } else if (ENUMS[k] && ENUMS[k].includes(v)) {
         settings[k] = v
       }
+    }
+    // legacy configs wrote the self-check dir as remote_dir (renamed 2026-11-25
+    // to end the collision with the batch_submit remote_dir ARG): migrate on
+    // read, fail-open like every other key — the next write persists the new key
+    if (sIn.selfcheck_remote_dir === undefined
+      && typeof sIn.remote_dir === 'string' && sIn.remote_dir.trim()) {
+      settings.selfcheck_remote_dir = sIn.remote_dir.trim().replace(/\\/g, '/')
     }
   }
   return { config: { version: 1, workspace, settings } }
@@ -248,7 +260,7 @@ export function normalizePin(value, key) {
 
 // Validate a full settings object (the tool `settings` param after the partial
 // merge, or a staged table confirm). remote_root: absolute POSIX path fencing
-// remote_dir (resolveRemoteDir re-fences at use time); ".." rejected here.
+// selfcheck_remote_dir (resolveRemoteDir re-fences at use time); ".." rejected here.
 // remote mode requires remote_root always and machine_id unless in-cluster LSF
 // is the only remote channel; out-of-cluster forbids local spectre (the host
 // cannot run it). The toolchain pins go through normalizePin.
@@ -271,12 +283,12 @@ export function validateSettings(input) {
       if (norm.length > 400) return { error: 'remote_root too long (max 400 chars)' }
       if (norm.split('/').includes('..')) return { error: 'remote_root must not contain ".."' }
       out.remote_root = norm.replace(/\/+$/, '') || '/'
-    } else if (k === 'remote_dir') {
-      if (typeof v !== 'string' || !v.trim()) return { error: 'remote_dir is required (a path relative to remote_root, or absolute)' }
+    } else if (k === 'selfcheck_remote_dir') {
+      if (typeof v !== 'string' || !v.trim()) return { error: 'selfcheck_remote_dir is required (a path relative to remote_root, or absolute)' }
       const norm = v.trim().replace(/\\/g, '/')
-      if (norm.length > 400) return { error: 'remote_dir too long (max 400 chars)' }
-      if (norm.split('/').includes('..')) return { error: 'remote_dir must not contain ".."' }
-      out.remote_dir = norm
+      if (norm.length > 400) return { error: 'selfcheck_remote_dir too long (max 400 chars)' }
+      if (norm.split('/').includes('..')) return { error: 'selfcheck_remote_dir must not contain ".."' }
+      out.selfcheck_remote_dir = norm
     } else if (PIN_KEYS.includes(k)) {
       const p = normalizePin(v, k)
       if (p.error) return { error: p.error }
@@ -291,12 +303,44 @@ export function validateSettings(input) {
     if (!sshlessLsf && !out.machine_id) {
       return { error: 'run_mode=remote requires machine_id unless in-cluster LSF is the only remote channel (pick a dsh-ssh host alias)' }
     }
-    if (!out.remote_root) return { error: 'run_mode=remote requires remote_root (the absolute remote path that fences remote_dir)' }
+    if (!out.remote_root) return { error: 'run_mode=remote requires remote_root (the absolute remote path that fences selfcheck_remote_dir)' }
   }
   if (out.cluster_env === 'out-of-cluster' && out.run_mode === 'local' && out.simulator === 'spectre') {
     return { error: 'run_mode=local with simulator=spectre requires cluster_env=in-cluster (the DSH host itself must run spectre)' }
   }
   return { settings: out }
+}
+
+// Project storage initialization (2026-11-25: the sidebar-open moment is now
+// the PRIMARY staging timing — POST /api/project-init — with the fresh config
+// write and the self-check start as backstops). Idempotent: AGENTS.md template
+// only while missing, scripts copy-if-missing (a user-edited copy is never
+// clobbered), and sim_scripts_dir flips to the project-local copy ONLY while
+// the configured value is still the packaged default — a hand-edited explicit
+// value stays (legacy projects, README "worker scripts" contract). Fixes the
+// asymmetry where a session-config write creating .harnessams first used to
+// suppress the fresh-init staging forever.
+export async function initProjectStorage(workspacePath) {
+  const dir = path.join(workspacePath, STORE_DIR)
+  const finalPath = configPath(workspacePath)
+  const fresh = !fs.existsSync(dir)
+  const cur = await readConfig(workspacePath)
+  await fsp.mkdir(dir, { recursive: true })
+  if (fresh) await ensureAgentsMdTemplate(workspacePath)
+  await ensureProjectScripts(workspacePath, resolveScriptsSource(workspacePath))
+  const ws = cur.config.workspace
+  const configured = path.isAbsolute(ws.sim_scripts_dir) ? ws.sim_scripts_dir : path.resolve(workspacePath, ws.sim_scripts_dir)
+  let flipped = false
+  if (path.resolve(configured) === defaultSimScriptsDir()) {
+    ws.sim_scripts_dir = path.join(dir, 'scripts')
+    flipped = true
+  }
+  if (fresh || flipped) {
+    const tmp = finalPath + '.tmp'
+    await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: ws, settings: cur.config.settings }, null, 2) + '\n', 'utf8')
+    await fsp.rename(tmp, finalPath)
+  }
+  return { fresh, flipped }
 }
 
 // Read-modify-write of the settings section only — the workspace section
@@ -311,15 +355,37 @@ export async function writeSettings(workspacePath, settings) {
   const dir = path.join(workspacePath, STORE_DIR)
   const finalPath = configPath(workspacePath)
   const fresh = !fs.existsSync(dir)
+  if (fresh) await initProjectStorage(workspacePath)
   const cur = await readConfig(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
-  if (fresh) {
-    await ensureAgentsMdTemplate(workspacePath)
-    await ensureProjectScripts(workspacePath, resolveScriptsSource(workspacePath))
-    cur.config.workspace.sim_scripts_dir = path.join(dir, 'scripts')
-  }
   const tmp = finalPath + '.tmp'
   await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings }, null, 2) + '\n', 'utf8')
   await fsp.rename(tmp, finalPath)
   return settings
+}
+
+// Prefill the toolchain pins from the plugin-global node memory (D-017): a
+// node measured for any earlier project heals a project on the same machine
+// before anything runs, so the settings file, the AGENTS.md yaml, and the
+// batch channel agree from the start. Only NULL pins are healed — an explicit
+// pin always wins; a machine_id is required to look the node up (local-only
+// projects have nothing to heal). Returns the (possibly healed) settings.
+export async function healToolchainPins(workspacePath) {
+  let settings
+  try {
+    ({ settings } = await readSettings(workspacePath))
+  } catch (e) {
+    return { error: `workspace_config.json unreadable: ${e?.message ?? e}` }
+  }
+  const need = PIN_KEYS.filter((k) => settings[k] == null)
+  if (!need.length || !settings.machine_id) return { settings }
+  const pins = await getNodePins(settings.machine_id)
+  if (!pins) return { settings }
+  const patch = {}
+  for (const k of need) if (pins[k]) patch[k] = pins[k]
+  if (!Object.keys(patch).length) return { settings }
+  const v = validateSettings({ ...settings, ...patch })
+  if (v.error) return { settings } // a remembered pin that stopped validating: keep nulls, no error
+  await writeSettings(workspacePath, v.settings)
+  return { settings: v.settings, healed: Object.keys(patch) }
 }

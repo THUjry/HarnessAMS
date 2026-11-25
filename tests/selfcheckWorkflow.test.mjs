@@ -11,7 +11,7 @@ import { workflowTable } from '../src/server/selfcheckWorkflow.js'
 const S = (over = {}) => ({
   cluster_env: 'out-of-cluster', run_mode: 'local', scheduler: 'lsf', simulator: 'spectre',
   compute_script_local: 'python', compute_script_remote: 'python',
-  machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
+  machine_id: null, remote_root: null, selfcheck_remote_dir: '.harnessams/selfcheck',
   ...over,
 })
 
@@ -33,8 +33,12 @@ test('workflowTable: five rows, three columns, header shape', () => {
 test('workflowTable: params the yaml already states are deliberately absent, machine/root resolve from config', () => {
   const t = workflowTable(S())
   const submit = t.split('\n').find((l) => l.startsWith('| Submit |'))
-  assert.match(submit, /Omit machine_id \/ remote_root \/ remote_dir \/ remote_python: they resolve from this config/)
+  assert.match(submit, /Omit machine_id \/ remote_root \/ remote_python: they resolve from this config/)
   assert.ok(!submit.includes('machine_id ='), 'no machine_id fill guidance')
+  // the batch output dir auto-names under remote_root — no remote_dir fill
+  // guidance anymore (the settings key is selfcheck_-prefixed, the ARG is
+  // a different thing the table deliberately stays silent about)
+  assert.match(submit, /the batch output dir auto-names under remote_root/)
 })
 
 test('workflowTable: monitor row carries the polling cadence (moved out of the system prompt)', () => {
@@ -79,10 +83,11 @@ test('workflowTable: toolchain pins (D-016) — submit omits remote_python, anal
   // pinned: the interpreter is whatever the yaml row says
   assert.match(analyze(pinnedOut), /ssh_exec them with the interpreter named by the remote_python row of the yaml above; never bare python/)
   assert.match(analyze(pinnedIn), /with the interpreter named by the remote_python row of the yaml above: <workspace_root>\/\.harnessams\/scripts\/spectre\/spectre_psf_parse\.py/)
-  // unpinned: the bare default each chain really runs under, stated as such
-  assert.match(analyze(unpinnedOut), /which is null here: use bare python3, the unpinned default the self-check verified/)
-  assert.match(analyze(unpinnedIn), /which is null here: use bare python3, the unpinned default the self-check verified/)
-  assert.match(analyze(unpinnedInLocal), /which is null here: use bare python, the unpinned default the self-check verified/,
+  // unpinned (not yet measured, D-017 auto-pin fills it on the next green
+  // run): the bare default each chain really runs under, stated as such
+  assert.match(analyze(unpinnedOut), /which is null here \(not yet measured\): use bare python3, the unpinned default the self-check verified/)
+  assert.match(analyze(unpinnedIn), /which is null here \(not yet measured\): use bare python3, the unpinned default the self-check verified/)
+  assert.match(analyze(unpinnedInLocal), /which is null here \(not yet measured\): use bare python, the unpinned default the self-check verified/,
     'the in-cluster local chain spawns python')
 })
 

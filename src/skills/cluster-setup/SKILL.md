@@ -1,20 +1,22 @@
 ---
 name: cluster-setup
 description: >
-  Cluster toolchain bootstrap, run once per cluster and when a remote command
-  cannot find spectre, python3 or module: harvest where the login startup
-  files (/etc/profile.d, ~/.bash_profile, ~/.bashrc: module loads, PATH
-  exports, alias lines) really put each key command, verify the candidates
-  as absolute paths with ssh_exec, then pin remote_python /
-  remote_spectre_cmd in the project settings so no job depends on PATH
-  order or an alias. Also when a self-check fails on its environment leg.
+  Cluster toolchain bootstrap and verification: harvest where the login
+  startup files (/etc/profile.d, ~/.bash_profile, ~/.bashrc) put each key
+  command, verify the candidates as absolute paths with ssh_exec, then pin
+  remote_python / remote_spectre_cmd. A green self-check pins the toolchain
+  it measured automatically; run this when it cannot decide (candidates
+  disagree, a command is missing, the user wants another interpreter) or a
+  remote command cannot find spectre, python3 or module.
 ---
 
 # cluster-setup - harvest, verify, pin: the cluster toolchain as absolute paths
 
 Every batch scheduler ends up launching a command on a cluster node under a bare name: `python3` runs the worker, `spectre` runs the simulation. A bare name resolves through PATH, and PATH is whatever the shell startup chain left behind. On an EDA cluster that is not stable: the same name can be a different program in an interactive login shell and in a non-interactive job. This skill turns each key command into one verified absolute path and pins it in the project settings. Run it before the first sweep on a new cluster, when the cluster's environment changed, and when a remote command cannot find `spectre`, `python3` or `module`. Once the pins are in place they do the work: a session passes no interpreter argument at all, and no job depends on an alias. The submission flow itself lives in the `batch-sweep` skill.
 
-**Never guess a path and never choose an interpreter by taste.** A path enters the settings only after stages 1 and 2 measured it, and when candidates disagree the user decides.
+Since 2026-11-25 the pinning is automatic in the common case: a GREEN self-check harvests the toolchain its jobs really ran under (the worker records its own interpreter and the resolved spectre into sweep_progress.json), writes the two pins, and remembers them per node in the plugin-global store, so a fresh project on a known machine starts pinned. This skill is what you run when that automation cannot decide: the measurement found nothing (an older worker, simulator=none), candidates disagree, a command is missing, or the user wants an interpreter other than the one PATH found.
+
+**Never guess a path and never choose an interpreter by taste.** A path enters the settings only after it was measured (by the self-check's own jobs, or by stages 1 and 2 here), and when candidates disagree the user decides.
 
 ## The moving parts (why a bare name is not enough)
 
@@ -69,14 +71,14 @@ After the user confirms the paths:
 
     harnessams_selfcheck { action: "run", settings: { remote_python: "<abs path>", remote_spectre_cmd: "<abs path>" } }
 
-The settings payload is a partial merge: only the keys named change, nothing else in the table moves (the pins have no row in that table: this call is their write face, and the AGENTS.md yaml is where they are kept). The self-check then runs the whole pipeline under exactly those two paths (assemble -> batch_submit -> batch_poll -> parse -> verify); when it passes, the pin is proven. Its finalize re-syncs AGENTS.md, whose yaml now carries `remote_python` and `remote_spectre_cmd` as the rows every later session reads.
+The settings payload is a partial merge: only the keys named change, nothing else in the table moves (the pins have no row in that table: this call is their write face, and the AGENTS.md yaml is where they are kept). The write also updates the plugin-global node memory (the machine's current pin pair), so a fresh project on the same node prefills, and an explicit `null` STAYS null (the memory itself says unpinned; only a later green run re-measures). The self-check then runs the whole pipeline under exactly those two paths (assemble -> batch_submit -> batch_poll -> parse -> verify); when it passes, the pin is proven. Its finalize re-syncs AGENTS.md, whose yaml now carries `remote_python` and `remote_spectre_cmd` as the rows every later session reads.
 
 From then on:
 
 - `batch_submit`: omit `remote_python`. The pinned interpreter runs the worker, and for the bundled worker `spectre/spectre_sweep_worker.py` the pinned spectre is passed as `--spectre-cmd` unless `worker_args` names one.
 - Remote parsers: `ssh_exec` them with the interpreter named by the `remote_python` row.
 - An explicit `remote_python` argument must be an absolute path. Bare names are rejected: they resolve to whatever the startup chain left first on PATH.
-- `null` in a row means not pinned: the bare default (`python3`, `spectre` on PATH) applies, which is exactly what the self-check verified for the project. Pinning is optional hardening while that default holds, and it is what protects the project when the PATH order changes.
+- `null` in a row means not yet measured (the temporary state of a machine no green self-check has run under, or an explicit clear): the bare default (`python3`, `spectre` on PATH) applies (the interpreter the self-check verified; never bare `python`). The next green run fills the row with what its jobs measured.
 
 Re-run the three stages when the cluster changes (a module default, a new tool version).
 

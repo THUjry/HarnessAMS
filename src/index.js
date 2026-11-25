@@ -34,7 +34,9 @@ import os from 'node:os'
 import { sessionProject, readSessionConfigs, writeSessionConfig } from './server/project.js'
 import { isForkSession } from './server/forkdetect.js'
 import { remoteMachinesStatus, fetchMachines, checkableMachines } from './server/machines.js'
-import { readSettings } from './server/settings.js'
+import { initProjectStorage, healToolchainPins, readSettings } from './server/settings.js'
+import { parseFacts } from './server/agentsmd.js'
+import { getFreshMin, setFreshMin } from './server/globalstore.js'
 import { readCheckParams } from './server/checkparams.js'
 import { remoteBrowse } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
@@ -194,7 +196,39 @@ async function handle(req, res, ctx) {
       json(200, r)
       return
     }
-    json(405, { error: 'GET only (PUT /api/session-config, POST /api/tool)' })
+    if (req.method === 'POST' && route === '/api/project-init') {
+      // Project initialization hook (D-015 2026-11-25): the sidebar opening a
+      // project is the PRIMARY staging timing — scripts land, the AGENTS.md
+      // template appears, sim_scripts_dir flips to the project-local copy, and
+      // null toolchain pins heal from the plugin-global node memory. Idempotent
+      // (copy-if-missing); the client fires it once per project per page load.
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const sessionId = body?.sessionId
+      if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      try {
+        const init = await initProjectStorage(project.path)
+        const healed = await healToolchainPins(project.path)
+        json(200, { ok: true, project, ...init, healed: healed.healed ?? [] })
+      } catch (e) {
+        json(500, { error: `project init failed: ${String(e?.message ?? e)}` })
+      }
+      return
+    }
+    if (req.method === 'PUT' && route === '/api/global-config') {
+      // The plugin-global display config (D-017: ~/.dsh/harnessams.json) —
+      // today the self-check freshness window the console's display settings
+      // own. Body { selfcheck_fresh_min } (minutes, 1..1440).
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const r = await setFreshMin(body?.selfcheck_fresh_min)
+      if (r.error) { json(400, { error: r.error }); return }
+      json(200, { ok: true, selfcheck_fresh_min: r.value })
+      return
+    }
+    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init)' })
     return
   }
 
@@ -202,6 +236,7 @@ async function handle(req, res, ctx) {
     json(200, {
       ok: true, plugin: 'dsh-harnessams',
       config: 'per-project <workspace>/.harnessams/workspace_config.json (the family harnessams.json is retired)',
+      display: { selfcheck_fresh_min: await getFreshMin() },
       tiers: {
         console: 'sidebar entry "HarnessAMS" (client half)',
         project: ctx.workspaceRegistry ? 'workspaceRegistry mapped' : 'workspaceRegistry unavailable (tier 2 degraded)',
@@ -299,6 +334,13 @@ async function handle(req, res, ctx) {
   // ---- tier 2: project mapping + per-session config store ----
   if (route === '/api/project') {
     const mapped = sessionProject(ctx.workspaceRegistry, url.searchParams.get('sessionId'))
+    // the AGENTS.md self-check facts ride along (D-017): the sidebar restores
+    // its status display from the yaml block after a page reload — no global
+    // "latest run" surface, the block is the per-project record
+    if (mapped.project?.path) {
+      const facts = await parseFacts(mapped.project.path)
+      if (facts) mapped.selfcheck_facts = { ...facts, fresh_min: await getFreshMin() }
+    }
     json(200, { ok: true, ...mapped })
     return
   }

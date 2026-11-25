@@ -217,6 +217,8 @@ window.__ModuleLoader__.load({
         'selfchk.scopeLocal': '本地链路',
         'selfchk.scopeRemote': '远程链路（{machine}）',
         'selfchk.noneYet': '尚未运行自检。',
+        'selfchk.stale': '超过{min}分钟未自检',
+        'selfchk.lastRun': '上次自检 {time}',
         'selfchk.skipped': '跳过',
         'selfchk.summaryOk': '自检通过',
         'selfchk.summaryFallback': '通过（经 SSH 运行回退）',
@@ -228,6 +230,9 @@ window.__ModuleLoader__.load({
         'set.title': '显示设置',
         'set.toolview': '会话内仿真进度卡片',
         'set.toolviewHint': '关闭后这些工具调用回退为原始 JSON 显示。浏览器本地偏好，对本机所有会话生效。',
+        'set.freshTitle': '自检新鲜窗口（分钟）：',
+        'set.freshHint': '刷新后窗口内的上次自检结果仍显示对勾，超出窗口显示超时提示。插件全局设置（本页可改）。',
+        'set.freshErr': '需为 1..1440 的分钟数',
         'card.title.batch_poll': '批量进度',
         'card.preparing': '等待参数…',
         'card.waitProgress': '等待首个进度文件（启动后约 30 秒出现）…',
@@ -424,6 +429,8 @@ window.__ModuleLoader__.load({
         'selfchk.scopeLocal': 'Local pipeline',
         'selfchk.scopeRemote': 'Remote pipeline ({machine})',
         'selfchk.noneYet': 'No self-check yet.',
+        'selfchk.stale': 'not self-checked for > {min} min',
+        'selfchk.lastRun': 'last self-check {time}',
         'selfchk.skipped': 'skipped',
         'selfchk.summaryOk': 'self-check passed',
         'selfchk.summaryFallback': 'passed (remote fell back to the ssh run)',
@@ -440,6 +447,10 @@ window.__ModuleLoader__.load({
         'set.toolview': 'Simulation progress cards in conversations',
         'set.toolviewHint': 'When off, these tool calls fall back to the raw JSON view. Browser-local preference, '
           + 'applies to every session on this machine.',
+        'set.freshTitle': 'Self-check freshness window (minutes): ',
+        'set.freshHint': 'after a reload, a last verdict within the window keeps its check mark; past the window the '
+          + 'table flags the timeout. Plugin-global (edited here).',
+        'set.freshErr': 'must be 1..1440 minutes',
         'card.title.batch_poll': 'Batch progress',
         'card.preparing': 'Waiting for arguments…',
         'card.waitProgress': 'Waiting for the first progress file (appears ~30 s after start)…',
@@ -1151,21 +1162,50 @@ window.__ModuleLoader__.load({
     }
 
     // Console-page display settings: the toggle backing the tool cards (guide s6
-    // points here; the preference is browser-local by design — see TOOLVIEW_KEY).
+    // points here; the preference is browser-local by design — see TOOLVIEW_KEY),
+    // plus the plugin-global self-check freshness window (D-017: server-truth in
+    // ~/.dsh/harnessams.json through PUT /api/global-config — it decides when a
+    // restored verdict still shows its check mark vs "not checked for > N min").
     function DisplaySettingsSection() {
       const [on, setOn] = useState(toolviewEnabledRead)
+      const [freshMin, setFreshMin] = useState(null)
+      const [freshErr, setFreshErr] = useState(null)
       useEffect(() => {
         const sync = () => setOn(toolviewEnabledRead())
         window.addEventListener(TOOLVIEW_EVENT, sync)
         return () => window.removeEventListener(TOOLVIEW_EVENT, sync)
       }, [])
+      useEffect(() => {
+        fetchJson(API + '/info')
+          .then((r) => { if (r?.display?.selfcheck_fresh_min != null) setFreshMin(Number(r.display.selfcheck_fresh_min)) })
+          .catch(() => { /* the input stays hidden — no value to edit */ })
+      }, [])
+      const commitFresh = (v) => {
+        const m = Number(v)
+        if (!Number.isFinite(m) || m < 1 || m > 1440) { setFreshErr(tr('set.freshErr')); return }
+        setFreshErr(null)
+        fetchJson(API + '/global-config', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ selfcheck_fresh_min: Math.round(m) }),
+        })
+          .then(() => setFreshMin(Math.round(m)))
+          .catch((e) => setFreshErr(String(e.message ?? e)))
+      }
       return h('section', { className: 'hams-section' },
         h('h2', null, tr('set.title')),
         h('label', { className: 'hams-row', style: { cursor: 'pointer' } },
           h('input', { type: 'checkbox', checked: on,
             onChange: (e) => { toolviewEnabledWrite(e.target.checked); setOn(e.target.checked) } }),
           h('span', null, tr('set.toolview'))),
-        h('div', { className: 'hams-dim' }, tr('set.toolviewHint')))
+        h('div', { className: 'hams-dim' }, tr('set.toolviewHint')),
+        freshMin != null && h('div', { className: 'hams-row', style: { marginTop: '8px' } },
+          h('label', null, tr('set.freshTitle'), ' ',
+            h('input', { type: 'number', min: 1, max: 1440, value: freshMin, style: { width: '72px' },
+              onChange: (e) => setFreshMin(e.target.value === '' ? null : Number(e.target.value)),
+              onBlur: (e) => { if (e.target.value !== '') commitFresh(e.target.value) } })),
+          h('span', { className: 'hams-dim' }, tr('set.freshHint'))),
+        freshErr && h('div', { className: 'hams-err' }, txt(freshErr)))
     }
 
     // Machines (tier 1): the dsh-ssh host registry read through /api/machines —
@@ -1394,7 +1434,7 @@ window.__ModuleLoader__.load({
     // directory level per fetch (GET /api/remote-browse — ssh_exec by alias
     // through the execRemote funnel), starting at the machine's remote root.
     // Clicking a name enters the directory; the per-row "select" button (or the
-    // footer's "use current") writes the ABSOLUTE path into remote_dir — the old
+    // footer's "use current") writes the ABSOLUTE path into remote_root — the old
     // free-typed text input is retired. Mirrors the add-report dialog's shape.
     function RemoteDirBrowse({ sessionId, machineId, rootDir, onCancel, onPick }) {
       const [cwd, setCwd] = useState(null) // null = server default (the machine's remote root)
@@ -1487,12 +1527,41 @@ window.__ModuleLoader__.load({
       return { state: 'ok', text: steps[steps.length - 1].result, title }
     }
 
+    // Status restore from the AGENTS.md facts (D-017): when the in-memory run
+    // state is gone (page reload, project switch away and back), the panel
+    // falls back to the managed block's last_selfcheck_* rows — a verdict
+    // finished within the freshness window keeps its check mark, past the
+    // window the cells say "not self-checked for > N min", and a null overall
+    // (no run ever synced) keeps the plain dash. Per-column verdict mapping:
+    // remote-section columns <- last_selfcheck_remote, local-section columns <-
+    // last_selfcheck_local, run_mode <- last_selfcheck_overall.
+    function restoredCellResult(facts, column, nowMs) {
+      if (!facts || facts.last_selfcheck_overall == null) return null
+      const finished = facts.last_selfcheck_finished_at
+      const finishedMs = finished ? Date.parse(finished) : NaN
+      const freshMin = Number(facts.fresh_min) > 0 ? Number(facts.fresh_min) : 30
+      const verdictOf = (v) => (v == null ? null
+        : String(v).startsWith('ok') ? 'ok' : v === 'failed' ? 'bad' : v === 'skipped' ? 'skip' : 'bad')
+      const title = `${facts.last_selfcheck_run_id ?? ''} · ${finished ?? ''}`
+      if (!Number.isFinite(finishedMs) || nowMs - finishedMs > freshMin * 60_000) {
+        return { state: 'stale', text: tr('selfchk.stale', { min: String(freshMin) }), title }
+      }
+      const which = column === 'machine' || column === 'scheduler' || column === 'compute_remote'
+        ? 'last_selfcheck_remote'
+        : column === 'simulator' || column === 'compute_local' ? 'last_selfcheck_local' : 'last_selfcheck_overall'
+      const verdict = verdictOf(facts[which])
+      if (verdict == null) return null
+      const text = which === 'last_selfcheck_remote' && facts[which] === 'ok-via-fallback'
+        ? tr('selfchk.summaryFallback') : tr(verdict === 'ok' ? 'selfchk.summaryOk' : verdict === 'skip' ? 'selfchk.skipped' : 'selfchk.summaryFail')
+      return { state: verdict, text, title }
+    }
+
     // The table edits STAGE into a draft (nothing hits the wire per cell); a
     // row whose staged value differs from the SAVED settings shows a red
     // "out of sync" marker in its own status cell (per-row, not global — the
     // saved verdicts of untouched rows stay visible) until the Confirm button
     // commits the whole object through POST /api/tool.
-    function SettingsTable({ draft, settings, machines, run, onChange }) {
+    function SettingsTable({ draft, settings, machines, run, facts, nowMs, onChange }) {
       const cols = SETTING_COLS.filter((c) => !c.visible || c.visible(draft))
       const settingCell = (c) => {
         if (c.kind === 'machine') {
@@ -1516,12 +1585,13 @@ window.__ModuleLoader__.load({
           ?? (c.column === 'run_mode' && run?.summary
             ? { state: run.summary.ok ? 'ok' : 'bad', text: tr(run.summary.ok ? 'selfchk.summaryOk' : 'selfchk.summaryFail'), title: '' }
             : null)
+          ?? restoredCellResult(facts, c.column, nowMs)
         if (rowDirty) {
           return h('td', { key: c.id, className: 'hams-bad', title: tr('pset.stagedHint') }, '● ' + tr('pset.unsaved'))
         }
         if (!agg) return h('td', { key: c.id, className: 'hams-faint' }, '—')
-        const cls = agg.state === 'ok' ? 'hams-good' : agg.state === 'warn' ? 'hams-warn' : agg.state === 'skip' ? 'hams-faint' : 'hams-bad'
-        const icon = agg.state === 'ok' ? '✅' : agg.state === 'warn' ? '⚠' : agg.state === 'skip' ? '⏭' : '✗'
+        const cls = agg.state === 'ok' ? 'hams-good' : agg.state === 'warn' || agg.state === 'stale' ? 'hams-warn' : agg.state === 'skip' ? 'hams-faint' : 'hams-bad'
+        const icon = agg.state === 'ok' ? '✅' : agg.state === 'warn' ? '⚠' : agg.state === 'stale' ? '⏱' : agg.state === 'skip' ? '⏭' : '✗'
         return h('td', { key: c.id, className: cls, title: agg.title || agg.text }, icon + ' ' + txt(agg.text))
       }
       return h('table', { className: 'hams-table hams-settable' },
@@ -1540,9 +1610,21 @@ window.__ModuleLoader__.load({
 
     // Step-detail table under the settings table: local/remote section headers +
     // the classic Item/Result/Elapsed/Status rows (skipped steps show ⏭ with the
-    // skip reason as the tooltip).
-    function SelfcheckSteps({ run }) {
+    // skip reason as the tooltip). With no in-memory run, the AGENTS.md facts
+    // supply a compact "last self-check" line instead (D-017 restore display).
+    function SelfcheckSteps({ run, facts, nowMs }) {
       if (!run || !(run.steps ?? []).length) {
+        const restored = restoredCellResult(facts, 'run_mode', nowMs)
+        if (restored) {
+          const finished = String(facts?.last_selfcheck_finished_at ?? '')
+          const icon = restored.state === 'stale' ? '⏱' : restored.state === 'bad' ? '✗' : '✅'
+          const cls = restored.state === 'stale' ? 'hams-warn' : restored.state === 'bad' ? 'hams-bad' : 'hams-dim'
+          const freshMin = String(Number(facts?.fresh_min) > 0 ? Number(facts.fresh_min) : 30)
+          const text = restored.state === 'stale'
+            ? tr('selfchk.stale', { min: freshMin })
+            : tr('selfchk.lastRun', { time: finished.slice(0, 19).replace('T', ' ') }) + ' · ' + restored.text
+          return h('div', { className: cls, title: restored.title }, icon + ' ' + txt(text))
+        }
         return h('div', { className: 'hams-dim' }, tr('selfchk.noneYet'))
       }
       const rows = []
@@ -1581,7 +1663,24 @@ window.__ModuleLoader__.load({
     const overviewMemory = { path: null, project: null, checksInfo: null }
     const selfcheckMemory = { path: null, settings: null, draft: null, run: null, envRun: null }
 
-    function ProjectSelfcheck({ sessionId, info, projectPath }) {
+    // Project initialization on sidebar open (D-015, 2026-11-25): one POST per
+    // project path per page load — the server stages the reusable scripts, lays
+    // the AGENTS.md template, flips sim_scripts_dir to the project-local copy,
+    // and heals null toolchain pins from the plugin-global node memory. All of
+    // it idempotent server-side; the Set only keeps the traffic down (a failed
+    // init is not retried — the self-check start is the staging backstop).
+    const projectInitFired = new Set()
+    function ensureProjectInit(projectPath, sessionId) {
+      if (!projectPath || projectInitFired.has(projectPath)) return
+      projectInitFired.add(projectPath)
+      fetchJson(API + '/project-init', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId }),
+      }).catch(() => { /* best-effort; the self-check start re-stages */ })
+    }
+
+    function ProjectSelfcheck({ sessionId, info, projectPath, facts }) {
       const [settings, setSettings] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.settings : null))
       const [draft, setDraft] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.draft : null))
       const [settingsError, setSettingsError] = useState(null)
@@ -1685,6 +1784,16 @@ window.__ModuleLoader__.load({
 
       // a stop request is one-shot: clear it once the status leaves 'running'
       useEffect(() => { if (runStatus !== 'running') setStopping(false) }, [runStatus])
+
+      // restore-display clock (D-017): a page left open must still flip the
+      // restored check mark to the "> N min" wording when the freshness window
+      // lapses — the 30 s tick only runs while the restore display is live
+      const [nowMs, setNowMs] = useState(() => Date.now())
+      useEffect(() => {
+        if (run != null || !facts || facts.last_selfcheck_overall == null) return
+        const timer = setInterval(() => setNowMs(Date.now()), 30_000)
+        return () => clearInterval(timer)
+      }, [run, facts?.last_selfcheck_overall])
 
       // staged edits: nothing leaves the browser until Confirm (or one of the
       // action buttons, which also commit pending edits so UI/config/AGENTS.md
@@ -1798,9 +1907,9 @@ window.__ModuleLoader__.load({
       const remote = draft?.run_mode === 'remote'
       const machine = machines.find((m) => m.id === draft?.machine_id) ?? null
       const root = String(draft?.remote_root ?? '').replace(/\/+$/, '')
-      const dirPreview = String(draft?.remote_dir ?? '').startsWith('/')
-        ? draft.remote_dir
-        : (root ? root + '/' + (draft?.remote_dir ?? '') : '$ROOT/' + (draft?.remote_dir ?? ''))
+      const dirPreview = String(draft?.selfcheck_remote_dir ?? '').startsWith('/')
+        ? draft.selfcheck_remote_dir
+        : (root ? root + '/' + (draft?.selfcheck_remote_dir ?? '') : '$ROOT/' + (draft?.selfcheck_remote_dir ?? ''))
       const running = run?.status === 'running'
       const envRunning = envRun?.status === 'running'
       const saving = saveState?.status === 'running'
@@ -1824,8 +1933,8 @@ window.__ModuleLoader__.load({
           // remote root (the working-directory row merged in, 2026-11-21):
           // browse-only — the free-typed root input and the separate
           // working-directory concept are both retired; the dim preview shows
-          // where run artifacts resolve (root + remote_dir, default
-          // .harnessams/selfcheck)
+          // where the self-check artifacts resolve (root +
+          // selfcheck_remote_dir, default .harnessams/selfcheck)
           h('div', { className: 'hams-row', style: { flexWrap: 'nowrap' } },
             h('b', { style: { flexShrink: 0 } }, tr('pset.rootLabel')),
             remote
@@ -1838,7 +1947,7 @@ window.__ModuleLoader__.load({
               onClick: () => setBrowseOpen(true) }, tr('pset.browse'))),
           remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
             '→ ', txt(dirPreview), ' · ', tr('pset.dirRemoteRel')),
-          h(SettingsTable, { draft, settings, machines, run, onChange: updateSetting }),
+          h(SettingsTable, { draft, settings, machines, run, facts, nowMs, onChange: updateSetting }),
           // confirm row: staged edits land in workspace_config.json (and AGENTS.md
           // re-syncs) only here — red "unsaved" cells mark the pending state
           h('div', { className: 'hams-row' },
@@ -1881,7 +1990,7 @@ window.__ModuleLoader__.load({
                 h('button', { className: 'hams-btn', disabled: saving || !sessionId, onClick: () => void commitEnv(envDialog) },
                   tr('envc.ok')),
                 h('button', { className: 'hams-btn', onClick: () => setEnvDialog(null) }, tr('common.cancel'))))),
-          h(SelfcheckSteps, { run }),
+          h(SelfcheckSteps, { run, facts, nowMs }),
           run?.summary && h('div', { className: 'hams-row' },
             run.status === 'cancelled'
               ? h('span', { className: 'hams-warn', style: { fontWeight: 600 } }, tr('selfchk.stopped'))
@@ -1956,7 +2065,7 @@ window.__ModuleLoader__.load({
         project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, txt(reason ?? '')),
         project && h('div', { className: 'hams-dim' },
           tr('tasks.projectLabel'), h('b', null, txt(project.title || project.path)), h('br'), null, txt(project.path)),
-        project && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath }),
+        project && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath, facts: project.selfcheck_facts ?? null }),
       )
     }
 
@@ -2073,7 +2182,11 @@ window.__ModuleLoader__.load({
               }
               setProject(r.project ?? null)
               setReason(r.project ? null : r.reason ?? null)
-              if (r?.project) lastProjectInfo.initialized = !!r.project.initialized
+              if (r?.project) {
+                lastProjectInfo.initialized = !!r.project.initialized
+                // sidebar open = the project-initialization moment (D-015)
+                ensureProjectInit(r.project.path, sessionId)
+              }
             })
             .catch((e) => {
               if (!alive) return

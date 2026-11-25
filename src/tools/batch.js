@@ -615,11 +615,18 @@ export function batchTools(ctx) {
           await new Promise((res) => setTimeout(res, Math.min(WAIT_GAP_MS, remain)))
         }
         // Terminal state: absorb the old fetch — pull the light result files
-        // straight down per file (existence probed once, no archive).
+        // straight down per file (existence probed once, no archive). The
+        // probe must tolerate MISSING files: ls exits 2 when any listed name
+        // is absent (errlog.txt only exists on a failed run — the green-run
+        // norm), and that nonzero exit used to skip the whole fetch, so
+        // sweep_progress.json never landed locally on a clean run (found
+        // 2026-11-25 while verifying the D-017 telemetry harvest; the
+        // trailing true keeps the exit code 0, stdout still lists only what
+        // exists).
         const fetched = []
         if (TERMINAL_POLL_STATES.has(parsed.state)) {
           const probe = await channel.exec(
-            `cd ${shq(remoteDir)} && ls -1 ${AUTO_FETCH_FILES.map(shq).join(' ')} 2>/dev/null`,
+            `cd ${shq(remoteDir)} && ls -1 ${AUTO_FETCH_FILES.map(shq).join(' ')} 2>/dev/null; true`,
             { timeoutMs: 30_000 })
           if (probe.ok) {
             for (const name of String(probe.stdout || '').split(/\r?\n/).map((s) => s.trim())) {

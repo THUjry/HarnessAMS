@@ -28,14 +28,21 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { apply, toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { defaultSettings, readSettings, validateSettings, writeSettings, configPath } from '../src/server/settings.js'
-import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR } from '../src/server/selfcheck.js'
+import { defaultSettings, readSettings, validateSettings, writeSettings, configPath, healToolchainPins, initProjectStorage } from '../src/server/settings.js'
+import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR, autoPinToolchain } from '../src/server/selfcheck.js'
+import { getNodePins, readGlobalStore, setFreshMin, updateNodePins } from '../src/server/globalstore.js'
+import { writeSessionConfig } from '../src/server/project.js'
 import { runSelfcheckAction } from '../src/tools/selfcheck.js'
 import { verifyRun, siValue } from '../src/scripts/selfcheck/selfcheck_verify.mjs'
 import { assertValidShell, callRoute, getReq, clientSrc, assertDictKeys } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+
+// D-017: isolate the plugin-global store — tests must never touch the real
+// ~/.dsh/harnessams.json (node memory, freshness window). Per-test overrides
+// point at their own tmp file for isolation between suites.
+process.env.HARNESSAMS_GLOBAL_STORE = path.join(os.tmpdir(), 'hams-globalstore-selfcheck-' + process.pid + '.json')
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -190,6 +197,13 @@ function makeHarness({ scenario = {} }) {
       return { success: true, exitCode: 0, timedOut: false, stdout: `[selfcheck] ${JSON.stringify(remoteVerifyJson(topo))}\n`, stderr: '', durationMs: 3 }
     }
     if (command.includes('wc -l')) return { success: true, exitCode: 0, timedOut: false, stdout: '0\n', stderr: '', durationMs: 3 }
+    // the terminal-fetch probe lists sweep_progress.json (errlog.txt only
+    // exists on failures — the green-run norm the 2026-11-25 fix covers).
+    // Match WITHOUT the quotes: execRemote wraps commands in sh -c "…", so
+    // the inner double quotes reach here backslash-escaped.
+    if (command.includes('ls -1') && command.includes('sweep_progress.json')) {
+      return { success: true, exitCode: 0, timedOut: false, stdout: 'sweep_progress.json\n', stderr: '', durationMs: 3 }
+    }
     return { success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 3 }
   }
 
@@ -248,7 +262,11 @@ function makeHarness({ scenario = {} }) {
       })
       await fsp.writeFile(local, rows.join('\n') + '\n', 'utf8')
     } else if (remote.endsWith('sweep_progress.json')) {
-      await fsp.writeFile(local, JSON.stringify({ status: 'completed', total_points: 9, succeeded: 9 }) + '\n', 'utf8')
+      // the worker's telemetry (D-016/D-017) rides along when the scenario
+      // opts in — the auto-pin flow test reads it back through the fetch
+      const prog = { status: 'completed', total_points: 9, succeeded: 9 }
+      if (scenario.telemetry) prog.toolchain = { python: PIN_PY, spectre: PIN_SPECTRE, node: 'node5' }
+      await fsp.writeFile(local, JSON.stringify(prog) + '\n', 'utf8')
     } else {
       await fsp.writeFile(local, '', 'utf8')
     }
@@ -509,13 +527,14 @@ const PIN_SPECTRE = '/opt/tools/spectre/bin/spectre'
 
 test('settings: defaults, validation, persistence, workspace section', async () => {
   assert.deepEqual(defaultSettings(), {
-    cluster_env: 'out-of-cluster', run_mode: 'local', machine_id: null, remote_root: null, remote_dir: '.harnessams/selfcheck',
+    cluster_env: 'out-of-cluster', run_mode: 'local', machine_id: null, remote_root: null,
+    selfcheck_remote_dir: '.harnessams/selfcheck',
     scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     remote_python: null, remote_spectre_cmd: null,
   })
   // valid full object round-trips
   const v = validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1',
-    remote_root: '/home/op/sim', remote_dir: '/abs/path', scheduler: 'ssh', compute_script_remote: 'js' })
+    remote_root: '/home/op/sim', selfcheck_remote_dir: '/abs/path', scheduler: 'ssh', compute_script_remote: 'js' })
   assert.ok(!v.error, v.error)
   assert.equal(v.settings.compute_script_remote, 'js')
   // the gen_sweep_report PNG gate is a SESSION option (sessions.json), not a
@@ -548,7 +567,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.match(validateSettings({ ...defaultSettings(), remote_python: 42 }).error, /absolute path to the executable, or null/)
   // a payload that omits every pin key (the established partial usage) is legal
   const partial = validateSettings({ cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
-    remote_dir: '.harnessams/selfcheck', scheduler: 'ssh', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' })
+    selfcheck_remote_dir: '.harnessams/selfcheck', scheduler: 'ssh', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' })
   assert.ok(!partial.error, partial.error)
   assert.equal(partial.settings.remote_python, null)
   assert.equal(partial.settings.remote_spectre_cmd, null)
@@ -569,7 +588,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
     remote_root: '/home/op/sim' }).error)
   assert.match(validateSettings({ ...defaultSettings(), cluster_env: 'in-cluster', run_mode: 'remote',
     remote_root: '/home/op/sim', scheduler: 'ssh' }).error, /requires machine_id/)
-  assert.match(validateSettings({ ...defaultSettings(), remote_dir: 'a/../b' }).error, /must not contain/)
+  assert.match(validateSettings({ ...defaultSettings(), selfcheck_remote_dir: 'a/../b' }).error, /must not contain/)
   assert.match(validateSettings({ ...defaultSettings(), remote_root: 'rel/path' }).error, /absolute remote path/)
   assert.match(validateSettings({ ...defaultSettings(), remote_root: '/a/../b' }).error, /must not contain/)
 
@@ -631,6 +650,13 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   const storedPins = (await readSettings(tmp)).settings
   assert.equal(storedPins.remote_python, PIN_PY)
   assert.equal(storedPins.remote_spectre_cmd, PIN_SPECTRE)
+  // 2026-11-25 rename: a legacy remote_dir key migrates on read (no rewrite
+  // forced — the next validated write persists the new key)
+  await fsp.writeFile(configPath(tmp), JSON.stringify({ settings: { remote_dir: '.harnessams/legacycheck' } }), 'utf8')
+  const legacy = (await readSettings(tmp)).settings
+  assert.equal(legacy.selfcheck_remote_dir, '.harnessams/legacycheck')
+  assert.ok(!('remote_dir' in legacy), 'the legacy key does not surface as a setting')
+  assert.equal(legacy.run_mode, 'local', 'the rest stays at defaults')
 })
 
 // ---------------------------------------------------------------------------
@@ -856,6 +882,213 @@ test('routes: GET project-settings defaults + the /api/tool funnel + guards', as
     async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 'ghost', action: 'run' })) },
   })
   assert.equal(unknownSession.code, 404)
+})
+
+// ---------------------------------------------------------------------------
+// D-017: plugin-global store + pin heal + auto-pin + project init
+// ---------------------------------------------------------------------------
+
+test('globalstore + heal (D-017): node memory, remembered clears stick, heal prefills only nulls', async () => {
+  const tmp = await tmpDir()
+  const prevStore = process.env.HARNESSAMS_GLOBAL_STORE
+  process.env.HARNESSAMS_GLOBAL_STORE = path.join(tmp, 'global.json')
+  try {
+    // display defaults, corrupt file = defaults (fail-open), set round-trips
+    assert.equal((await readGlobalStore()).display.selfcheck_fresh_min, 30)
+    await fsp.writeFile(process.env.HARNESSAMS_GLOBAL_STORE, '{junk', 'utf8')
+    assert.equal((await readGlobalStore()).display.selfcheck_fresh_min, 30)
+    assert.ok((await setFreshMin(60)).ok)
+    assert.equal((await readGlobalStore()).display.selfcheck_fresh_min, 60)
+    assert.match(String((await setFreshMin(0)).error), /1\.\.1440/)
+
+    // node memory: write, host preserved across updates, both-null removes
+    await updateNodePins('nodeX', { host: '10.0.0.1', remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE })
+    let mem = await getNodePins('nodeX')
+    assert.equal(mem.remote_python, PIN_PY)
+    assert.equal(mem.host, '10.0.0.1')
+    await updateNodePins('nodeX', { remote_python: PIN_PY }) // no host: remembered one survives
+    mem = await getNodePins('nodeX')
+    assert.equal(mem.host, '10.0.0.1')
+    assert.equal(mem.remote_spectre_cmd, null)
+    await updateNodePins('nodeX', { remote_python: null, remote_spectre_cmd: null })
+    assert.equal(await getNodePins('nodeX'), null, 'both-null removes the entry')
+    assert.equal(await getNodePins('ghost'), null)
+
+    // heal: null pins adopt what the node memory holds; a remembered CLEAR
+    // (null in the memory) never refills — only a later green run re-measures
+    const ws = path.join(tmp, 'proj-heal')
+    await writeSettings(ws, { ...defaultSettings(), run_mode: 'remote', machine_id: 'nodeY', remote_root: '/home/op/sim' })
+    await updateNodePins('nodeY', { remote_python: PIN_PY })
+    const r1 = await healToolchainPins(ws)
+    assert.deepEqual(r1.healed, ['remote_python'])
+    let healed = (await readSettings(ws)).settings
+    assert.equal(healed.remote_python, PIN_PY)
+    assert.equal(healed.remote_spectre_cmd, null, 'nothing remembered for spectre -> stays null')
+    await writeSettings(ws, { ...defaultSettings(), run_mode: 'remote', machine_id: 'nodeZ', remote_root: '/home/op/sim', remote_python: PIN_PY })
+    await updateNodePins('nodeZ', { remote_python: PIN_PY, remote_spectre_cmd: null })
+    assert.ok(!(await healToolchainPins(ws)).healed, 'the memory itself says unpinned: no refill')
+    assert.equal((await readSettings(ws)).settings.remote_spectre_cmd, null)
+    // local-only project: no machine to look up, nothing heals
+    const ws2 = path.join(tmp, 'proj-local')
+    await writeSettings(ws2, { ...defaultSettings(), cluster_env: 'in-cluster' })
+    assert.ok(!(await healToolchainPins(ws2)).healed)
+  } finally {
+    if (prevStore === undefined) delete process.env.HARNESSAMS_GLOBAL_STORE
+    else process.env.HARNESSAMS_GLOBAL_STORE = prevStore
+    await fsp.rm(tmp, { recursive: true, force: true })
+  }
+})
+
+test('project init (D-015, 2026-11-25): staging at init heals the writeSessionConfig asymmetry; legacy values kept', async () => {
+  const tmp = await tmpDir()
+  const ws = path.join(tmp, 'proj-init')
+  await fsp.mkdir(ws, { recursive: true })
+  try {
+    // a session-config write creates .harnessams + the AGENTS.md template
+    // WITHOUT staging — the asymmetry this init hook exists to heal
+    await writeSessionConfig(ws, 's1', {})
+    assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')))
+    assert.ok(!fs.existsSync(path.join(ws, '.harnessams', 'scripts')), 'not staged by the session write')
+
+    const r1 = await initProjectStorage(ws)
+    assert.deepEqual({ fresh: r1.fresh, flipped: r1.flipped }, { fresh: false, flipped: true })
+    assert.ok(fs.existsSync(path.join(ws, '.harnessams', 'scripts')), 'scripts staged at init')
+    assert.ok(fs.existsSync(path.join(ws, 'script', 'analysis', 'gen_selfcheck_rc.py')), 'the RC example stays in script/analysis (user ruling)')
+    let raw = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
+    assert.equal(raw.workspace.sim_scripts_dir, path.join(ws, '.harnessams', 'scripts'), 'the suppressed flip lands')
+
+    // idempotent: a page-reload init neither re-stages nor rewrites
+    const r2 = await initProjectStorage(ws)
+    assert.deepEqual({ fresh: r2.fresh, flipped: r2.flipped }, { fresh: false, flipped: false })
+
+    // a hand-edited explicit sim_scripts_dir is NEVER flipped (legacy contract)
+    raw.workspace.sim_scripts_dir = 'C:/custom/scripts'
+    await fsp.writeFile(configPath(ws), JSON.stringify(raw, null, 2), 'utf8')
+    const r3 = await initProjectStorage(ws)
+    assert.equal(r3.flipped, false)
+    raw = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
+    assert.equal(raw.workspace.sim_scripts_dir, 'C:/custom/scripts')
+  } finally { await fsp.rm(tmp, { recursive: true, force: true }) }
+})
+
+test('autoPin (D-016/D-017): a green run pins the MEASURED toolchain and remembers the node', async () => {
+  const tmp = await tmpDir()
+  const prevStore = process.env.HARNESSAMS_GLOBAL_STORE
+  process.env.HARNESSAMS_GLOBAL_STORE = path.join(tmp, 'pin-global.json')
+  try {
+    const ws = path.join(tmp, 'proj-pin')
+    await writeSettings(ws, { ...defaultSettings(), run_mode: 'remote', machine_id: 'nodeA', remote_root: '/home/op/sim' })
+    const run = {
+      summary: { ok: true },
+      _priv: {
+        settings: (await readSettings(ws)).settings,
+        project: { path: ws },
+        machine: { id: 'nodeA', name: 'nodeA', host: '10.1.2.3' },
+        toolchainTelemetry: { python: PIN_PY, spectre: PIN_SPECTRE, node: 'compute-a' },
+      },
+    }
+    await autoPinToolchain(run)
+    assert.equal(run.summary.toolchain_pinned, true)
+    const pinned = (await readSettings(ws)).settings
+    assert.equal(pinned.remote_python, PIN_PY)
+    assert.equal(pinned.remote_spectre_cmd, PIN_SPECTRE)
+    const mem = await getNodePins('nodeA')
+    assert.equal(mem.remote_python, PIN_PY)
+    assert.equal(mem.remote_spectre_cmd, PIN_SPECTRE)
+    assert.equal(mem.host, '10.1.2.3')
+
+    // in-cluster LSF (no machine): the memory keys by the telemetry hostname
+    await writeSettings(ws, { ...defaultSettings(), cluster_env: 'in-cluster', run_mode: 'remote', remote_root: '/home/op/sim' })
+    const run2 = {
+      summary: { ok: true },
+      _priv: {
+        settings: (await readSettings(ws)).settings,
+        project: { path: ws },
+        machine: null,
+        toolchainTelemetry: { python: PIN_PY, spectre: null, node: 'compute-b' },
+      },
+    }
+    await autoPinToolchain(run2)
+    assert.equal(run2.summary.toolchain_pinned, true)
+    assert.equal((await getNodePins('compute-b')).remote_python, PIN_PY)
+
+    // no telemetry (an older worker / simulator=none): honest nulls, nothing written
+    await writeSettings(ws, { ...defaultSettings(), cluster_env: 'in-cluster' })
+    const run3 = {
+      summary: { ok: true },
+      _priv: { settings: (await readSettings(ws)).settings, project: { path: ws }, machine: null },
+    }
+    await autoPinToolchain(run3)
+    assert.equal(run3.summary.toolchain_pinned, false)
+    assert.equal((await readSettings(ws)).settings.remote_python, null)
+    // a failed run never pins
+    const run4 = { summary: { ok: false }, _priv: { ...run._priv, toolchainTelemetry: { python: PIN_PY, spectre: PIN_SPECTRE } } }
+    await autoPinToolchain(run4)
+    assert.equal(run4.summary.toolchain_pinned, false)
+  } finally {
+    if (prevStore === undefined) delete process.env.HARNESSAMS_GLOBAL_STORE
+    else process.env.HARNESSAMS_GLOBAL_STORE = prevStore
+    await fsp.rm(tmp, { recursive: true, force: true })
+  }
+})
+
+test('routes: project-init (D-015) + global-config (D-017) + project facts', async () => {
+  const tmp = await tmpDir()
+  const projectPath = path.join(tmp, 'proj')
+  await fsp.mkdir(projectPath, { recursive: true })
+  const prevStore = process.env.HARNESSAMS_GLOBAL_STORE
+  process.env.HARNESSAMS_GLOBAL_STORE = path.join(tmp, 'routes-global.json')
+  try {
+    const ctx = makeHarness({})
+    ctx.workspaceRegistry.list = () => [{ id: 'ws1', path: projectPath, title: 'P', sessionIds: ['s1'] }]
+    const routes = []
+    ctx.webServer.register = (r) => routes.push(r)
+    await apply(ctx)
+    const postInit = () => driveRoute(routes, {
+      method: 'POST', url: '/harnessams/api/project-init', headers: {},
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1' })) },
+    })
+    // sidebar-open init: fresh store + template + scripts + the flip, in one call
+    const init = await postInit()
+    assert.equal(init.code, 200, JSON.stringify(init.body))
+    assert.equal(init.body.fresh, true)
+    assert.ok(fs.existsSync(path.join(projectPath, '.harnessams', 'scripts')))
+    assert.ok(fs.existsSync(path.join(projectPath, 'script', 'analysis', 'gen_selfcheck_rc.py')))
+    assert.equal(init.body.healed.length, 0, 'no node memory yet: nothing to prefill')
+    // a page-reload init is a quiet idempotent no-op
+    const init2 = await postInit()
+    assert.equal(init2.code, 200)
+    assert.equal(init2.body.fresh, false)
+
+    // global-config: the freshness window round-trips; junk is refused
+    const putCfg = (body) => driveRoute(routes, {
+      method: 'PUT', url: '/harnessams/api/global-config', headers: {},
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(body)) },
+    })
+    const put = await putCfg({ selfcheck_fresh_min: 45 })
+    assert.equal(put.code, 200)
+    assert.equal(put.body.selfcheck_fresh_min, 45)
+    assert.equal((await putCfg({ selfcheck_fresh_min: 0 })).code, 400)
+
+    // the info route carries the display section; the project route carries
+    // the AGENTS.md facts (template block: never-run nulls + the window)
+    const info = await driveRoute(routes, getReq('/harnessams/api/info'))
+    assert.equal(info.body.display.selfcheck_fresh_min, 45)
+    const proj = await driveRoute(routes, getReq('/harnessams/api/project?sessionId=s1'))
+    assert.ok(proj.body.selfcheck_facts, 'the facts ride the project route (D-017 restore display)')
+    assert.equal(proj.body.selfcheck_facts.fresh_min, 45)
+    assert.equal(proj.body.selfcheck_facts.last_selfcheck_overall, null)
+    // session fence still applies
+    const badInit = await driveRoute(routes, {
+      method: 'POST', url: '/harnessams/api/project-init', headers: {},
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 'ghost' })) },
+    })
+    assert.equal(badInit.code, 404)
+  } finally {
+    if (prevStore === undefined) delete process.env.HARNESSAMS_GLOBAL_STORE
+    else process.env.HARNESSAMS_GLOBAL_STORE = prevStore
+    await fsp.rm(tmp, { recursive: true, force: true })
+  }
 })
 
 test('tool actions: env returns facts+checks; run/status round-trip; project resolution via session', async () => {
@@ -1220,6 +1453,45 @@ test('flow: remote verify failure skips the cross-check step', async () => {
   } finally { f.restoreAll() }
 })
 
+test('flow: a green remote run auto-pins the measured toolchain and remembers the node (D-016/D-017)', async () => {
+  // The scenario opts the downloaded sweep_progress.json into carrying the
+  // worker telemetry (the measurement the real worker records); a green run
+  // must pin both paths into the project settings AND the plugin-global node
+  // memory BEFORE the AGENTS.md finalize sync renders the yaml — the block
+  // then carries no null pins.
+  const f = await startFlow({ scenario: { telemetry: true }, settings: REMOTE_LSF })
+  try {
+    const run = await waitDone(f.start.runId, f.projectPath)
+    // the auto-pin + AGENTS.md sync are finalize's ASYNC tail: status flips to
+    // 'done' first, the pins land milliseconds later — poll the view for them
+    let pinnedRun = run
+    for (let i = 0; i < 50 && pinnedRun.summary.toolchain_pinned !== true; i++) {
+      await new Promise((res) => setTimeout(res, 100))
+      pinnedRun = getSelfcheck(f.start.runId, f.projectPath)
+    }
+    assert.equal(pinnedRun.summary.ok, true)
+    assert.equal(pinnedRun.summary.toolchain_pinned, true, 'the measured toolchain must pin at finalize')
+    const pinned = (await readSettings(f.projectPath)).settings
+    assert.equal(pinned.remote_python, PIN_PY)
+    assert.equal(pinned.remote_spectre_cmd, PIN_SPECTRE)
+    const mem = await getNodePins('node1')
+    assert.equal(mem.remote_python, PIN_PY)
+    assert.equal(mem.remote_spectre_cmd, PIN_SPECTRE)
+    // the yaml sync is the tail's tail — it lands after the pins; poll for it
+    let md = ''
+    for (let i = 0; i < 50; i++) {
+      md = await fsp.readFile(path.join(f.projectPath, 'AGENTS.md'), 'utf8').catch(() => '')
+      if (md.includes(`  remote_python: "${PIN_PY}"`)) break
+      await new Promise((res) => setTimeout(res, 100))
+    }
+    assert.ok(md.includes(`  remote_python: "${PIN_PY}"`), 'the auto-pinned interpreter reaches the yaml')
+    assert.ok(md.includes(`  remote_spectre_cmd: "${PIN_SPECTRE}"`), 'the auto-pinned spectre reaches the yaml')
+  } finally {
+    await updateNodePins('node1', {}).catch(() => {}) // keep the suite store clean for later flows
+    f.restoreAll()
+  }
+})
+
 // ---------------------------------------------------------------------------
 // 8) start guards + re-entry
 // ---------------------------------------------------------------------------
@@ -1346,7 +1618,8 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
   assert.ok(src.includes('function SettingsTable('))
   assert.ok(src.includes('function SelfcheckSteps('))
   assert.ok(src.includes('SETTING_COLS'), 'row config drives the transposed three-column table (name / value / verdict)')
-  assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath })'), 'mounted in the Overview tab')
+  assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath, facts: project.selfcheck_facts ?? null })'),
+    'mounted in the Overview tab with the AGENTS.md facts (D-017 restore display)')
   assert.match(src, /,\s*3_000\s*\)/, '3s poll while running')
   assert.match(src, /,\s*1_000\s*\)/, '1s settings poll follows tool-side config writes')
   assert.ok(src.includes("'local'"), 'local dir display branch')

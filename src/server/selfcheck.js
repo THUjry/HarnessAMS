@@ -54,7 +54,8 @@ import { runPython } from '../py.js'
 import { callTool, execRemote, uploadFile, downloadFile, shq } from '../remote.js'
 import { execLocal, localCopy } from '../localchannel.js'
 import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
-import { readSettings, resolveScriptsSource } from './settings.js'
+import { healToolchainPins, readSettings, resolveScriptsSource, validateSettings, writeSettings, PIN_KEYS, normalizePin } from './settings.js'
+import { updateNodePins } from './globalstore.js'
 import { ensureProjectScripts } from './scriptStage.js'
 import { syncAgentsMd } from './agentsmd.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
@@ -304,6 +305,13 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
   } catch (e) {
     return { error: `workspace_config.json unreadable: ${e?.message ?? e}`, code: 400 }
   }
+  // D-017 prefill: null pins heal from the plugin-global node memory before
+  // anything runs, so the run submits under the paths the AGENTS.md yaml will
+  // claim (best-effort — an unreadable memory keeps what was just read)
+  try {
+    const healed = await healToolchainPins(project.path)
+    if (healed.settings) settings = healed.settings
+  } catch { /* keep the settings as read */ }
 
   let machine = null
   let alias = null
@@ -325,7 +333,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
       alias = machine.id
     }
     try {
-      remoteBase = resolveRemoteDir(settings.remote_root, settings.remote_dir)
+      remoteBase = resolveRemoteDir(settings.remote_root, settings.selfcheck_remote_dir)
     } catch (e) {
       return { error: String(e?.message ?? e), code: 400 }
     }
@@ -733,6 +741,9 @@ async function localChain(run, sim) {
         }
         const prog = await fsp.readFile(path.join(runDir, 'sweep_progress.json'), 'utf8')
           .then((t) => JSON.parse(t)).catch(() => null)
+        // toolchain telemetry (D-016/D-017): the local worker records its own
+        // interpreter + resolved spectre too — the in-cluster pin this run used
+        if (prog?.toolchain && !run._priv.toolchainTelemetry) run._priv.toolchainTelemetry = prog.toolchain
         const total = Number(prog?.total_points) || 0
         const succ = Number(prog?.succeeded) || 0
         const ok = !last?.isError && prog?.status === 'completed' && total === 9 && succ === total
@@ -941,6 +952,9 @@ async function remoteSpectreChain(run) {
       }
       const prog = await fsp.readFile(path.join(staging, 'sweep_progress.json'), 'utf8')
         .then((t) => JSON.parse(t)).catch(() => null)
+      // toolchain telemetry (D-016/D-017): the worker records the interpreter
+      // and spectre the JOB really got — harvest it for the finalize auto-pin
+      if (prog?.toolchain && !run._priv.toolchainTelemetry) run._priv.toolchainTelemetry = prog.toolchain
       const fetchedOk = state === 'completed' || (prog?.status === 'completed' && Number(prog.succeeded) === 9)
       if (!fetchedOk) ok = false
       details.push(`${topo}: state=${state ?? 'unknown'}${prog ? ` (${prog.succeeded}/${prog.total_points})` : ''}`
@@ -1133,6 +1147,40 @@ async function remoteGoldenChain(run) {
 // Finalize: summary + the end-of-run diagnosis for uncovered failures
 // ---------------------------------------------------------------------------
 
+// A green run pins the toolchain it MEASURED and remembers it per node
+// (2026-11-25, D-016/D-017): the worker's sweep_progress.json telemetry is
+// what the job really ran under — sys.executable and the resolved spectre —
+// never a guess, and it equals an explicit pin anyway (the worker runs under
+// it). Writing it refreshes the settings + the plugin-global node memory, so
+// the yaml the finalize sync renders carries no null pins and the next
+// project on the same node starts pinned. Without telemetry (an older worker,
+// simulator=none) nothing is written — the honest nulls stay.
+export async function autoPinToolchain(run) {
+  const tel = run._priv.toolchainTelemetry
+  run.summary.toolchain_pinned = false
+  if (!run.summary.ok || !tel) return
+  const patch = {}
+  if (tel.python && normalizePin(tel.python, 'remote_python').value) patch.remote_python = tel.python
+  if (tel.spectre && normalizePin(tel.spectre, 'remote_spectre_cmd').value) patch.remote_spectre_cmd = tel.spectre
+  if (!PIN_KEYS.some((k) => patch[k] != null)) return
+  const stored = run._priv.settings
+  const v = validateSettings({ ...stored, ...patch })
+  if (v.error) return
+  await writeSettings(run._priv.project.path, v.settings)
+  run._priv.settings = v.settings
+  run.summary.toolchain_pinned = true
+  // node memory: keyed by the dsh-ssh machine alias; in-cluster LSF (no
+  // machine) falls back to the hostname the telemetry itself reports
+  const nodeKey = stored.machine_id || (tel.node ? String(tel.node) : null)
+  if (nodeKey) {
+    await updateNodePins(nodeKey, {
+      host: run._priv.machine?.host ?? (tel.node ? String(tel.node) : null),
+      remote_python: patch.remote_python ?? v.settings.remote_python ?? null,
+      remote_spectre_cmd: patch.remote_spectre_cmd ?? v.settings.remote_spectre_cmd ?? null,
+    }).catch(() => { /* best-effort memory; the settings pin already landed */ })
+  }
+}
+
 function finalize(run) {
   // A user-stopped run finalizes as status='cancelled' (not 'done'): partial
   // evidence is KEPT for inspection, no diagnosis sessions spawn, and the
@@ -1191,6 +1239,14 @@ function finalize(run) {
   if (run.summary.ok && run.diagnoses.length === 0) {
     void cleanRunArtifacts(run.runDir).catch(() => {})
   }
-  void syncAgentsMd(run._priv.ctx, { project: run._priv.project, settings: run._priv.settings })
-    .catch(() => { /* best-effort at finalize; the save button can always re-sync */ })
+  // the auto-pin must land BEFORE the AGENTS.md sync — the yaml then renders
+  // with the just-measured pins, not the nulls the run started with
+  void (async () => {
+    try {
+      await autoPinToolchain(run)
+      void persistRun(run)
+    } catch { /* best-effort: the honest nulls simply stay */ }
+    await syncAgentsMd(run._priv.ctx, { project: run._priv.project, settings: run._priv.settings })
+      .catch(() => { /* best-effort at finalize; the save button can always re-sync */ })
+  })()
 }

@@ -38,7 +38,7 @@ const HEADER = '## Project Config (HarnessAMS)'
 const CONSTRAINTS = [
   '- When design constraints are unclear, ask the user before doing anything — never guess or invent them.',
   '- Execute through the SAS/HA plugin tools (spectre_assemble, batch_submit / batch_poll, snp_*, gen_sweep_report); if a tool call fails, stop and consult the user — no hand-rolled workarounds around the tool chain.',
-  '- `.harnessams/` is plugin-managed project storage (config, sessions, run records): do not read it during normal work — everything you need is in this block and the Overview settings table.',
+  '- `.harnessams/` is plugin-managed project storage (config, sessions, run records): do not read it during normal work — everything you need is in this block.',
 ]
 
 export function agentsMdPath(workspacePath) {
@@ -55,9 +55,13 @@ const scalar = (v) => (v === null || v === undefined ? 'null' : typeof v === 'bo
 // env facts + the latest finished self-check verdict. Machine ALIASES are
 // deliberately absent (2026-11-24): the dsh-ssh alias never appears in the
 // block — the batch tools resolve the configured machine themselves, and the
-// remote side is stated as paths only (remote_root, remote_dir,
-// remote_scripts_dir, and the toolchain pins remote_python /
-// remote_spectre_cmd — D-016: null = not pinned yet, the bare defaults).
+// remote side is stated as paths only (remote_root, remote_scripts_dir, the
+// toolchain pins remote_python / remote_spectre_cmd, and the self-check dir).
+// 2026-11-25 shape (D-016/D-017): the local env rows carry the local_ prefix,
+// the selfcheck group sits at the tail (selfcheck_remote_dir + the verdicts),
+// and rows that would render null because they do not apply (remote_root /
+// remote_scripts_dir in local mode) are OMITTED, not left empty — a synced
+// values build never leaves an unfilled row behind.
 function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   const s = settings ?? {}
   const lines = ['hams_project_config:']
@@ -73,14 +77,15 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   row('compute_remote', s.compute_script_remote)
   row('remote_python', s.remote_python ?? null)
   row('remote_spectre_cmd', s.remote_spectre_cmd ?? null)
-  row('remote_dir', s.remote_dir)
-  row('remote_root', s.remote_root)
-  row('remote_scripts_dir', s.remote_root
-    ? `${String(s.remote_root).replace(/\/+$/, '')}/.harnessams/scripts` : null)
-  row('node_version', env?.node?.version)
-  row('node_path', env?.node?.path)
-  row('python_version', env?.python?.version)
-  row('python_path', env?.python?.path)
+  if (s.remote_root) {
+    row('remote_root', s.remote_root)
+    row('remote_scripts_dir', `${String(s.remote_root).replace(/\/+$/, '')}/.harnessams/scripts`)
+  }
+  row('local_node_version', env?.node?.version)
+  row('local_node_path', env?.node?.path)
+  row('local_python_version', env?.python?.version)
+  row('local_python_path', env?.python?.path)
+  row('selfcheck_remote_dir', s.selfcheck_remote_dir)
   row('last_selfcheck_run_id', run?.run_id ?? null)
   row('last_selfcheck_finished_at', run?.finished_at ?? null)
   row('last_selfcheck_local', run?.local ?? null)
@@ -158,6 +163,41 @@ export async function latestSelfcheckRun(workspacePath) {
     } catch { /* unreadable run dir — fall through to the older one */ }
   }
   return null
+}
+
+// Read the managed block BACK as a flat facts object (D-017): the sidebar's
+// status display restores from the AGENTS.md yaml after a page reload — the
+// block is the per-project record, so no global "latest run" surface is
+// needed. Rows are `  key: value` single-level scalars: the YAML null literal
+// or a JSON double-quoted string. Returns null when the file/block/fence is
+// missing (nothing to restore yet).
+export async function parseFacts(workspacePath) {
+  if (!workspacePath || typeof workspacePath !== 'string') return null
+  let text
+  try {
+    text = await fsp.readFile(agentsMdPath(workspacePath), 'utf8')
+  } catch {
+    return null
+  }
+  const begin = text.indexOf(BEGIN)
+  if (begin < 0) return null
+  const end = text.indexOf(END, begin)
+  if (end < 0) return null
+  const block = text.slice(begin, end)
+  const fenceStart = block.indexOf('```yaml')
+  const fenceEnd = block.indexOf('```', fenceStart + 7)
+  if (fenceStart < 0 || fenceEnd < 0) return null
+  const facts = {}
+  for (const line of block.slice(fenceStart + 7, fenceEnd).split(/\r?\n/)) {
+    const m = line.match(/^  ([a-z_][a-z0-9_]*): (.*)$/)
+    if (!m) continue
+    const raw = m[2].trim()
+    if (raw === 'null' || raw === '~' || raw === '') facts[m[1]] = null
+    else if (raw.startsWith('"')) {
+      try { facts[m[1]] = JSON.parse(raw) } catch { facts[m[1]] = raw }
+    } else facts[m[1]] = raw
+  }
+  return facts
 }
 
 // Values sync behind the harnessams_selfcheck tool (action=save_agentsmd) and

@@ -9,9 +9,10 @@
 // (exec.agent.id ≡ sessionId, as in gen_sweep_report) — no project guessing.
 import path from 'node:path'
 import { sessionProject } from '../server/project.js'
-import { readSettings, validateSettings, writeSettings } from '../server/settings.js'
+import { healToolchainPins, readSettings, validateSettings, writeSettings, PIN_KEYS } from '../server/settings.js'
 import { localEnvFacts, runLocalChecks } from '../server/checks.js'
 import { syncAgentsMd } from '../server/agentsmd.js'
+import { updateNodePins } from '../server/globalstore.js'
 import { startSelfcheck, getSelfcheck, stopSelfcheck } from '../server/selfcheck.js'
 
 // Shared action runner: the tool def (agent-facing, resolves session/project
@@ -35,6 +36,19 @@ export async function runSelfcheckAction(ctx, { sessionId, project, action, sett
       await writeSettings(project.path, v.settings)
     } catch (e) {
       return { error: `workspace_config.json write failed: ${String(e?.message ?? e)}`, code: 500 }
+    }
+    // an explicit toolchain pin write doubles as node memory (D-017): the
+    // machine's CURRENT pin pair is remembered plugin-globally — values set,
+    // clears cleared, so a fresh project on the same node prefills and an
+    // explicit null STAYS null (heal only re-fills what the node truly runs;
+    // only a later green run re-measures). Machine-less configs have no node
+    // to attribute the pins to.
+    const touchedPin = PIN_KEYS.some((k) => Object.prototype.hasOwnProperty.call(settings, k))
+    if (v.settings.machine_id && touchedPin) {
+      await updateNodePins(v.settings.machine_id, {
+        remote_python: v.settings.remote_python ?? null,
+        remote_spectre_cmd: v.settings.remote_spectre_cmd ?? null,
+      }).catch(() => { /* best-effort memory */ })
     }
   }
   if (action === 'run') {
@@ -60,13 +74,12 @@ export async function runSelfcheckAction(ctx, { sessionId, project, action, sett
     return { ok: true, facts, checks }
   }
   if (action === 'save_agentsmd') {
-    let s
-    try {
-      ({ settings: s } = await readSettings(project.path))
-    } catch (e) {
-      return { error: `workspace_config.json unreadable: ${String(e?.message ?? e)}`, code: 500 }
-    }
-    const r = await syncAgentsMd(ctx, { project, settings: s })
+    // D-017 prefill: heal null pins from the node memory first, so the yaml
+    // renders what the channel will actually run (a machine with nothing
+    // remembered keeps the honest nulls)
+    const healed = await healToolchainPins(project.path)
+    if (healed.error) return { error: healed.error, code: 500 }
+    const r = await syncAgentsMd(ctx, { project, settings: healed.settings })
     if (r.error) return { error: r.error, code: 500 }
     return { ok: true, path: r.path, created: r.created }
   }
@@ -109,13 +122,15 @@ export function selfcheckTools(ctx) {
       + 'config and self-check results + the recommended-workflow table for the current settings). '
       + 'Passing "settings" (a full object or a partial one — a partial payload is merged over the stored settings) '
       + 'writes the project config settings section BEFORE the action runs — that is the single config write face '
-      + '(cluster_env/run_mode/machine_id/remote_root/remote_dir/scheduler/simulator/compute_script_local/'
+      + '(cluster_env/run_mode/machine_id/remote_root/selfcheck_remote_dir/scheduler/simulator/compute_script_local/'
       + 'compute_script_remote/remote_python/remote_spectre_cmd; remote mode requires an absolute remote_root and machine_id '
       + 'unless in-cluster LSF is the only remote channel; scheduler is lsf/ssh; compute_script_* selects the compute '
       + 'LANGUAGE (python/js), never an interpreter path; remote_python and remote_spectre_cmd are the cluster toolchain '
-      + 'pins — absolute paths to the worker interpreter and to the spectre executable, null = the bare defaults: harvest '
-      + 'and verify them with the cluster-setup skill, never guess a path. The pins are not a settings-table row: this '
-      + 'argument is their write face and the AGENTS.md yaml is where they are kept.',
+      + 'pins — absolute paths to the worker interpreter and to the spectre executable. A GREEN self-check pins the paths '
+      + 'it measured automatically and remembers them per node plugin-globally (a fresh project on a known machine '
+      + 'prefills, so null pins are rare and temporary); this settings argument stays the explicit write face for '
+      + 'overriding them (a bare name is refused — harvest and verify with the cluster-setup skill, never guess a path). '
+      + 'The pins are not a settings-table row and the AGENTS.md yaml is where they are kept.',
     parameters: {
       action: { type: 'string', required: true, enum: ['run', 'status', 'stop', 'env', 'save_agentsmd'],
         description: 'run=start a self-check (background, returns run_id) | status=fetch one run | stop=cancel a running self-check | env=local environment listing | save_agentsmd=sync the AGENTS.md config table' },
