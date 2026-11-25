@@ -304,6 +304,14 @@ test('agentsmd client: button row order and wiring, new keys bilingual', () => {
   assert.ok(src.includes("h(SessionOptionFigs, { config, updateConfig }),")
     && src.indexOf('h(SessionOptionFigs, { config, updateConfig }),') < src.indexOf('h(SessionDashboard, { sessionId, config, updateConfig }),'),
     'the report-figures option renders above the dashboard')
-  assert.ok(src.includes("updateConfig((c) => ({ ...c, report_figs: e.target.value === '1' }))"), 'the option writes the session entry')
+  assert.ok(src.includes("onChange: captureValue((on) => void updateConfig((c) => ({ ...c, report_figs: on === '1' })))"),
+    'the option writes the session entry')
   assert.ok(src.includes("...(src.report_figs === true ? { report_figs: true } : {})"), 'the session clone carries the option')
+  // a controlled select snaps back before the rebased persist runs its
+  // mutator: the dashboard dropdown must capture the picked value first (the
+  // "cannot select the older report" regression)
+  assert.ok(src.includes("onChange: captureValue((id) => updateConfig((c) => ({ ...c, dashboard_selected: id })))"),
+    'the report dropdown captures its value synchronously')
+  assert.ok(!/updateConfig\(\(c\) => \(\{ \.\.\.c, dashboard_selected: e\.target\.value \}\)\)/.test(src),
+    'no deferred read of e.target.value in the report dropdown')
 })

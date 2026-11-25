@@ -2200,6 +2200,14 @@ window.__ModuleLoader__.load({
     // file; the ↗ open-in-tab link and a direct file open now all render
     // identically.
 
+    // A controlled <select> snaps back to its rendered value the moment the
+    // change event ends, and persistConfig applies its mutator only after an
+    // await (the rebase GET): reading e.target.value inside that mutator
+    // returns the OLD value, so the choice never landed — the dashboard
+    // dropdown could not switch away from the newest report. Capture the
+    // value synchronously, then hand it on.
+    const captureValue = (apply) => (e) => { const value = e.target.value; return apply(value) }
+
     // Session option, one line ABOVE the dashboard: the gen_sweep_report PNG
     // export gate. It belongs to the session, not to the project settings —
     // it rides beside the reports it applies to — is off unless this session
@@ -2212,7 +2220,7 @@ window.__ModuleLoader__.load({
             className: 'hams-select',
             value: config.report_figs === true ? '1' : '0',
             title: tr('pset.figsWarn'),
-            onChange: (e) => void updateConfig((c) => ({ ...c, report_figs: e.target.value === '1' })),
+            onChange: captureValue((on) => void updateConfig((c) => ({ ...c, report_figs: on === '1' }))),
           },
           h('option', { value: '1' }, tr('check.on')),
           h('option', { value: '0' }, tr('check.off'))),
@@ -2308,7 +2316,7 @@ window.__ModuleLoader__.load({
               value: selectedId ?? '',
               disabled: !reports.length,
               title: current ? current.path : tr('dash.noReports'),
-              onChange: (e) => updateConfig((c) => ({ ...c, dashboard_selected: e.target.value })),
+              onChange: captureValue((id) => updateConfig((c) => ({ ...c, dashboard_selected: id }))),
             },
             reports.length
               ? reports.map((r) => h('option', { key: r.id, value: r.id }, txt(r.name)))
