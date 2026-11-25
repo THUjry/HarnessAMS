@@ -196,10 +196,6 @@ window.__ModuleLoader__.load({
         'pset.colCompRemote': '远端计算',
         'pset.colFigs': '报告出图',
         'pset.figsWarn': '开启后每次生成报告都会把每张图导出为 PNG 存入 Figs/；持续保存图片会造成较大磁盘占用',
-        'pset.colRemotePython': '远端 Python（绝对路径）',
-        'pset.colRemoteSpectre': '远端 spectre（绝对路径）',
-        'pset.pinPlaceholder': '（留空＝默认裸名）',
-        'pset.pinHint': '填可执行文件的绝对路径（如 /opt/tools/python3/bin/python3）；留空＝不钉，沿用 PATH 上的裸名。路径由 cluster-setup 技能从启动文件采集并核实，不要手猜',
         'pset.mode.local': '本地',
         'pset.mode.remote': '远程',
         'pset.sched.lsf': 'LSF 队列',
@@ -407,10 +403,6 @@ window.__ModuleLoader__.load({
         'pset.colCompRemote': 'Remote compute',
         'pset.colFigs': 'Report figures',
         'pset.figsWarn': 'When on, every generated report exports one PNG per chart into Figs/; continuously saving images causes significant disk usage',
-        'pset.colRemotePython': 'Remote Python (absolute path)',
-        'pset.colRemoteSpectre': 'Remote spectre (absolute path)',
-        'pset.pinPlaceholder': '(empty = bare default)',
-        'pset.pinHint': 'The executable\'s absolute path (e.g. /opt/tools/python3/bin/python3); empty = unpinned, the bare name on PATH applies. Harvest and verify the path with the cluster-setup skill — never guess one',
         'pset.mode.local': 'local',
         'pset.mode.remote': 'remote',
         'pset.sched.lsf': 'LSF queue',
@@ -1467,16 +1459,9 @@ window.__ModuleLoader__.load({
       { id: 'compute_script_remote', labelKey: 'pset.colCompRemote', column: 'compute_remote',
         visible: (s) => s.run_mode === 'remote',
         options: [['python', 'pset.comp.python'], ['js', 'pset.comp.js']] },
-      // cluster toolchain pins (D-016): absolute paths to the worker
-      // interpreter and the spectre executable, harvested and verified by the
-      // cluster-setup skill; empty = unpinned (the bare defaults). Text inputs
-      // — no browse picker exists for executables; the server validates on
-      // confirm. Their verdict rides the submit/poll steps, i.e. the
-      // scheduler column's aggregate.
-      { id: 'remote_python', labelKey: 'pset.colRemotePython', column: 'scheduler', kind: 'text',
-        visible: (s) => s.cluster_env === 'in-cluster' || s.run_mode === 'remote' },
-      { id: 'remote_spectre_cmd', labelKey: 'pset.colRemoteSpectre', column: 'scheduler', kind: 'text',
-        visible: (s) => (s.cluster_env === 'in-cluster' || s.run_mode === 'remote') && s.simulator === 'spectre' },
+      // NOT rows here, by ruling: the cluster toolchain pins remote_python /
+      // remote_spectre_cmd — the agent writes them through harnessams_selfcheck
+      // and they are kept in the AGENTS.md yaml, never typed in the table.
       // gen_sweep_report PNG export gate (default off — disk); no selfcheck
       // verdict column of its own, the row always shows a faint dash
       { id: 'report_figs', labelKey: 'pset.colFigs', column: null, kind: 'bool' },
@@ -1520,13 +1505,6 @@ window.__ModuleLoader__.load({
             onChange: (e) => onChange(c.id, e.target.value === '1') },
             h('option', { value: '1' }, tr('check.on')),
             h('option', { value: '0' }, tr('check.off')))
-        }
-        if (c.kind === 'text') {
-          // a pin is an absolute path with no spaces — trimming as typed is
-          // invisible to a valid entry and stops a stray leading space
-          return h('input', { className: 'hams-input', type: 'text', spellCheck: false,
-            value: draft[c.id] ?? '', placeholder: tr('pset.pinPlaceholder'), title: tr('pset.pinHint'),
-            onChange: (e) => onChange(c.id, e.target.value.trim() || null) })
         }
         return h('select', { className: 'hams-select', value: draft[c.id] ?? '',
           onChange: (e) => onChange(c.id, e.target.value) },

@@ -290,13 +290,11 @@ test('agentsmd client: button row order and wiring, new keys bilingual', () => {
     'pset.browse', 'pset.browseTitle', 'pset.browsePickDir', 'pset.pickDir', 'pset.pickThisDir', 'pset.pickCurrentDir',
     'pset.colName', 'pset.colValue', 'pset.confirmBtn', 'pset.unsaved', 'pset.stagedHint',
     'pset.envTitle', 'pset.envIn', 'pset.envOut', 'pset.envHint',
-    // D-016: the toolchain pins are two text rows of the settings table
-    'pset.colRemotePython', 'pset.colRemoteSpectre', 'pset.pinPlaceholder', 'pset.pinHint',
     'envc.title', 'envc.bodyIn', 'envc.bodyOut', 'envc.ok',
     'chk.btn.local', 'chk.truncated',
   ])
-  // the two pin rows: text inputs keyed to the settings, empty = unpinned
-  assert.ok(src.includes("id: 'remote_python', labelKey: 'pset.colRemotePython', column: 'scheduler', kind: 'text'"))
-  assert.ok(src.includes("id: 'remote_spectre_cmd', labelKey: 'pset.colRemoteSpectre', column: 'scheduler', kind: 'text'"))
-  assert.ok(src.includes("onChange(c.id, e.target.value.trim() || null)"), 'an emptied pin row writes null, not an empty string')
+  // the cluster toolchain pins are NOT a settings-table row (by ruling)
+  for (const gone of ['pset.colRemotePython', 'pset.colRemoteSpectre', 'pset.pinPlaceholder', 'pset.pinHint', "kind: 'text'"]) {
+    assert.ok(!src.includes(gone), `the settings table lost "${gone}"`)
+  }
 })
