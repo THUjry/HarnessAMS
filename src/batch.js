@@ -331,6 +331,18 @@ function section(text, name) {
   return m ? m[1].trim() : ''
 }
 
+// Classify a raw `bjobs` output block into one vocabulary word
+// ('queued' | 'running' | 'done' | 'failed' | '' | 'unknown'). Shared by the
+// poll parser and the submit-time post-check so PEND means the same thing in
+// both places.
+export function classifyBjobsState(bjobsOut) {
+  if (/(^|\n)\s*\d+\s+(PEND|PSUSP)/.test(bjobsOut)) return 'queued'
+  if (/(^|\n)\s*\d+\s+RUN/.test(bjobsOut)) return 'running'
+  if (/(^|\n)\s*\d+\s+DONE/.test(bjobsOut)) return 'done'
+  if (/(^|\n)\s*\d+\s+(EXIT|ZOMBI)/.test(bjobsOut)) return 'failed'
+  return /No (unfinished )?job found/i.test(bjobsOut) || !bjobsOut ? '' : 'unknown'
+}
+
 export function parsePollOutput(text, { total } = {}) {
   const bjob = section(text, 'BJOB')
   const meta = Number(section(text, 'META')) || 0
@@ -341,11 +353,7 @@ export function parsePollOutput(text, { total } = {}) {
   if (progressText) {
     try { progress = JSON.parse(progressText) } catch { progress = null }
   }
-  const jobState = /(^|\n)\s*\d+\s+(PEND|PSUSP)/.test(bjob) ? 'queued'
-    : /(^|\n)\s*\d+\s+RUN/.test(bjob) ? 'running'
-      : /(^|\n)\s*\d+\s+(DONE)/.test(bjob) ? 'done'
-        : /(^|\n)\s*\d+\s+(EXIT|ZOMBI)/.test(bjob) ? 'failed'
-          : /No (unfinished )?job found/i.test(bjob) || !bjob ? '' : 'unknown'
+  const jobState = classifyBjobsState(bjob)
   const progressTotal = Number(progress?.total_points) || Number(total) || 0
   const completed = meta
   let state = 'unknown'

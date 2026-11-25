@@ -77,7 +77,7 @@ function pollValue({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN
 // src/tools.ts (ssh_exec failures are values, not throws). Commands arrive
 // already wrapped by execRemote (timeout -s KILL ... -- sh -c "..."); routing
 // matches substrings inside the wrapper, exactly like the assertions below.
-function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false, existing = 0, ls = '' } = {}) {
+function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false, existing = 0, ls = '', post = '777 RUN\n__STARTED__\n' } = {}) {
   const calls = []
   const ok = (value) => ({ isError: false, value })
   let seqIdx = 0 // pollSeq cursor: successive __BJOB__ polls shift through the
@@ -114,7 +114,7 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
           if (pollSeq) return reply(ok(pollValue(pollSeq[Math.min(seqIdx++, pollSeq.length - 1)])))
           return reply(ok(pollValue(poll)))
         }
-        if (cmd.includes('sleep 1; bjobs')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: '777 RUN\n__STARTED__\n', stderr: '', durationMs: 3 }))
+        if (cmd.includes('sleep 1; bjobs')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: post, stderr: '', durationMs: 3 }))
         if (cmd.includes('bsub -q')) {
           return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: 'Job <777> is submitted to queue <normal>.\n', stderr: '', durationMs: 3 }))
         }
@@ -274,6 +274,95 @@ test('batch_submit resolves machine/root from the project settings and uploads t
       'worker uploaded from the configured scripts root')
     assert.ok(uploads.includes('/home/op/sim/.harnessams/assets/numfallback.py'),
       'the sibling assets bucket uploads beside the scripts root (D-015)')
+  } finally {
+    restoreEnv()
+    fs.rmSync(base, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// 2026-11-25: PEND right after bsub is the expected state (queueing), not a
+// failure — the submit result says queued with zero failure-shaped warnings
+// (the old wording "post-submit verification failed: <job> PEND" + "no
+// .worker_started marker yet" fired on every healthy queued submit).
+test('batch_submit classifies a queued (PEND) job as expected — state queued, no warnings', async () => {
+  const base = tmp('hams-pend-')
+  const scriptsRoot = path.join(base, 'scripts')
+  fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), '# worker\n')
+  process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
+  const root = tmp('hams-proj-')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
+      remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+      compute_script_local: 'python', compute_script_remote: 'python',
+    },
+  }, null, 2))
+  try {
+    const run = makeRunDir({ under: root })
+    const ctx = makeCtx({ post: '777 PEND\n' })
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.state, 'queued')
+    assert.deepEqual(res.warnings, [])
+    assert.equal(res.job_id, '777')
+  } finally {
+    restoreEnv()
+    fs.rmSync(base, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// 2026-11-25 (D-019): the session-level Max-points-per-scan gate. A 222-point
+// sweep_config against the calling session's limit of 100 rejects before any
+// upload; raising the session field to 250 lets the same scan through.
+test('batch_submit enforces the session max-points-per-scan gate (D-019)', async () => {
+  const base = tmp('hams-mp-')
+  const scriptsRoot = path.join(base, 'scripts')
+  fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), '# worker\n')
+  process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
+  const root = tmp('hams-proj-')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
+      remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+      compute_script_local: 'python', compute_script_remote: 'python',
+    },
+  }, null, 2))
+  const sessionsFile = path.join(root, '.harnessams', 'sessions.json')
+  const writeSessions = (limit) => fs.writeFileSync(sessionsFile, JSON.stringify({
+    version: 2,
+    sessions: { 'sess-gate': { display: 'session', reports: [], max_points_per_scan: limit } },
+  }, null, 2))
+  try {
+    const cpf = Array.from({ length: 111 }, (_, i) => String(i + 10)) // 111 x 2 = 222 points
+    const run = makeRunDir({ under: root, config: {
+      netlist_template: 'template.scs',
+      parameters: { cpf, SW: [0, 1] },
+      sweep_mode: 'cross_product',
+    } })
+    const exec = { agent: { id: 'sess-gate' } }
+    writeSessions(100)
+    const gateCtx = makeCtx()
+    await assert.rejects(tool(gateCtx, 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
+    }, exec), /max points per scan: 222 > 100/)
+    // the reject happens before anything is staged: no ssh call left the mock
+    assert.equal(gateCtx.calls.length, 0)
+    writeSessions(250)
+    const res = await tool(makeCtx(), 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
+    }, exec)
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.state, 'running')
   } finally {
     restoreEnv()
     fs.rmSync(base, { recursive: true, force: true })

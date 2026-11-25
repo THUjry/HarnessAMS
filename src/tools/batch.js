@@ -24,10 +24,10 @@ import { readJsonIfExists, resolveDir } from '../py.js'
 import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
 import { execLocal, localCopy } from '../localchannel.js'
 import { readRunProgress, totalFromConfig } from '../progress_files.js'
-import { normalizePin, readSettingsFor } from '../server/settings.js'
+import { findProjectRoot, normalizePin, readSettingsFor } from '../server/settings.js'
 import {
   DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildSshCommand, buildSubmitCommand,
-  collectRunFiles,
+  classifyBjobsState, collectRunFiles,
   defaultRemoteScriptsDir, nextSimDir, parseJobId, parsePollOutput, pluginAssets, pluginScripts,
   pollCommand, postSubmitCommand, readJob, remoteJoin,
   resolveRemoteDir, sanitizeRel, submitScriptsRoot, templateUploadPlan, writeJob,
@@ -41,6 +41,25 @@ const AUTO_FETCH_FILES = ['sweep_progress.json', 'errlog.txt']
 // batch_poll wait_sec cadence (D-008): the gap between re-polls of a blocking
 // wait. 10 s matches the wait policy's preferred first-backoff step.
 const WAIT_GAP_MS = 10_000
+
+// The session-level scan-size ceiling (D-019): the calling session's
+// "Max points per scan" field, defaulting to 100. Fail-open — a missing
+// session entry or an unreadable store never blocks a submit.
+const DEFAULT_MAX_POINTS_PER_SCAN = 100
+
+async function maxPointsPerScan(runDir, sessionId) {
+  try {
+    if (!sessionId) return DEFAULT_MAX_POINTS_PER_SCAN
+    const root = findProjectRoot(runDir)
+    if (!root) return DEFAULT_MAX_POINTS_PER_SCAN
+    const { readSessionConfigs } = await import('../server/project.js')
+    const store = await readSessionConfigs(root)
+    const v = store.sessions?.[sessionId]?.max_points_per_scan
+    return Number.isInteger(v) && v > 0 ? v : DEFAULT_MAX_POINTS_PER_SCAN
+  } catch {
+    return DEFAULT_MAX_POINTS_PER_SCAN
+  }
+}
 
 // The suite's own Spectre worker (ships with SmartAnaSim): the only worker
 // the remote_spectre_cmd pin is passed to — custom workers keep their own
@@ -228,7 +247,9 @@ export function batchTools(ctx) {
         + '(out-of-cluster: the ssh node itself, a second hop goes through the dsh-ssh proxy config; in-cluster: '
         + 'any other node — files never cross ssh). The worker path is scripts-root-relative (e.g. '
         + '"spectre/spectre_sweep_worker.py") or absolute on the target; worker_args are passed through. Writes '
-        + '.batch_job.json in the run directory for batch_poll.',
+        + '.batch_job.json in the run directory for batch_poll. Rejects a scan whose total point count (from '
+        + 'sweep_config.json) exceeds the calling session\'s Max points per scan field (default 100) — split the '
+        + 'grid into multiple batches instead.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
         remote_dir: { type: 'string', description: 'Remote batch directory: absolute, or relative to remote_root. '
@@ -266,6 +287,19 @@ export function batchTools(ctx) {
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
+        // Session scan-size gate (D-019): reads sweep_config.json and rejects
+        // an oversized grid before anything is staged or uploaded. Splits the
+        // scan into multiple Sim batches instead of one mega-run.
+        const totalScanPoints = totalFromConfig(runDir)
+        if (totalScanPoints > 0) {
+          const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+          const limit = await maxPointsPerScan(runDir, sid)
+          if (totalScanPoints > limit) {
+            throw new Error(`scan exceeds the session's max points per scan: ${totalScanPoints} > ${limit}`
+              + ' — split the parameter grid into multiple batches (auto Sim naming)'
+              + " or raise the session's Max points per scan field")
+          }
+        }
         const scheduler = args.scheduler === 'ssh' ? 'ssh' : args.scheduler === 'local' ? 'local' : 'lsf'
         // Channel matrix (D-002): the project's cluster_env picks the semantics.
         // Out-of-cluster every remote operation crosses dsh-ssh; in-cluster
@@ -476,12 +510,26 @@ export function batchTools(ctx) {
         const warnings = []
         const post = await channel.exec(postSubmitCommand(remoteDir, jobId),
           { timeoutMs: 30_000 })
-        if (!post.ok) warnings.push(`post-submit verification failed: ${(post.stderr || post.text).slice(0, 300)}`)
+        // PEND right after bsub is the expected state, not a failure: the
+        // bjobs block decides which "no marker yet" cases are worth a word.
+        const jobState = classifyBjobsState(post.stdout || '')
+        if (!post.ok) {
+          warnings.push(`post-submit check could not run: ${(post.stderr || post.text).slice(0, 300)}`)
+        }
         if (post.stdout.includes('__ERRLOG__')) {
           warnings.push('remote errlog.txt exists — the worker failed to start (use batch_poll for details)')
         }
-        if (!post.stdout.includes('__STARTED__')) {
-          warnings.push('no .worker_started marker yet — the job is queued or the worker has not run')
+        if (jobState === 'failed') {
+          warnings.push('the job is already EXIT/ZOMBI per bjobs — poll for details')
+        }
+        if (!post.stdout.includes('__STARTED__') && jobState !== 'queued') {
+          if (jobState === 'running') {
+            warnings.push('job is RUN but the .worker_started marker is not there yet — poll to confirm')
+          } else if (jobState === 'done') {
+            warnings.push('job already finished (DONE) before verification — poll to fetch')
+          } else if (jobState !== 'failed' && post.ok) {
+            warnings.push('job state unknown after submit — poll to confirm')
+          }
         }
 
         const job = {
@@ -505,7 +553,10 @@ export function batchTools(ctx) {
         return {
           ok: true,
           job_id: jobId,
-          state: post.stdout.includes('__STARTED__') ? 'running' : 'submitted',
+          state: post.stdout.includes('__STARTED__') ? 'running'
+            : jobState === 'queued' ? 'queued'
+            : jobState === 'failed' ? 'failed'
+            : 'submitted',
           remote_dir: remoteDir,
           scripts_dir: scriptsRoot,
           warnings,
