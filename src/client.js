@@ -2766,7 +2766,10 @@ window.__ModuleLoader__.load({
             multRow('m', 'check.multM'),
             switchRow('unit_check', 'check.unitCheck', 'check.noteUnit'))),
         params && draft && h('div', { className: 'hams-row' },
-          h('button', { className: 'hams-btn hams-btn-sm', disabled: !dirty || saving, onClick: () => { void confirm() } },
+          // an UNCONFIRMED session can always confirm: with no own table the
+          // draft holds the effective defaults and Confirming adopts them —
+          // only an owned, unchanged table has nothing to save
+          h('button', { className: 'hams-btn hams-btn-sm', disabled: (!dirty && hasOwn) || saving, onClick: () => { void confirm() } },
             saving ? tr('common.loading') : tr('check.confirm')),
           h('button', { className: 'hams-btn hams-btn-sm', disabled: !dirty || saving, onClick: () => setDraft(toDraft(params)) },
             tr('common.cancel')),
