@@ -26,7 +26,7 @@ Every batch scheduler ends up launching a command on a cluster node under a bare
 
 ## Stage 1 - harvest: read the startup files (read-only)
 
-Run on the host the project submits through (the machine in the Overview settings table), every command through dsh-ssh `ssh_exec`, never raw shell ssh; in-cluster, run them on this host.
+Run on the host the project submits through. That is the machine of the Overview settings table, which you cannot see: take the host from what the user wrote, and when they did not name it, ask which configured host (`ssh_list` shows the candidates) before probing anything: a login node and a compute node can resolve the same command differently. Every command goes through dsh-ssh `ssh_exec`, never raw shell ssh; in-cluster, run them on this host.
 
     ls -1 /etc/profile /etc/profile.d/ ~/.bash_profile ~/.bashrc 2>/dev/null
     cat /etc/profile ~/.bash_profile ~/.bashrc
@@ -34,7 +34,7 @@ Run on the host the project submits through (the machine in the Overview setting
 
 Follow every `source` or `.` line into the file it names. Collect four kinds of leads for each key command (`spectre`, `python3`, `bsub` / `bjobs`):
 
-- `module load <mod>`: the modulefile states the absolute directories. `bash -lc "module show <mod>"` prints the modulefile's path; `cat` it and read its `prepend-path PATH /abs/tools/bin` line.
+- `module load <mod>`: the modulefile states the absolute directories. For the modules that can supply a key command (not every module in the file) `bash -lc "module show <mod>"` prints the modulefile's path; `cat` it and read its `prepend-path PATH /abs/tools/bin` line, and note the variables the tool needs beside PATH (`LD_LIBRARY_PATH` and friends).
 - `export PATH=...`: the absolute directories prepended, in order.
 - `alias <cmd>=/abs/path`: where the user chose to bind that command. Record it as a CANDIDATE, the user's own answer for that command, still to be verified.
 - `source` lines: follow them; the chain is as long as it is.
@@ -50,14 +50,15 @@ Result of stage 1, shown to the user: a table `command | where it comes from (fi
     command -v spectre; command -v python3                      # what a non-interactive exec resolves: the job's view
     bash -lc "command -v spectre; command -v python3"           # what a login shell's PATH resolves (aliases do not expand here: stage 1 harvested them)
     ls -l <candidate>                                          # exists? a real binary, a symlink or a wrapper script
+    <spectre candidate> -V                                     # its version line (prints and exits, on stderr, no license)
     <python candidate> -c "import sys; print(sys.version)"      # the worker needs Python >= 3.7
     <python candidate> -c "import numpy"                       # optional: the snp tools use it, else the staged numfallback
 
 Reading the results:
 
 - Both `command -v` rows print the same absolute path: that is the command's real path. Pin the path `command -v` printed, as printed; do not "improve" it with `readlink -f` (a wrapper script needs its own location).
-- The rows disagree: typical on a cluster that publishes `python3` as an alias while the non-interactive PATH finds a tool-vendored python first. Both are candidates. Report each with its version (and numpy or not) and let the user choose.
-- A candidate that neither row resolves (an alias target, for instance) is checked by the last two probes alone: it is the path the user chose for their interactive shell.
+- The rows disagree: typical on a cluster that publishes `python3` as an alias while the non-interactive PATH finds a tool-vendored python first. Both are candidates. Report each with its version (and numpy or not) and recommend the cluster's own interpreter over a tool-vendored one (a python vendored inside an EDA install leaves with that tool); the user chooses.
+- A candidate that neither row resolves (an alias target, for instance) is checked by the last three probes alone: it is the path the user chose for their interactive shell.
 - `spectre` is missing from the non-interactive row: its module loads sit behind an interactive guard. An absolute path only helps if spectre also finds the libraries its module sets up (`LD_LIBRARY_PATH` and friends); the self-check in stage 3 is the test that decides.
 
 Result of stage 2: `command | absolute path | version`, plus every disagreement spelled out.
@@ -68,7 +69,7 @@ After the user confirms the paths:
 
     harnessams_selfcheck { action: "run", settings: { remote_python: "<abs path>", remote_spectre_cmd: "<abs path>" } }
 
-The settings payload is a partial merge: only the keys named change, nothing else in the table moves. The self-check then runs the whole pipeline under exactly those two paths (assemble -> batch_submit -> batch_poll -> parse -> verify); when it passes, the pin is proven. Its finalize re-syncs AGENTS.md, whose yaml now carries `remote_python` and `remote_spectre_cmd` as the rows every later session reads.
+The settings payload is a partial merge: only the keys named change, nothing else in the table moves (the pins have no row in that table: this call is their write face, and the AGENTS.md yaml is where they are kept). The self-check then runs the whole pipeline under exactly those two paths (assemble -> batch_submit -> batch_poll -> parse -> verify); when it passes, the pin is proven. Its finalize re-syncs AGENTS.md, whose yaml now carries `remote_python` and `remote_spectre_cmd` as the rows every later session reads.
 
 From then on:
 
@@ -97,10 +98,11 @@ Login and compute nodes normally mount one NFS home, so every node reads the sam
     module load SPECTRE21.1
     alias python3=/opt/GNU/python3.12/bin/python3
 
-What the three stages found on this cluster:
+What the three stages found on this cluster (measured through the plugin's own exec channel on a compute node):
 
-- `spectre`: stage 1, `module load SPECTRE21.1`, unconditional in `~/.bashrc`. Stage 2, `command -v spectre` resolves inside that module for non-interactive commands; that absolute path is the pin.
-- `python3`: stage 1, no export names it, and the alias line is the user's binding (a 3.12 install). Stage 2, the non-interactive row resolves `python3` inside the calibre module's install first (a tool-vendored 3.8, which carries numpy), and the alias target carries no numpy. Two candidates, two versions: both go to the user. The 3.8 is the one the self-check passed with under the bare default.
+- `spectre`: stage 1, `module load SPECTRE21.1`, unconditional in `~/.bashrc`, and its modulefile prepends two absolute `bin/` directories. Stage 2, both `command -v` rows printed the same path in the module's `tools/bin` (a symlink), `-V` answered with a version line; that absolute path is the pin.
+- `python3`: stage 1, no export names it, and the alias line is the user's binding (a 3.12 install). Stage 2, both `command -v` rows resolved `python3` inside the calibre module's install first (a tool-vendored 3.8, which carries numpy), and the alias target carries no numpy. Two candidates, two versions went to the user; the pin is the 3.12, the cluster's own interpreter. Without numpy the worker, the psf parser and the snp tools still run: they are standard-library only, and the snp tools fall back to the staged numfallback. The self-check passed under that pin.
+- Both rows agreeing means the non-interactive exec on this cluster does pick up the `~/.bashrc` module loads. That is a measurement, not a rule: on the next cluster the rows may disagree.
 - `module`: a function, available in every command because `~/.bashrc` re-runs `/etc/profile`.
 
 The skeleton is a pointer, not a template: another cluster's files differ, and the stages, not this listing, decide what gets pinned.

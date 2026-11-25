@@ -42,7 +42,11 @@ test('skills: cluster-setup is harvest, verify, pin: read-only, through ssh_exec
   // pins through the self-check's partial settings write
   for (const needle of ['~/.bashrc', '~/.bash_profile', '/etc/profile.d', 'alias python3=',
     'command -v spectre', 'remote_python', 'remote_spectre_cmd', 'ssh_exec', 'never raw shell ssh',
-    'harnessams_selfcheck { action: "run", settings: { remote_python:']) {
+    'harnessams_selfcheck { action: "run", settings: { remote_python:',
+    // the host is not visible to a model: take it from the user or ask
+    'ask which configured host',
+    // a spectre candidate has a version probe of its own
+    '<spectre candidate> -V']) {
     assert.ok(content.includes(needle), `cluster-setup lost "${needle}"`)
   }
   // probes go through ssh_exec: no raw shell ssh, no host placeholder to guess
