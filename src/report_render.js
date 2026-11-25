@@ -155,7 +155,7 @@ const HEAD = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__ - sweep report</title>
 <script src="__PLOTLY__"></script>
-<script>window.Plotly || document.write('<script src="/harnessams/assets/plotly.min.js"><\\/script>');</script>
+<script>window.Plotly || document.write('<script src="__CDN__"><\\/script>');</script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #f9f9f7; font-family: system-ui, -apple-system, 'Segoe UI', sans-serif; padding: 36px; display: flex; flex-direction: column; align-items: center; }
@@ -559,28 +559,36 @@ if (MANIFEST.rounds.length) { loadRound(MANIFEST.rounds[0].file); }
 </html>
 `
 
-// --- plotly asset resolution (unchanged mechanism from the retired -------
-// sim_analysis.js) ---------------------------------------------------------
+// --- plotly source resolution (D-021: config-driven, session-project ------
+// anchored; the findProjectConfigFrom walk-up is retired) -------------------
 function isFileLoose(p) {
   try { return fs.statSync(p).isFile() } catch { return false }
 }
 
-// Walk upward from the report's PROJECT directory for the single project
-// config (.harnessams/workspace_config.json), at most 8 levels. Corrupt
-// configs are skipped and the walk continues. Only the workspace section
-// matters here (plotly_asset seeding); the PNG export gate is a per-session
-// option read from sessions.json (tools/gen_report.js sessionReportFigs).
-export function findProjectConfigFrom(startDir, maxLevels = 8) {
-  let d = path.resolve(String(startDir ?? '.'))
-  for (let i = 0; i < maxLevels; i++) {
-    const cand = path.join(d, '.harnessams', 'workspace_config.json')
-    if (isFileLoose(cand)) {
-      try {
-        const raw = readJsonBom(cand)
-        const ws = raw?.workspace && typeof raw.workspace === 'object' ? raw.workspace : {}
-        const st = raw?.settings && typeof raw.settings === 'object' ? raw.settings : {}
-        return { workspace: ws, settings: st, root: d }
-      } catch { /* corrupt config keeps the walk going */ }
+// The workspace section's plotly fields at a KNOWN project root (the report
+// tool resolved the session's project — no ancestor walk). Null when the
+// config is missing/unreadable.
+function readPlotlyConfig(configRoot) {
+  if (!configRoot) return null
+  try {
+    const raw = readJsonBom(path.join(configRoot, '.harnessams', 'workspace_config.json'))
+    const ws = raw?.workspace && typeof raw.workspace === 'object' ? raw.workspace : {}
+    const str = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null)
+    return { plotly_url: str(ws.plotly_url), plotly_asset: str(ws.plotly_asset) }
+  } catch { return null }
+}
+
+// The packaged plotly.min.js (the seed source): this module's ancestors —
+// assets/, src/assets/, installed-sibling layouts. A PACKAGE search, not a
+// .harnessams project walk (that one is retired, D-021).
+function packagedPlotly() {
+  let d = path.resolve(import.meta.dirname ?? '.')
+  for (let i = 0; i < 5; i++) {
+    for (const cand of [path.join(d, 'assets', 'plotly.min.js'),
+      path.join(d, 'src', 'assets', 'plotly.min.js'),
+      path.join(d, 'node_modules', 'dsh-harnessams', 'assets', 'plotly.min.js'),
+      path.join(d, 'dsh-harnessams', 'assets', 'plotly.min.js')]) {
+      if (isFileLoose(cand)) return cand
     }
     const parent = path.dirname(d)
     if (parent === d) break
@@ -589,56 +597,58 @@ export function findProjectConfigFrom(startDir, maxLevels = 8) {
   return null
 }
 
-// Project-level shared Plotly copy at <project_root>/assets/plotly.min.js.
-// Seed search: explicit path > project config workspace.plotly_asset > this
-// module's ancestors (assets/, src/assets/, installed-sibling layouts). A
-// missing or size-stale project copy is (re-)seeded; the report references it
-// with a project-relative src. With no local source at all the CDN is the
-// fallback. Returns the src AND the absolute project copy path (or null when
-// CDN) — the PNG exporter needs the local file.
-export function resolvePlotlySrc(forceCdn, outDir, project, plotlyArg) {
-  if (forceCdn) return { src: PLOTLY_CDN, localFile: null }
-  const found = findProjectConfigFrom(project)
-  const root = found?.root ?? path.resolve(String(project ?? '.'))
-  const wsAsset = path.join(root, 'assets', 'plotly.min.js')
-  let seed = plotlyArg || null
-  if (!seed) {
-    const field = found?.workspace?.plotly_asset
-    if (field) seed = path.isAbsolute(field) ? field : path.resolve(root, field)
+// Resolve the report's plotly <script src> (D-021): `outDir` anchors the
+// relative src (the report's own directory — the design folder);
+// `configRoot` is the session project root whose workspace.plotly_url names
+// the source. An http(s) URL is used verbatim (no local file — the PNG
+// exporter skips with its visible reason); a local path — the DEFAULT is the
+// bundled copy seeded into <configRoot>/.harnessams/assets/plotly.min.js,
+// root stays clean — is (for the default target only) copy-if-missing /
+// size-refreshed from the packaged copy and referenced by a relative route
+// (a sibling copy when outDir sits on another drive); a missing configRoot
+// or an unresolvable value falls back to the CDN. The in-page fallback line
+// in HEAD is the CDN too: bundled default first, CDN as the fallback (user
+// ruling, two-step). Returns { src, localFile } — localFile is what the PNG
+// exporter needs.
+export function resolvePlotlySrc(outDir, configRoot) {
+  const cfg = readPlotlyConfig(configRoot)
+  const url = cfg?.plotly_url
+  if (url && /^https?:\/\//i.test(url)) return { src: url, localFile: null }
+  if (!configRoot) return { src: PLOTLY_CDN, localFile: null }
+  const projectCopy = path.join(configRoot, '.harnessams', 'assets', 'plotly.min.js')
+  let target = projectCopy
+  if (url) {
+    const norm = url.replace(/\\/g, '/')
+    target = path.isAbsolute(norm) ? norm : path.resolve(configRoot, norm)
   }
-  if (!seed) {
-    let d = path.resolve(import.meta.dirname ?? '.')
-    for (let i = 0; i < 5; i++) {
-      for (const cand of [path.join(d, 'assets', 'plotly.min.js'),
-        path.join(d, 'src', 'assets', 'plotly.min.js'),
-        path.join(d, 'node_modules', 'dsh-harnessams', 'assets', 'plotly.min.js'),
-        path.join(d, 'dsh-harnessams', 'assets', 'plotly.min.js')]) {
-        if (isFileLoose(cand)) { seed = cand; break }
+  const isDefaultTarget = path.resolve(target) === path.resolve(projectCopy)
+  if (isDefaultTarget) {
+    let seed = null
+    if (cfg?.plotly_asset) {
+      const a = cfg.plotly_asset.replace(/\\/g, '/')
+      seed = path.isAbsolute(a) ? a : path.resolve(configRoot, a)
+    }
+    if (!seed || !isFileLoose(seed)) seed = packagedPlotly()
+    if (seed && isFileLoose(seed)) {
+      if (isFileLoose(target)) {
+        if (fs.statSync(target).size !== fs.statSync(seed).size) {
+          fs.copyFileSync(seed, target) // size mismatch = plotly version bump, refresh
+        }
+      } else {
+        fs.mkdirSync(path.dirname(target), { recursive: true })
+        fs.copyFileSync(seed, target)
       }
-      if (seed) break
-      const parent = path.dirname(d)
-      if (parent === d) break
-      d = parent
     }
   }
-  const seedOk = !!seed && isFileLoose(seed)
-  if (isFileLoose(wsAsset)) {
-    if (seedOk && fs.statSync(wsAsset).size !== fs.statSync(seed).size) {
-      fs.copyFileSync(seed, wsAsset) // size mismatch = plotly version bump, refresh
-    }
-  } else if (seedOk) {
-    fs.mkdirSync(path.dirname(wsAsset), { recursive: true })
-    fs.copyFileSync(seed, wsAsset)
-  } else {
-    return { src: PLOTLY_CDN, localFile: null }
-  }
-  const rel = path.relative(outDir, wsAsset)
+  if (!isFileLoose(target)) return { src: PLOTLY_CDN, localFile: null }
+  const rel = path.relative(outDir, target)
   if (path.isAbsolute(rel)) {
-    // out dir on a different drive than the workspace: no relative route, keep a sibling copy
-    fs.copyFileSync(wsAsset, path.join(outDir, 'plotly.min.js'))
-    return { src: 'plotly.min.js', localFile: path.join(outDir, 'plotly.min.js') }
+    // out dir on a different drive than the target: no relative route, keep a sibling copy
+    const sibling = path.join(outDir, 'plotly.min.js')
+    fs.copyFileSync(target, sibling)
+    return { src: 'plotly.min.js', localFile: sibling }
   }
-  return { src: rel.replace(/\\/g, '/'), localFile: wsAsset }
+  return { src: rel.replace(/\\/g, '/'), localFile: target }
 }
 
 // Natural-order comparison (numeric chunks compare as numbers, so Sim10 sorts
@@ -658,16 +668,20 @@ function naturalCompare(a, b) {
 }
 
 // --- report assembly --------------------------------------------------------
-// D-006 layout: report HTML at the PROJECT ROOT (outName defaults to
-// <project>_report.html), its data JS at <project>/SimResults/<report base
-// name>/<round id>.js. The data directory is PER REPORT, named after the HTML
-// file: two reports of one project used to share SimResults/<round id>.js, so
-// the later report silently replaced the earlier one's numbers (the session
-// dashboard could list both, but both rendered the newest one's data).
+// D-006 layout inside the DESIGN FOLDER (D-021, 2026-11-25: projectDir is the
+// design folder — the project root holds only .harnessams, AGENTS.md, and the
+// design folders): report HTML at <design>/ (outName defaults to
+// <design>_report.html), its data JS at <design>/SimResults/<report base
+// name>/<round id>.js, PNGs in <design>/Figs/. The data directory is PER
+// REPORT, named after the HTML file: two reports of one design used to share
+// SimResults/<round id>.js, so the later report silently replaced the earlier
+// one's numbers (the session dashboard could list both, but both rendered the
+// newest one's data). `configRoot` (the session project root) drives the
+// plotly source; without one the CDN fallback applies.
 // prepared = { title, metaLine?, conclusions?, outName?, rounds: [roundData] }
 // where each roundData already carries .charts specs. Returns { reportPath,
 // dataDir, entries, plotlyLocal }.
-export function genReportFromSpec(projectDir, prepared) {
+export function genReportFromSpec(projectDir, prepared, { configRoot } = {}) {
   const project = path.resolve(projectDir)
   const projectName = path.basename(project.replace(/[\\/]+$/, ''))
   const reportFile = prepared.outName || `${projectName}_report.html`
@@ -687,7 +701,7 @@ export function genReportFromSpec(projectDir, prepared) {
   const roundsJs = entries.map((e) => (
     `{id:${inlineJson(e.id)},title:${inlineJson(e.title)},file:${inlineJson(e.file)},n_points:${e.n_points}}`
   )).join(',')
-  const plotly = resolvePlotlySrc(false, project, project, null)
+  const plotly = resolvePlotlySrc(project, configRoot)
   const now = new Date()
   const pad = (n) => String(n).padStart(2, '0')
   const nowStamp = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} `
@@ -696,6 +710,7 @@ export function genReportFromSpec(projectDir, prepared) {
   let html = HEAD
     .replaceAll('__TITLE__', htmlEscape(title))
     .replaceAll('__PLOTLY__', plotly.src)
+    .replaceAll('__CDN__', PLOTLY_CDN)
     .replaceAll('__NOW__', nowStamp)
     .replaceAll('__META__', prepared.metaLine ? ' | ' + htmlEscape(prepared.metaLine) : '')
     .replaceAll('__CONCLUSIONS__', concl

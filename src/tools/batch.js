@@ -24,7 +24,9 @@ import { readJsonIfExists, resolveDir } from '../py.js'
 import { callTool, downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
 import { execLocal, localCopy } from '../localchannel.js'
 import { readRunProgress, totalFromConfig } from '../progress_files.js'
-import { findProjectRoot, normalizePin, readSettingsFor } from '../server/settings.js'
+import { normalizePin } from '../server/settings.js'
+import { overlaySettingsAt } from '../server/reconcile.js'
+import { resolveProjectTool } from '../server/project.js'
 import {
   DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildSshCommand, buildSubmitCommand,
   classifyBjobsState, collectRunFiles,
@@ -44,16 +46,16 @@ const WAIT_GAP_MS = 10_000
 
 // The session-level scan-size ceiling (D-019): the calling session's
 // "Max points per scan" field, defaulting to 100. Fail-open — a missing
-// session entry or an unreadable store never blocks a submit.
+// session entry or an unreadable store never blocks a submit. `projectPath`
+// is the session-resolved project root (D-021: no walk-up from run_dir).
 const DEFAULT_MAX_POINTS_PER_SCAN = 100
 
-async function maxPointsPerScan(runDir, sessionId) {
+async function maxPointsPerScan(projectPath, sessionId) {
   try {
     if (!sessionId) return DEFAULT_MAX_POINTS_PER_SCAN
-    const root = findProjectRoot(runDir)
-    if (!root) return DEFAULT_MAX_POINTS_PER_SCAN
+    if (!projectPath) return DEFAULT_MAX_POINTS_PER_SCAN
     const { readSessionConfigs } = await import('../server/project.js')
-    const store = await readSessionConfigs(root)
+    const store = await readSessionConfigs(projectPath)
     const v = store.sessions?.[sessionId]?.max_points_per_scan
     return Number.isInteger(v) && v > 0 ? v : DEFAULT_MAX_POINTS_PER_SCAN
   } catch {
@@ -100,13 +102,13 @@ function underRoot(root, candidate) {
 // terminates by itself. The same toolchain pins as the remote schedulers
 // (D-016) apply here: the pinned interpreter spawns the worker, the pinned
 // spectre rides as --spectre-cmd for the bundled worker.
-async function submitLocal(args, runDir, settings) {
+async function submitLocal(args, runDir, settings, projectPath) {
   const rawWorker = String(args.worker)
   if (rawWorker.startsWith('/') || /^[A-Za-z]:[\\/]/.test(rawWorker)) {
     throw new Error('scheduler=local needs a scripts-root-relative worker (e.g. "spectre/spectre_sweep_worker.py"), not an absolute path')
   }
   const rel = sanitizeRel(rawWorker)
-  const workerAbs = path.join(submitScriptsRoot(args.sim_scripts_dir, runDir), ...rel.split('/'))
+  const workerAbs = path.join(submitScriptsRoot(args.sim_scripts_dir, projectPath), ...rel.split('/'))
   if (!fs.existsSync(workerAbs)) {
     throw new Error(`worker script not found under the project sim_scripts_dir: ${rel} `
       + '(set workspace.sim_scripts_dir in the project\'s .harnessams/workspace_config.json '
@@ -238,7 +240,7 @@ export function batchTools(ctx) {
       name: 'batch_submit',
       description: 'Submit a batch through the suite\'s worker scripts under one of three schedulers, with '
         + 'semantics set by the project\'s working environment (read the cluster_env row of the project\'s AGENTS.md '
-        + 'config block — .harnessams/ is plugin storage, do not read it). scheduler="local" runs the worker on THIS host detached and returns '
+        + 'config block). scheduler="local" runs the worker on THIS host detached and returns '
         + 'immediately — poll with batch_poll (in-cluster only; an out-of-cluster host cannot run it). '
         + 'scheduler="lsf" (default) runs it under bsub: in-cluster bsub runs right on this host and the run '
         + 'directory stages as a local copy on the shared filesystem; out-of-cluster the directory and the worker '
@@ -249,12 +251,14 @@ export function batchTools(ctx) {
         + '"spectre/spectre_sweep_worker.py") or absolute on the target; worker_args are passed through. Writes '
         + '.batch_job.json in the run directory for batch_poll. Rejects a scan whose total point count (from '
         + 'sweep_config.json) exceeds the calling session\'s Max points per scan field (default 100) — split the '
-        + 'grid into multiple batches instead.',
+        + 'grid into multiple batches instead. The project config resolves from the calling session\'s workspace '
+        + 'with the AGENTS.md yaml block overlaid (D-021: hand-edits of that block take effect immediately at '
+        + 'this read; an invalid row keeps the stored value and warns in the result).',
       parameters: {
-        run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json)' },
+        run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json) — by convention inside the design folder, e.g. <project>/<design>/run1' },
         remote_dir: { type: 'string', description: 'Remote batch directory: absolute, or relative to remote_root. '
           + 'Omit to auto-generate the next Sim<N>_<YYYYMMDD>_batch<M> directory under <remote_root>/RawResults '
-          + '(the D-006 raw-simulation-data convention; mirror the same name locally under <project>/RawResults). '
+          + '(the D-006 raw-simulation-data convention; mirror the same name locally under <design>/RawResults). '
           + 'Unused for scheduler="local"' },
         remote_root: { type: 'string', description: 'Absolute run root that fences remote_dir — a shared-filesystem '
           + 'path in-cluster, the ssh host\'s path out-of-cluster. Omit to use the project\'s configured remote_root '
@@ -269,8 +273,8 @@ export function batchTools(ctx) {
           + 'applies (the AGENTS.md yaml row; null = bare python3). An explicit value must be an ABSOLUTE path — bare names are rejected, '
           + 'they resolve to whichever tool python comes first on PATH (the cluster-setup skill harvests and verifies real paths)' },
         remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remote_root>/.harnessams/scripts)' },
-        sim_scripts_dir: { type: 'string', description: 'Worker scripts root: an existing directory IS the root (override); any other value only anchors the '
-          + 'project walk-up (default: the project\'s workspace_config.json workspace.sim_scripts_dir, found by walking up from run_dir)' },
+        sim_scripts_dir: { type: 'string', description: 'Worker scripts root: an existing directory IS the root (override); any other value is ignored — '
+          + 'the session project\'s workspace.sim_scripts_dir applies (D-021: resolved from the calling session, not from run_dir)' },
         files: { type: 'array', items: { type: 'string' }, description: 'Run-dir files to upload (default: top-level regular files)' },
         queue: { type: 'string', description: 'LSF queue (default normal)' },
         scheduler: { type: 'string', enum: ['lsf', 'ssh', 'local'],
@@ -287,16 +291,27 @@ export function batchTools(ctx) {
         no_pre_check: { type: 'boolean', description: 'Skip the built-in spectre netlist pre-check (the SmartAnaSim spectre_pre_check '
           + 'tool that runs automatically before anything is staged). Pass true ONLY after reviewing a failed pre-check report — the '
           + 'waiver exists for consciously accepted netlist quirks, not for unexamined errors' },
+        project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
+        // D-021 project anchoring: the calling session (or an explicit `project`
+        // argument) — NOT a path walk-up from run_dir — decides which project's
+        // config this submission resolves. The AGENTS.md yaml block overlays at
+        // this READ (reconcile at read AND write, user ruling 2026-11-25): a
+        // hand-edited row takes effect immediately; an invalid row keeps the
+        // json value and surfaces as a warning riding the result.
+        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        const p = resolveProjectTool(ctx.workspaceRegistry, sid, args.project)
+        if (p.error) throw new Error(p.error)
+        const projectPath = p.project.path
+        const { settings, warnings: overlayWarnings } = overlaySettingsAt(projectPath)
         // Session scan-size gate (D-019): reads sweep_config.json and rejects
         // an oversized grid before anything is staged or uploaded. Splits the
         // scan into multiple Sim batches instead of one mega-run.
         const totalScanPoints = totalFromConfig(runDir)
         if (totalScanPoints > 0) {
-          const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
-          const limit = await maxPointsPerScan(runDir, sid)
+          const limit = await maxPointsPerScan(projectPath, sid)
           if (totalScanPoints > limit) {
             throw new Error(`scan exceeds the session's max points per scan: ${totalScanPoints} > ${limit}`
               + ' — split the parameter grid into multiple batches (auto Sim naming)'
@@ -309,14 +324,13 @@ export function batchTools(ctx) {
         // this path needs no local python). Fail-closed on errors (fix the
         // netlist, or consciously re-submit with no_pre_check: true), fail-open
         // when the tool is not registered, warnings ride along into the result.
-        const preCheckWarnings = []
+        const preCheckWarnings = [...overlayWarnings]
         if (args.no_pre_check !== true) {
           if (!ctx.tools?.get?.('spectre_pre_check')) {
             preCheckWarnings.push('spectre_pre_check is not registered — netlist content checks skipped '
               + '(install/enable the SmartAnaSim plugin)')
           } else {
             const preArgs = { run_dir: args.run_dir }
-            const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
             if (sid) preArgs.session_id = sid
             const pre = await callTool(ctx, 'spectre_pre_check', preArgs, { timeoutMs: 30_000 })
             if (pre.isError || pre.value?.ok === false) {
@@ -334,14 +348,13 @@ export function batchTools(ctx) {
         // bsub runs on THIS host (the official ctx.shell seam) and "transfers"
         // are local copies on the shared filesystem — scheduler=ssh still
         // executes over ssh, on any other node.
-        const settings = readSettingsFor(runDir)
         const inCluster = settings.cluster_env === 'in-cluster'
         if (scheduler === 'local') {
           if (!inCluster) {
             throw new Error('scheduler=local requires cluster_env=in-cluster (an out-of-cluster host cannot run '
               + 'the worker — use scheduler="ssh" or "lsf")')
           }
-          const local = await submitLocal(args, runDir, settings)
+          const local = await submitLocal(args, runDir, settings, projectPath)
           local.warnings = [...preCheckWarnings, ...(local.warnings || [])]
           return local
         }
@@ -442,7 +455,7 @@ export function batchTools(ctx) {
           collectRunFiles(runDir, args.files), sweepConfig)
 
         if (syncScripts) {
-          const scriptsRootLocal = submitScriptsRoot(args.sim_scripts_dir, runDir)
+          const scriptsRootLocal = submitScriptsRoot(args.sim_scripts_dir, projectPath)
           for (const script of pluginScripts(scriptsRootLocal)) {
             const remote = remoteJoin(scriptsRoot, script.rel)
             const up = await channel.upload(script.local, remote)
@@ -601,12 +614,22 @@ export function batchTools(ctx) {
         + '(point_meta.json count, sweep_progress.json summary, errlog tail) and a per-point digest (index/name/'
         + 'status/params). On a terminal state it auto-fetches the light result files (sweep_progress.json, '
         + 'errlog.txt) straight into the run directory — no includes, no archive; raw psf/sp data stays on the '
-        + 'executing side by design (analyze it there and pull back compact results). The machine, directory and '
+        + 'executing side by design. The machine, directory and '
         + 'job id default to <run_dir>/.batch_job.json. A local submission (scheduler="local") is polled from the '
         + 'run directory\'s own files, no ssh involved — a worker that died reads as failed and carries its stderr '
         + 'tail. An in-cluster LSF submission polls locally (bjobs on this host); everything else polls over ssh. '
         + 'Pass wait_sec for a bounded blocking wait — the in-flight call is the '
-        + 'window where the session progress card live-updates.',
+        + 'window where the session progress card live-updates. Polling discipline (D-021, moved here from the '
+        + 'AGENTS.md workflow table): poll, never blind-sleep — re-check after each bounded wait, back off '
+        + '10 s -> 20 s -> 40 s with the ETA computed from completed over total; while a progress card is up, '
+        + 'refresh it at least every 5 s. Analysis recipe after a terminal state (raw data stays where it '
+        + 'executed): in-cluster run the parsers on the host that holds the data (shared filesystem) with the '
+        + 'interpreter named by the remote_python row of the project\'s AGENTS.md yaml (null = the bare default '
+        + 'the self-check verified — python for the in-cluster local chain, python3 otherwise) — '
+        + '<workspace_root>/.harnessams/scripts/spectre/spectre_psf_parse.py --work-dir <run dir> --format csv, '
+        + 'the snp tools for S-parameters; out-of-cluster go remote-first — the parsers are already staged under '
+        + '<remote_root>/.harnessams/scripts, ssh_exec them with the same interpreter rule (never bare python, '
+        + 'it is 2.x on many hosts) and ssh_download only the compact JSON into <design>/SimResults/.',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory holding .batch_job.json' },
         machine_id: { type: 'string', description: 'Override the dsh-ssh host alias from the job file' },
@@ -617,9 +640,18 @@ export function batchTools(ctx) {
         wait_sec: { type: 'integer', description: 'Bounded blocking wait: re-poll (~10 s apart) until a terminal state '
           + '(completed/failed/partial) or this many seconds elapse (capped at 600), then return the last payload. '
           + 'Default 0 = single snapshot, the original contract' },
+        project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
+        // D-021 anchoring: the calling session's project (or an explicit
+        // `project` argument) — no walk-up from run_dir. The AGENTS.md yaml
+        // overlay applies to the cluster_env fallback below; invalid rows keep
+        // the json value and warn into the result.
+        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        const p = resolveProjectTool(ctx.workspaceRegistry, sid, args.project)
+        if (p.error) throw new Error(p.error)
+        const { settings, warnings: overlayWarnings } = overlaySettingsAt(p.project.path)
         const job = readJob(runDir)
         const jobId = args.job_id || job?.job_id
         if (!jobId) throw new Error('no job id: pass job_id or run batch_submit first')
@@ -652,14 +684,15 @@ export function batchTools(ctx) {
             fetched: [], // nothing to pull: everything already lives in the run directory
             // ... and say so: an empty list reads as "no result files" otherwise
             fetched_note: 'scheduler=local: no transfer — the result files already live in run_dir',
+            ...(overlayWarnings.length ? { warnings: overlayWarnings } : {}),
             ...frame,
           }
         }
         // Remote-side channel mirrors the submit matrix: an in-cluster LSF job
         // (no machine in the job file) polls locally — bjobs and the progress
         // files live on this host's shared filesystem; everything else polls
-        // over ssh on the job's machine.
-        const settings = readSettingsFor(runDir)
+        // over ssh on the job's machine. cluster_env falls back to the
+        // session-project settings (AGENTS.md-overlaid, D-021).
         const inCluster = (job?.cluster_env ?? settings.cluster_env) === 'in-cluster'
         const sshExec = scheduler === 'ssh' || !inCluster
         let target
@@ -725,6 +758,7 @@ export function batchTools(ctx) {
           ...parsed,
           fetched,
           output: (stdout || '').trim().slice(0, 1500),
+          ...(overlayWarnings.length ? { warnings: overlayWarnings } : {}),
         }
       },
     },

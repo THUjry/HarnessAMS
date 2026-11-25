@@ -23,15 +23,16 @@
 // and its shared modules resolve remotely.
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveWorkspacePaths } from './server/settings.js'
+import { resolveWorkspacePathsAt } from './server/settings.js'
 import { shq } from './remote.js'
 
-// Worker scripts root (see the header comment). `anchor` is any path inside
-// the project (a run directory); the project root is the nearest ancestor with
-// a .harnessams store. Throws with guidance when no usable root exists — a
-// wrong root would upload a partial tree whose remote imports break, so
-// failing early beats a confusing remote traceback.
-export function simScriptsDir(anchor = process.cwd()) {
+// Worker scripts root (see the header comment). `projectRoot` is the
+// session-resolved project root (D-021: no ancestor walk-up from a run
+// directory — the caller anchored the project through resolveProjectTool).
+// Throws with guidance when no usable root exists — a wrong root would upload
+// a partial tree whose remote imports break, so failing early beats a
+// confusing remote traceback.
+export function simScriptsDir(projectRoot = process.cwd()) {
   const override = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
   if (override) {
     const abs = path.resolve(override)
@@ -40,7 +41,7 @@ export function simScriptsDir(anchor = process.cwd()) {
     }
     return abs
   }
-  const { sim_scripts_dir: dir } = resolveWorkspacePaths(anchor)
+  const { sim_scripts_dir: dir } = resolveWorkspacePathsAt(projectRoot)
   if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) return path.resolve(dir)
   throw new Error(`no worker scripts root: ${dir} does not exist — fix the worker scripts root in the `
     + 'project settings table (the Overview settings UI or the harnessams_selfcheck settings argument) '
@@ -88,19 +89,18 @@ export function pluginAssets(root = simScriptsDir()) {
 // Worker scripts root for one submit call. The tool's `sim_scripts_dir`
 // argument is the documented root OVERRIDE: when it names an existing
 // directory, that directory IS the root (a custom worker tree, a test
-// fixture). Anything else — a missing path, a file — is only an ANCHOR for the
-// project walk-up, the pre-override meaning kept so a run directory outside
-// the project tree still resolves its project config. (2026-11-23: the local
+// fixture). Any other value is ignored (D-021: no walk-up — the session
+// project's workspace.sim_scripts_dir applies). (2026-11-23: the local
 // scheduler handed a custom root silently started the stock worker instead.)
-export function submitScriptsRoot(simScriptsDirArg, runDir) {
+export function submitScriptsRoot(simScriptsDirArg, projectRoot) {
   const given = typeof simScriptsDirArg === 'string' ? simScriptsDirArg.trim() : ''
   if (given) {
     const abs = path.resolve(given)
     try {
       if (fs.statSync(abs).isDirectory()) return abs
-    } catch { /* not an existing directory: fall through to the anchor meaning */ }
+    } catch { /* not an existing directory: fall through to the project default */ }
   }
-  return simScriptsDir(runDir)
+  return simScriptsDir(projectRoot)
 }
 
 export function remoteJoin(...parts) {

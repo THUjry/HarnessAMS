@@ -6,16 +6,16 @@
 // (an earlier trash layout still found in some workspaces) restore as-is.
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveWorkspacePaths } from './server/settings.js'
+import { resolveWorkspacePathsAt } from './server/settings.js'
+import { resolveProjectTool } from './server/project.js'
 
 // Trash root: the owning project's workspace_config.json workspace.trash_dir
-// (default .harnessams/trash under the project root). `anchor` is any path
-// inside the project — for a trash action that is the target itself; without
-// one the nearest ancestor store of the process cwd decides (list/restore/purge
-// operate inside the trash root, so the anchor only picks WHICH project's
-// trash; .harnessams/trash under that root).
-export function trashDir(anchor) {
-  return resolveWorkspacePaths(anchor ?? process.cwd()).trash_dir
+// (default .harnessams/trash under the project root). `projectRoot` is the
+// SESSION-RESOLVED project root (D-021: no ancestor walk-up — the safe_trash
+// tool resolves the project from the calling session or an explicit `project`
+// argument, and the target path itself no longer picks the project).
+export function trashDir(projectRoot) {
+  return resolveWorkspacePathsAt(projectRoot ?? process.cwd()).trash_dir
 }
 
 function nowStamp() {
@@ -175,8 +175,11 @@ export function purgeEntry(name, opts = {}) {
   return `purged ${name}`
 }
 
-// Model-facing safe_trash tool (the definition lives beside the mechanics it routes to).
-export function safeTrashTool() {
+// Model-facing safe_trash tool (the definition lives beside the mechanics it
+// routes to). D-021: the project comes from the calling session (or an
+// explicit `project` argument) — the target path itself no longer anchors the
+// trash root through a walk-up.
+export function safeTrashTool(ctx) {
   return {
     name: 'safe_trash',
     description: 'Project trash (safety by default): move paths into the owning project\'s '
@@ -188,24 +191,28 @@ export function safeTrashTool() {
         description: 'trash | list | restore | purge' },
       path: { type: 'string', description: 'trash: path to move; restore/purge: trash entry name (from list)' },
       dest: { type: 'string', description: 'restore destination directory' },
+      project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
     },
-    async execute(args) {
+    async execute(args, exec) {
+      const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+      const p = resolveProjectTool(ctx?.workspaceRegistry, sid, args.project)
+      if (p.error) return { ok: false, error: p.error }
+      const opts = { trashDir: trashDir(p.project.path) }
       if (args.action === 'list') {
-        const entries = listTrash()
+        const entries = listTrash(opts)
         return { ok: true, entries, output: JSON.stringify(entries, null, 2) }
       }
       if (args.action === 'restore') {
         if (!args.path) return { ok: false, error: 'restore requires path=<trash entry name from list>' }
-        return { ok: true, output: restoreEntry(String(args.path), args.dest ? String(args.dest) : '.') }
+        return { ok: true, output: restoreEntry(String(args.path), args.dest ? String(args.dest) : '.', opts) }
       }
       if (args.action === 'purge') {
         if (!args.path) return { ok: false, error: 'purge requires path=<trash entry name from list>' }
-        return { ok: true, output: purgeEntry(String(args.path)) }
+        return { ok: true, output: purgeEntry(String(args.path), opts) }
       }
       if (args.action === 'trash') {
         if (!args.path) return { ok: false, error: 'trash requires path=<file or directory>' }
-        // anchor the trash root at the target's project (nearest .harnessams)
-        return { ok: true, output: trashPaths([String(args.path)], { anchor: String(args.path) }).join('\n') }
+        return { ok: true, output: trashPaths([String(args.path)], opts).join('\n') }
       }
       return { ok: false, error: `unknown action: ${args.action}` }
     },

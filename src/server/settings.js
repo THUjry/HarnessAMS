@@ -2,18 +2,25 @@
 // <workspace>/.harnessams/workspace_config.json. It replaces both the retired
 // project_settings.json and the retired family harnessams.json, and carries two
 // sections:
-//   workspace — install/env facts (worker scripts root, plotly seed, trash dir).
-//     Not a UI surface: laid down once with resolved defaults at file creation
-//     and hand-edited only; every key still has a runtime default so a missing
-//     or partial section fails open.
+//   workspace — install/env facts (worker scripts root, plotly seed + url,
+//     trash dir). Not a UI surface: laid down once with resolved defaults at
+//     file creation and hand-edited only; every key still has a runtime
+//     default so a missing or partial section fails open.
 //   settings  — the run settings the Overview table stages + confirms through
 //     the harnessams_selfcheck tool (working environment / mode / machine /
 //     remote_root / selfcheck_remote_dir / scheduler / simulator / compute
 //     scripts / the cluster toolchain pins remote_python + remote_spectre_cmd,
-//     D-016).
+//     D-016) plus the MEASURED python facts: local_python_version/_path and
+//     the local_python_numpy / remote_python_numpy tri-states (yes / no /
+//     fallback — D-021 wave, 2026-11-25). The facts are null until a green
+//     self-check measures them; global-store memory prefills fresh projects.
 //     The remote root now lives HERE
 //     (settings.remote_root), not in a family map — the project is the single
 //     authority, so UI / config file / AGENTS.md can never disagree.
+// Project anchoring (D-021): there is NO findProjectRoot walk-up anymore —
+// every consumer resolves the project from the calling SESSION (or an explicit
+// project argument) and reads this file at that root; resolveWorkspacePathsAt
+// resolves the workspace section's relative keys against a GIVEN root.
 // Per-session check params are NOT here (D-005: sessions.json carries the
 // confirmed table; checkparams.js reads the project fallback file).
 import fs from 'node:fs'
@@ -21,7 +28,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
 import { ensureProjectScripts } from './scriptStage.js'
-import { getNodePins } from './globalstore.js'
+import { getNodePins, getLocalFacts } from './globalstore.js'
 
 const PKG_ROOT = path.resolve(import.meta.dirname ?? '.', '..') // src/
 const STORE_DIR = '.harnessams'
@@ -34,6 +41,34 @@ const ENUMS = {
   simulator: ['spectre', 'none'],
   compute_script_local: ['python', 'js'],
   compute_script_remote: ['python', 'js'],
+  local_python_numpy: ['yes', 'no', 'fallback'],
+  remote_python_numpy: ['yes', 'no', 'fallback'],
+}
+
+// The numpy tri-state fields and their legal values (D-021): "yes" the
+// interpreter imports numpy natively; "fallback" it does not but the staged
+// numfallback asset imports (the pure-stdlib shim); "no" neither works (a
+// python 2 shell where even the fallback has py3 syntax). null = unmeasured.
+export const NUMPY_KEYS = ['local_python_numpy', 'remote_python_numpy']
+export const NUMPY_STATES = ENUMS.local_python_numpy
+
+// Every MEASURED python-fact settings key (loose validation — these are facts,
+// not configurable knobs; the AGENTS.md reconcile map validates them the same
+// way, but with Windows-legal paths rather than the POSIX pin rules).
+export const PY_FACT_KEYS = ['local_python_version', 'local_python_path', ...NUMPY_KEYS]
+
+// Stricter shared helper for the loose string facts (also used by the
+// AGENTS.md reconcile): non-empty trimmed string, <=400 chars, no control
+// characters; null/'' → null.
+function normalizeLooseFact(value, key) {
+  if (value == null || value === '') return { value: null, error: null }
+  if (typeof value !== 'string' || !value.trim()) {
+    return { value: null, error: `${key} must be a non-empty string or null` }
+  }
+  const norm = value.trim()
+  if (norm.length > 400) return { value: null, error: `${key} too long (max 400 chars)` }
+  if (/[\u0000-\u001F]/.test(norm)) return { value: null, error: `${key} must not contain control characters (it renders into the AGENTS.md yaml)` }
+  return { value: norm, error: null }
 }
 
 export function defaultSettings() {
@@ -55,6 +90,15 @@ export function defaultSettings() {
     // defaults apply (python3 / spectre on PATH)
     remote_python: null,
     remote_spectre_cmd: null,
+    // MEASURED python facts (D-021, 2026-11-25): local_* describe THIS host's
+    // bare `python` (probed at self-check finalize, remembered plugin-globally
+    // so a fresh project prefills); remote_python_numpy describes the
+    // interpreter the worker ran under (worker telemetry on a green run). null
+    // = not measured yet; the numpy fields are the yes/no/fallback tri-state.
+    local_python_version: null,
+    local_python_path: null,
+    local_python_numpy: null,
+    remote_python_numpy: null,
   }
 }
 
@@ -80,11 +124,12 @@ function defaultSimScriptsDir() {
 // Source root for the one-time project script staging (scriptStage.js):
 // HARNESSAMS_SIM_SCRIPTS_DIR -> the configured sim_scripts_dir (pre-flip —
 // the dev sibling for a fresh project) -> the dev-sibling default. Resolution
-// only; existence is the stager's problem (it fails open).
+// only; existence is the stager's problem (it fails open). `workspacePath` IS
+// the project root (no walk-up since D-021).
 export function resolveScriptsSource(workspacePath) {
   const env = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
   if (env) return path.resolve(env)
-  return resolveWorkspacePaths(workspacePath).sim_scripts_dir
+  return resolveWorkspacePathsAt(workspacePath).sim_scripts_dir
 }
 
 export function defaultWorkspaceSection() {
@@ -93,28 +138,20 @@ export function defaultWorkspaceSection() {
     // the shipped copy inside this package — in an installed layout that IS the
     // ~/.dsh node_modules location
     plotly_asset: path.join(PKG_ROOT, 'assets', 'plotly.min.js'),
+    // the report's plotly <script src> source (D-021): a project-relative or
+    // absolute LOCAL path (the default is the bundled plotly.min.js seeded
+    // into <project>/.harnessams/assets — offline-capable, root stays clean),
+    // or an http(s) URL (used verbatim; then no local file and PNG export
+    // skips). An unresolvable value falls back to the CDN at render time.
+    plotly_url: '.harnessams/assets/plotly.min.js',
     trash_dir: '.harnessams/trash',
   }
 }
 
-// ---- file location + project-root discovery ---------------------------------
+// ---- file location -----------------------------------------------------------
 
 export function configPath(workspacePath) {
   return path.join(workspacePath, STORE_DIR, CONFIG_FILE)
-}
-
-// Nearest ancestor directory that has a .harnessams store — the project root
-// anchor for cwd-less consumers (trash, worker scripts). ≤8 levels, like the
-// python twin's walkers.
-export function findProjectRoot(startDir) {
-  let d = path.resolve(String(startDir ?? process.cwd()))
-  for (let i = 0; i < 8; i++) {
-    try { if (fs.statSync(path.join(d, STORE_DIR)).isDirectory()) return d } catch { /* keep walking */ }
-    const parent = path.dirname(d)
-    if (parent === d) return null
-    d = parent
-  }
-  return null
 }
 
 // ---- read/normalize ----------------------------------------------------------
@@ -146,6 +183,9 @@ function parseConfig(raw) {
         // an invalid stored pin (hand-edited) reads as unpinned — the same
         // fail-open every other key gets
         settings[k] = normalizePin(v, k).value
+      } else if (k === 'local_python_version' || k === 'local_python_path') {
+        // measured facts: same fail-open (invalid reads as unmeasured)
+        settings[k] = normalizeLooseFact(v, k).value
       } else if (ENUMS[k] && ENUMS[k].includes(v)) {
         settings[k] = v
       }
@@ -189,12 +229,12 @@ export async function readSettings(workspacePath) {
   return { settings: config.settings }
 }
 
-// Settings for an ANCHOR path inside the project (the batch tools' run_dir):
-// the project root is the nearest ancestor with a .harnessams store; no store
-// or a corrupt file = the defaults (out-of-cluster, the conservative channel).
-// Sync — the batch submit/poll call sites are synchronous setup.
-export function readSettingsFor(anchor = process.cwd()) {
-  const base = findProjectRoot(anchor) ?? path.resolve(String(anchor ?? '.'))
+// Settings at a KNOWN project root, synchronously (the batch tools' setup is
+// synchronous). No walk-up (D-021): the caller resolved the project from the
+// calling session (or an explicit project argument). A missing or corrupt file
+// = the defaults (out-of-cluster, the conservative channel).
+export function readSettingsAt(projectRoot) {
+  const base = path.resolve(String(projectRoot ?? '.'))
   try {
     return readConfigSync(base).config.settings
   } catch {
@@ -202,13 +242,14 @@ export function readSettingsFor(anchor = process.cwd()) {
   }
 }
 
-// Resolve the workspace section's path keys against the project root (relative
-// values like ".harnessams/trash" are project-relative by design). The root is
-// the nearest ancestor of `anchor` holding a .harnessams store; with no store
-// found the section defaults apply, anchored at `anchor` itself. Sync — the
-// consumers (batch/trash) are synchronous call sites.
-export function resolveWorkspacePaths(anchor = process.cwd()) {
-  const base = findProjectRoot(anchor) ?? path.resolve(String(anchor ?? '.'))
+// Resolve the workspace section's path keys against a GIVEN project root
+// (relative values like ".harnessams/trash" are project-relative by design —
+// the caller passes the session-resolved project root; no ancestor walk).
+// plotly_url is passed through unresolved — its classification (URL vs local
+// path) is the report renderer's business. Sync — the consumers (batch/trash)
+// are synchronous call sites.
+export function resolveWorkspacePathsAt(projectRoot) {
+  const base = path.resolve(String(projectRoot ?? '.'))
   let ws = defaultWorkspaceSection()
   try {
     const { config } = readConfigSync(base)
@@ -218,6 +259,7 @@ export function resolveWorkspacePaths(anchor = process.cwd()) {
     root: base,
     sim_scripts_dir: path.isAbsolute(ws.sim_scripts_dir) ? ws.sim_scripts_dir : path.resolve(base, ws.sim_scripts_dir),
     plotly_asset: path.isAbsolute(ws.plotly_asset) ? ws.plotly_asset : path.resolve(base, ws.plotly_asset),
+    plotly_url: typeof ws.plotly_url === 'string' ? ws.plotly_url : '',
     trash_dir: path.isAbsolute(ws.trash_dir) ? ws.trash_dir : path.resolve(base, ws.trash_dir),
   }
 }
@@ -258,45 +300,69 @@ export function normalizePin(value, key) {
 
 // ---- validate + write --------------------------------------------------------
 
+// Context-free per-key validation for ONE value (D-021, 2026-11-25): the
+// single authority validateSettings loops over, and the AGENTS.md reconcile
+// (reconcile.js) reuses to validate one hand-edited yaml row before adopting
+// it. Nullable keys accept null/'' → { value: null }; NO cross-key coupling —
+// the whole-object validateSettings call owns the coupling rules, so the
+// reconcile can adopt a pair of rows that only make sense together.
+export function validateSettingValue(key, value) {
+  if (key === 'machine_id') {
+    if (value == null || value === '') return { value: null, error: null }
+    if (typeof value !== 'string' || !value.trim()) {
+      return { value: null, error: 'machine_id must be a non-empty string or null' }
+    }
+    return { value: value.trim().slice(0, 120), error: null }
+  }
+  if (key === 'remote_root') {
+    if (value == null || value === '') return { value: null, error: null }
+    if (typeof value !== 'string' || !value.trim()) {
+      return { value: null, error: 'remote_root must be a non-empty string or null' }
+    }
+    const norm = value.trim().replace(/\\/g, '/')
+    if (!norm.startsWith('/')) return { value: null, error: 'remote_root must be an absolute remote path (starts with "/")' }
+    if (norm.length > 400) return { value: null, error: 'remote_root too long (max 400 chars)' }
+    if (norm.split('/').includes('..')) return { value: null, error: 'remote_root must not contain ".."' }
+    return { value: norm.replace(/\/+$/, '') || '/', error: null }
+  }
+  if (key === 'selfcheck_remote_dir') {
+    if (typeof value !== 'string' || !value.trim()) {
+      return { value: null, error: 'selfcheck_remote_dir is required (a path relative to remote_root, or absolute)' }
+    }
+    const norm = value.trim().replace(/\\/g, '/')
+    if (norm.length > 400) return { value: null, error: 'selfcheck_remote_dir too long (max 400 chars)' }
+    if (norm.split('/').includes('..')) return { value: null, error: 'selfcheck_remote_dir must not contain ".."' }
+    return { value: norm, error: null }
+  }
+  if (PIN_KEYS.includes(key)) return normalizePin(value, key)
+  if (key === 'local_python_version' || key === 'local_python_path') return normalizeLooseFact(value, key)
+  if (ENUMS[key]) {
+    if (NUMPY_KEYS.includes(key) && (value == null || value === '')) return { value: null, error: null }
+    if (!ENUMS[key].includes(value)) {
+      const orNull = NUMPY_KEYS.includes(key) ? ' (or null — not measured yet)' : ''
+      return { value: null, error: `${key} must be one of: ${ENUMS[key].join(', ')}${orNull}` }
+    }
+    return { value, error: null }
+  }
+  return { value: null, error: `unknown settings key: ${key}` }
+}
+
 // Validate a full settings object (the tool `settings` param after the partial
 // merge, or a staged table confirm). remote_root: absolute POSIX path fencing
 // selfcheck_remote_dir (resolveRemoteDir re-fences at use time); ".." rejected here.
 // remote mode requires remote_root always and machine_id unless in-cluster LSF
 // is the only remote channel; out-of-cluster forbids local spectre (the host
-// cannot run it). The toolchain pins go through normalizePin.
+// cannot run it). Per-key rules come from validateSettingValue (single
+// authority); the coupling checks below are this function's own.
 export function validateSettings(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     return { error: 'settings must be an object' }
   }
   const out = {}
   for (const k of Object.keys(defaultSettings())) {
-    const v = input[k]
-    if (k === 'machine_id') {
-      if (v == null || v === '') out.machine_id = null
-      else if (typeof v === 'string' && v.trim()) out.machine_id = v.trim().slice(0, 120)
-      else return { error: 'machine_id must be a non-empty string or null' }
-    } else if (k === 'remote_root') {
-      if (v == null || v === '') { out.remote_root = null; continue }
-      if (typeof v !== 'string' || !v.trim()) return { error: 'remote_root must be a non-empty string or null' }
-      const norm = v.trim().replace(/\\/g, '/')
-      if (!norm.startsWith('/')) return { error: 'remote_root must be an absolute remote path (starts with "/")' }
-      if (norm.length > 400) return { error: 'remote_root too long (max 400 chars)' }
-      if (norm.split('/').includes('..')) return { error: 'remote_root must not contain ".."' }
-      out.remote_root = norm.replace(/\/+$/, '') || '/'
-    } else if (k === 'selfcheck_remote_dir') {
-      if (typeof v !== 'string' || !v.trim()) return { error: 'selfcheck_remote_dir is required (a path relative to remote_root, or absolute)' }
-      const norm = v.trim().replace(/\\/g, '/')
-      if (norm.length > 400) return { error: 'selfcheck_remote_dir too long (max 400 chars)' }
-      if (norm.split('/').includes('..')) return { error: 'selfcheck_remote_dir must not contain ".."' }
-      out.selfcheck_remote_dir = norm
-    } else if (PIN_KEYS.includes(k)) {
-      const p = normalizePin(v, k)
-      if (p.error) return { error: p.error }
-      out[k] = p.value
-    } else if (ENUMS[k]) {
-      if (!ENUMS[k].includes(v)) return { error: `${k} must be one of: ${ENUMS[k].join(', ')}` }
-      out[k] = v
-    }
+    const r = validateSettingValue(k, input[k])
+    if (r.error) return { error: r.error }
+    out[k] = r.value
   }
   if (out.run_mode === 'remote') {
     const sshlessLsf = out.cluster_env === 'in-cluster' && out.scheduler !== 'ssh'
@@ -320,13 +386,33 @@ export function validateSettings(input) {
 // value stays (legacy projects, README "worker scripts" contract). Fixes the
 // asymmetry where a session-config write creating .harnessams first used to
 // suppress the fresh-init staging forever.
-export async function initProjectStorage(workspacePath) {
+export async function initProjectStorage(workspacePath, { settings } = {}) {
   const dir = path.join(workspacePath, STORE_DIR)
   const finalPath = configPath(workspacePath)
   const fresh = !fs.existsSync(dir)
   const cur = await readConfig(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
-  if (fresh) await ensureAgentsMdTemplate(workspacePath)
+  if (fresh) {
+    // Measured local python facts prefill from the plugin-global memory
+    // (D-021): the local_node_* rows render from process either way (dsh runs
+    // on node — always available, filled at establishment), the python rows
+    // PERSIST here, honestly null when this machine was never measured. Pins
+    // stay null on a fresh config (no machine to attribute them to yet; the
+    // project-init heal fills them from node memory when machine_id is set).
+    try {
+      const facts = await getLocalFacts()
+      if (facts) {
+        for (const k of ['local_python_version', 'local_python_path', 'local_python_numpy']) {
+          if (cur.config.settings[k] == null && facts[k] != null) cur.config.settings[k] = facts[k]
+        }
+      }
+    } catch { /* memory unreadable — the honest nulls stand */ }
+    // The template renders the settings about to be WRITTEN when the caller
+    // states them (writeSettings' fresh path) — a template carrying the
+    // pre-write defaults would read as a divergent hand-edit at the next
+    // reconcile (D-021).
+    await ensureAgentsMdTemplate(workspacePath, { settings: settings ?? cur.config.settings })
+  }
   await ensureProjectScripts(workspacePath, resolveScriptsSource(workspacePath))
   const ws = cur.config.workspace
   const configured = path.isAbsolute(ws.sim_scripts_dir) ? ws.sim_scripts_dir : path.resolve(workspacePath, ws.sim_scripts_dir)
@@ -355,7 +441,7 @@ export async function writeSettings(workspacePath, settings) {
   const dir = path.join(workspacePath, STORE_DIR)
   const finalPath = configPath(workspacePath)
   const fresh = !fs.existsSync(dir)
-  if (fresh) await initProjectStorage(workspacePath)
+  if (fresh) await initProjectStorage(workspacePath, { settings })
   const cur = await readConfig(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
   const tmp = finalPath + '.tmp'
@@ -364,28 +450,38 @@ export async function writeSettings(workspacePath, settings) {
   return settings
 }
 
-// Prefill the toolchain pins from the plugin-global node memory (D-017): a
-// node measured for any earlier project heals a project on the same machine
-// before anything runs, so the settings file, the AGENTS.md yaml, and the
-// batch channel agree from the start. Only NULL pins are healed — an explicit
-// pin always wins; a machine_id is required to look the node up (local-only
-// projects have nothing to heal). Returns the (possibly healed) settings.
-export async function healToolchainPins(workspacePath) {
+// Prefill NULL settings fields from the plugin-global memories (D-017, widened
+// D-021): a node measured for any earlier project heals a project on the same
+// machine (the toolchain pins plus the measured remote_python_numpy tri-state
+// — machine-scoped, machine_id required); THIS host's remembered python facts
+// heal the local_python_* fields (host-scoped, no machine needed). Only NULL
+// fields are healed — an explicit value always wins, and a remembered
+// null/cleared key never refills (only a later green run re-measures). The
+// AGENTS.md reconcile (reconcile.js) runs BEFORE this at each write entry so a
+// hand-edited yaml value beats the memory. Returns the (possibly healed)
+// settings.
+export async function healFromGlobalMemory(workspacePath) {
   let settings
   try {
     ({ settings } = await readSettings(workspacePath))
   } catch (e) {
     return { error: `workspace_config.json unreadable: ${e?.message ?? e}` }
   }
-  const need = PIN_KEYS.filter((k) => settings[k] == null)
-  if (!need.length || !settings.machine_id) return { settings }
-  const pins = await getNodePins(settings.machine_id)
-  if (!pins) return { settings }
   const patch = {}
-  for (const k of need) if (pins[k]) patch[k] = pins[k]
+  const needNode = [...PIN_KEYS, 'remote_python_numpy'].filter((k) => settings[k] == null)
+  if (needNode.length && settings.machine_id) {
+    const pins = await getNodePins(settings.machine_id)
+    if (pins) for (const k of needNode) if (pins[k]) patch[k] = pins[k]
+  }
+  const needLocal = ['local_python_version', 'local_python_path', 'local_python_numpy']
+    .filter((k) => settings[k] == null)
+  if (needLocal.length) {
+    const facts = await getLocalFacts()
+    if (facts) for (const k of needLocal) if (facts[k]) patch[k] = facts[k]
+  }
   if (!Object.keys(patch).length) return { settings }
   const v = validateSettings({ ...settings, ...patch })
-  if (v.error) return { settings } // a remembered pin that stopped validating: keep nulls, no error
+  if (v.error) return { settings } // a remembered fact that stopped validating: keep nulls, no error
   await writeSettings(workspacePath, v.settings)
   return { settings: v.settings, healed: Object.keys(patch) }
 }

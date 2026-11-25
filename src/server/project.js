@@ -45,6 +45,35 @@ const MAX_REPORTS = 32
 const MAX_REPORT_PATH = 400
 export const SESSION_ID_RE = /^[\w-]{1,128}$/
 
+// Tool-facing project resolution (D-021 shared helper, extracted from the
+// harnessams_selfcheck tool so batch_submit / batch_poll / safe_trash /
+// gen_sweep_report anchor the same way): an explicit `project` argument must
+// name a registered DSH workspace; otherwise the calling session's mapping
+// decides (session_id ≡ exec.agent.id). Errors list the registered candidates
+// so the model can self-correct. This is the ONLY project anchor since the
+// findProjectRoot walk-ups were deleted — run_dir/spec paths never discover
+// the project anymore.
+export function resolveProjectTool(registry, sessionId, projectArg) {
+  const registered = typeof registry?.list === 'function' ? registry.list() : []
+  const candidates = registered.map((w) => w.path).join(', ') || 'none'
+  if (projectArg != null) {
+    if (typeof projectArg !== 'string' || !projectArg.trim()) {
+      return { error: 'project must be a workspace path string' }
+    }
+    const want = path.resolve(projectArg.trim())
+    const hit = registered.find((w) => path.resolve(String(w?.path ?? '')) === want)
+    if (!hit) {
+      return { error: `project is not a registered workspace: ${projectArg} (registered: ${candidates})` }
+    }
+    return { project: { id: hit.id, path: hit.path, title: hit.title } }
+  }
+  const { project, reason } = sessionProject(registry, sessionId)
+  if (!project) {
+    return { error: `${reason ?? 'no project for session'} (registered: ${candidates})` }
+  }
+  return { project }
+}
+
 // Dashboard reports attached to a session (the sidebar Dashboard sub-view): local
 // HTML files picked anywhere on disk via the add-report browser, or registered by
 // the report tool. Paths are normalized to absolute here; duplicates by

@@ -1,43 +1,35 @@
 // Recommended-workflow table for the AGENTS.md project-config block (2026-11-24
-// rework). The block carries NO prose any more: the yaml (config + self-check
-// results) plus this one .md table — the workflow the model should follow
-// in-session, each row naming the tool and ONLY the parameters the model
-// actually fills. Values the yaml already states (workspace root, remote root,
-// machine, the toolchain pins remote_python / remote_spectre_cmd) are
-// deliberately absent from the table: the tools resolve them from the project
-// config, and repeating them here is how the 2026-11-24 incident started (a
-// config value misread as an executable). Branch forks are minimal:
-// the scheduler cell and the analyze row follow cluster_env (remote-first over
-// dsh-ssh out-of-cluster, on-the-data python in-cluster). English + ASCII by
-// the block's language ruling; one line per table row.
+// rework; slimmed 2026-11-25 D-021). The block carries NO prose any more: the
+// yaml (config + self-check results + the python facts) plus this one .md
+// table — the workflow the model should follow in-session, each row naming
+// the tool and ONLY the step's purpose with a minimal fill hint. Per the
+// 2026-11-25 dedup ruling, PARAMETER SEMANTICS AND CONTRACTS live in the TOOL
+// DESCRIPTIONS (the netlist authoring contract in spectre_pre_check's, the
+// scheduler matrix / lsf_node / overwrite / no_pre_check in batch_submit's,
+// the poll cadence ladder and the analyze recipe in batch_poll's, the report
+// schema in gen_sweep_report's): the table stays a lean pointer list, and the
+// values the yaml already states (workspace root, remote root, machine, the
+// toolchain pins, the numpy tri-states) are deliberately absent — repeating
+// them here is how the 2026-11-24 incident started (a config value misread as
+// an executable). One branch fork remains: the Analyze row's Tool cell
+// follows cluster_env (python direct on the shared filesystem in-cluster,
+// ssh_exec + ssh_download out-of-cluster). Project organization (D-021):
+// every design lives in its own folder under the project root (root =
+// .harnessams + AGENTS.md + design folders only); the design folder holds
+// the run dirs, RawResults/, SimResults/, Figs/ and the report HTML. English
+// + ASCII by the block's language ruling; one line per table row.
 
-// The five rows. Cells are md-table-safe (no pipes); branch wording is baked
-// in by workflowTable below.
+// The five rows. Cells are md-table-safe (no pipes).
 export function workflowTable(settings) {
   const s = settings ?? {}
   const inCluster = s.cluster_env === 'in-cluster'
-  const schedulerCell = inCluster
-    ? 'scheduler = "lsf" (default, bsub on this host) / "ssh" (foreground, another node) / "local" (this host, background)'
-    : 'scheduler = "lsf" (default, bsub through the ssh node) / "ssh" (foreground on the ssh node); "local" is unavailable out-of-cluster'
   const analyzeTool = inCluster ? 'python (direct)' : 'ssh_exec + ssh_download'
-  // Remote-side parsers follow the remote_python yaml row (D-016/D-017): a
-  // green self-check pins the measured absolute path automatically (and
-  // remembers it per node), so a null row is the rare, temporary state of a
-  // machine the plugin has not measured yet — then the bare default the
-  // self-check verified applies, which differs by chain (the in-cluster local
-  // chain spawns python, every remote chain python3).
-  const interpreter = s.remote_python
-    ? 'the interpreter named by the remote_python row of the yaml above'
-    : `the interpreter named by the remote_python row of the yaml above, which is null here (not yet measured): use bare ${inCluster && s.run_mode === 'local' ? 'python' : 'python3'}, the unpinned default the self-check verified`
-  const analyzeCell = inCluster
-    ? `run the parsers on the host that holds the data (shared filesystem) with ${interpreter}: <workspace_root>/.harnessams/scripts/spectre/spectre_psf_parse.py --work-dir <run dir> --format csv; the snp tools for S-parameters; write compact JSON into <project>/SimResults/`
-    : `remote-first: the parsers are already staged under <remote_root>/.harnessams/scripts, ssh_exec them with ${interpreter}; never bare python, it is 2.x on many hosts; ssh_download only the compact JSON into <project>/SimResults/`
   const rows = [
-    ['Write', 'spectre_pre_check', 'hand-write the run dir first: template*.scs (simulator lang=spectre; @@PARAM@@ placeholders ONLY on the parameters statement, the circuit references parameters by name; SI-suffixed numbers only, never scientific notation; ideal R/C/L values are literals or parameter names, never expressions; an omitted temperature only warns, the worker fills 27 degC; follow the dca-cell-design / smart-spectre template rules and the sky130proc examples) + sweep_config.json (parameters dict of lists, SI-suffixed strings for swept R/C/L values, sweep_mode, netlist_template). batch_submit runs the netlist gate itself before staging and fails with the findings, so no separate validation call is needed'],
-    ['Submit', 'batch_submit', 'run_dir; worker = "spectre/spectre_sweep_worker.py"; worker_args = ["--config", "sweep_config.json", "--max-parallel", "8"]; ' + schedulerCell + '; lsf_node only to pin or spread bsub hosts. Omit machine_id / remote_root / remote_python: they resolve from this config (the pinned spectre reaches the bundled worker by itself, so do not pass --spectre-cmd; the batch output dir auto-names under remote_root); overwrite: true only to re-run a finished dir; no_pre_check: true only to waive an already-reviewed pre-check failure'],
-    ['Monitor', 'batch_poll', 'run_dir; wait_sec (<= 600). Poll, never blind-sleep: re-check after each bounded wait, back off 10 s -> 20 s -> 40 s with the ETA from completed over total; while a progress card is up, refresh it at least every 5 s; terminal states auto-fetch the light results'],
-    ['Analyze', analyzeTool, analyzeCell],
-    ['Report', 'gen_sweep_report', 'spec = path to the report spec JSON (rounds with points and curves; conclusions land in the session dashboard)'],
+    ['Write', 'spectre_pre_check', 'create the design folder first (<project>/<design>, e.g. Pi12dB; the project root holds only .harnessams, AGENTS.md, and design folders), then the run dir directly under it: template*.scs + sweep_config.json per the netlist contract (the spectre_pre_check description + the smart-spectre / dca-cell-design skills); batch_submit runs the same gate before staging, so a separate validation call is optional'],
+    ['Submit', 'batch_submit', 'run_dir + worker + worker_args; omit machine_id / remote_root / remote_python (they resolve from this config); the remaining parameter semantics (scheduler per cluster_env, lsf_node, overwrite, no_pre_check) are documented in the batch_submit description'],
+    ['Monitor', 'batch_poll', 'run_dir + bounded wait_sec; poll, never blind-sleep (the backoff cadence and progress-card refresh rules live in the batch_poll description); terminal states auto-fetch the light results'],
+    ['Analyze', analyzeTool, 'run the parsers on the host that holds the data and write compact JSON into <design>/SimResults/ (the full recipe: staged parser paths, the interpreter per the remote_python row, what to ssh_download back; it lives in the batch_poll description)'],
+    ['Report', 'gen_sweep_report', 'spec = path to the report spec JSON, placed in <design>/SimResults/ (the schema and output layout live in the gen_sweep_report description; conclusions land in the session dashboard)'],
   ]
   const head = ['Step', 'Tool', 'Model fills']
   return [

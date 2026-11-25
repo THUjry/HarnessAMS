@@ -1,12 +1,17 @@
 // workflowTable (server/selfcheckWorkflow.js) — the recommended-workflow table
 // rendered into the AGENTS.md project-config block on values builds. The
 // 2026-11-24 rework replaced the five prose self-check branches with ONE
-// table: five rows (Write/Submit/Monitor/Analyze/Report — the 2026-11-25
-// wave hand-writes the run directory; batch_submit runs the netlist gate
-// itself, so the Write row names the governing tool without prescribing a
-// separate validation call), columns Step | Tool | Model fills, cluster_env
-// forking only the scheduler and analyze cells. ASCII-only by the block's
-// language ruling; one line per table row.
+// table; the 2026-11-25 D-021 dedup slimmed it to purpose rows: five rows
+// (Write/Submit/Monitor/Analyze/Report), columns Step | Tool | Model fills,
+// each cell stating the step's purpose and a minimal fill hint, with the
+// PARAMETER SEMANTICS AND CONTRACTS living in the tool descriptions (the
+// netlist contract in spectre_pre_check's, the scheduler matrix / lsf_node /
+// overwrite / no_pre_check in batch_submit's, the poll cadence ladder and the
+// analyze recipe in batch_poll's, the report schema in gen_sweep_report's).
+// The Write row opens with the design-folder organization (D-021: one folder
+// per design, the project root holds only .harnessams, AGENTS.md, and design
+// folders). The only remaining cluster_env fork is the Analyze row's Tool
+// cell. ASCII-only by the block's language ruling; one line per table row.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { workflowTable } from '../src/server/selfcheckWorkflow.js'
@@ -31,80 +36,76 @@ test('workflowTable: five rows, three columns, header shape', () => {
   assert.ok(t.includes('| batch_submit |'))
   assert.ok(t.includes('| batch_poll |'))
   assert.ok(t.includes('| gen_sweep_report |'))
-  // the 2026-11-25 weakening: the Write row carries the value-form rules and
-  // the temperature default, and never prescribes a separate validation call
-  const write = t.split('\n').find((l) => l.startsWith('| Write |'))
-  assert.ok(write.includes('never scientific notation'), write)
-  assert.ok(write.includes('never expressions'), write)
-  assert.ok(write.includes('worker fills 27 degC'), write)
-  assert.ok(!write.includes('then validate with'), write)
-  assert.ok(write.includes('no separate validation call is needed'), write)
 })
 
-test('workflowTable: params the yaml already states are deliberately absent, machine/root resolve from config', () => {
+test('workflowTable: the Write row opens with the design-folder organization (D-021)', () => {
+  const t = workflowTable(S())
+  const write = t.split('\n').find((l) => l.startsWith('| Write |'))
+  assert.match(write, /create the design folder first \(<project>\/<design>, e\.g\. Pi12dB/)
+  assert.match(write, /the project root holds only \.harnessams, AGENTS\.md, and design folders/)
+  assert.match(write, /then the run dir directly under it: template\*\.scs \+ sweep_config\.json/)
+  // D-021 dedup: the netlist authoring contract lives in the tool description,
+  // the row only points at it (no value-form rules, no temperature default)
+  assert.match(write, /per the netlist contract \(the spectre_pre_check description/)
+  for (const gone of ['never scientific notation', 'never expressions', 'worker fills 27 degC']) {
+    assert.ok(!write.includes(gone), `contract detail moved out: ${gone}`)
+  }
+  // batch_submit runs the gate itself — a separate validation call is optional
+  assert.match(write, /batch_submit runs the same gate before staging/)
+})
+
+test('workflowTable: the Submit row is a purpose pointer, parameter semantics stay in batch_submit description', () => {
   const t = workflowTable(S())
   const submit = t.split('\n').find((l) => l.startsWith('| Submit |'))
-  assert.match(submit, /Omit machine_id \/ remote_root \/ remote_python: they resolve from this config/)
-  assert.match(submit, /no_pre_check: true only to waive an already-reviewed pre-check failure/)
-  assert.ok(!submit.includes('machine_id ='), 'no machine_id fill guidance')
-  // the batch output dir auto-names under remote_root — no remote_dir fill
-  // guidance anymore (the settings key is selfcheck_-prefixed, the ARG is
-  // a different thing the table deliberately stays silent about)
-  assert.match(submit, /the batch output dir auto-names under remote_root/)
+  assert.match(submit, /omit machine_id \/ remote_root \/ remote_python \(they resolve from this config\)/)
+  assert.match(submit, /scheduler per cluster_env, lsf_node, overwrite, no_pre_check\) are documented in the batch_submit description/)
+  // the scheduler matrix and the pin/worker recipes moved out (D-021)
+  assert.ok(!submit.includes('scheduler = "lsf"'), 'no scheduler matrix in the row')
+  assert.ok(!t.includes('do not pass --spectre-cmd'), 'the --spectre-cmd rule lives in batch_submit')
+  assert.ok(!t.includes('the batch output dir auto-names'), 'the auto-naming convention lives in batch_submit')
+  // the table never repeats a yaml value
+  const PIN = '/opt/tools/python3/bin/python3'
+  const pinned = workflowTable(S({ run_mode: 'remote', remote_python: PIN }))
+  assert.ok(!pinned.includes(PIN), 'the table never repeats a pin value')
 })
 
-test('workflowTable: monitor row carries the polling cadence (moved out of the system prompt)', () => {
+test('workflowTable: the Monitor row points at the cadence, does not carry it', () => {
   const t = workflowTable(S())
   const monitor = t.split('\n').find((l) => l.startsWith('| Monitor |'))
+  assert.match(monitor, /bounded wait_sec/)
   assert.match(monitor, /never blind-sleep/)
-  assert.match(monitor, /10 s -> 20 s -> 40 s/)
-  assert.match(monitor, /every 5 s/)
+  assert.match(monitor, /cadence and progress-card refresh rules live in the batch_poll description/)
+  // the ladder itself moved into the tool description (D-021)
+  assert.ok(!monitor.includes('10 s -> 20 s -> 40 s'), 'the backoff ladder lives in batch_poll')
+  assert.ok(!monitor.includes('every 5 s'), 'the card-refresh cadence lives in batch_poll')
+  assert.match(monitor, /terminal states auto-fetch the light results/)
 })
 
-test('workflowTable: cluster_env forks the scheduler and analyze cells', () => {
+test('workflowTable: the Analyze row keeps the one cluster_env fork (Tool cell) and points at the recipe', () => {
   const outC = workflowTable(S())
   const inC = workflowTable(S({ cluster_env: 'in-cluster' }))
-  assert.match(outC, /"local" is unavailable out-of-cluster/)
-  assert.ok(!inC.includes('unavailable out-of-cluster'), 'in-cluster has local')
-  assert.match(inC, /scheduler = "lsf" \(default, bsub on this host\)/)
-  // analyze: remote-first triple out-of-cluster, direct python in-cluster
   const outRow = outC.split('\n').find((l) => l.startsWith('| Analyze |'))
   const inRow = inC.split('\n').find((l) => l.startsWith('| Analyze |'))
-  // pinned or not, the interpreter is the yaml's remote_python row (D-016),
-  // never a path of the table's own
-  assert.match(outRow, /remote_python row/)
-  assert.match(outRow, /never bare python/)
-  assert.match(inRow, /python \(direct\)/)
-  assert.match(inRow, /shared filesystem/)
+  assert.match(outRow, /\| ssh_exec \+ ssh_download \|/, 'out-of-cluster analyze over ssh')
+  assert.match(inRow, /\| python \(direct\) \|/, 'in-cluster analyze runs python directly')
+  // the recipe (parser paths, interpreter rule, never-bare-python) moved to
+  // the batch_poll description; the row points at the remote_python row only
+  assert.match(outRow, /write compact JSON into <design>\/SimResults\//)
+  assert.match(outRow, /the full recipe: staged parser paths, the interpreter per the remote_python row/)
+  assert.ok(!outRow.includes('never bare python'), 'the never-bare-python rule lives in batch_poll')
+  assert.ok(!outRow.includes('spectre_psf_parse.py'), 'no parser paths in the row')
 })
 
-test('workflowTable: toolchain pins (D-016) — submit omits remote_python, analyze follows the remote_python row', () => {
-  const PIN = '/opt/tools/python3/bin/python3'
-  const unpinnedOut = workflowTable(S({ run_mode: 'remote' }))
-  const unpinnedIn = workflowTable(S({ run_mode: 'remote', cluster_env: 'in-cluster' }))
-  const unpinnedInLocal = workflowTable(S({ run_mode: 'local', cluster_env: 'in-cluster' }))
-  const pinnedOut = workflowTable(S({ run_mode: 'remote', remote_python: PIN }))
-  const pinnedIn = workflowTable(S({ run_mode: 'remote', cluster_env: 'in-cluster', remote_python: PIN }))
-  const submit = (t) => t.split('\n').find((l) => l.startsWith('| Submit |'))
-  const analyze = (t) => t.split('\n').find((l) => l.startsWith('| Analyze |'))
-  for (const t of [unpinnedOut, unpinnedIn, unpinnedInLocal, pinnedOut, pinnedIn]) {
-    assert.match(submit(t), /do not pass --spectre-cmd/, 'the pinned spectre rides along by itself')
-    assert.ok(!submit(t).includes(PIN) && !analyze(t).includes(PIN), 'the table never repeats a yaml value')
-    assert.match(analyze(t), /remote_python row/, 'pinned or not, the cell points at the row')
-  }
-  // pinned: the interpreter is whatever the yaml row says
-  assert.match(analyze(pinnedOut), /ssh_exec them with the interpreter named by the remote_python row of the yaml above; never bare python/)
-  assert.match(analyze(pinnedIn), /with the interpreter named by the remote_python row of the yaml above: <workspace_root>\/\.harnessams\/scripts\/spectre\/spectre_psf_parse\.py/)
-  // unpinned (not yet measured, D-017 auto-pin fills it on the next green
-  // run): the bare default each chain really runs under, stated as such
-  assert.match(analyze(unpinnedOut), /which is null here \(not yet measured\): use bare python3, the unpinned default the self-check verified/)
-  assert.match(analyze(unpinnedIn), /which is null here \(not yet measured\): use bare python3, the unpinned default the self-check verified/)
-  assert.match(analyze(unpinnedInLocal), /which is null here \(not yet measured\): use bare python, the unpinned default the self-check verified/,
-    'the in-cluster local chain spawns python')
+test('workflowTable: the Report row points at the schema and names the design layout', () => {
+  const t = workflowTable(S())
+  const report = t.split('\n').find((l) => l.startsWith('| Report |'))
+  assert.match(report, /spec = path to the report spec JSON, placed in <design>\/SimResults\//)
+  assert.match(report, /schema and output layout live in the gen_sweep_report description/)
+  assert.match(report, /conclusions land in the session dashboard/)
 })
 
 test('workflowTable: unknown/partial settings normalize to the defaults', () => {
-  assert.ok(workflowTable({}).includes('unavailable out-of-cluster'))
+  assert.ok(workflowTable({}).includes('| Analyze | ssh_exec + ssh_download |'))
   assert.ok(workflowTable(undefined).includes('| Report |'))
 })
 

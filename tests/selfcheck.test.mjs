@@ -28,9 +28,11 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { apply, toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { defaultSettings, readSettings, validateSettings, writeSettings, configPath, healToolchainPins, initProjectStorage } from '../src/server/settings.js'
+import { defaultSettings, readSettings, readConfig, validateSettings, writeSettings, configPath, healFromGlobalMemory, initProjectStorage } from '../src/server/settings.js'
 import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR, autoPinToolchain } from '../src/server/selfcheck.js'
-import { getNodePins, readGlobalStore, setFreshMin, updateNodePins } from '../src/server/globalstore.js'
+import { getNodePins, getLocalFacts, readGlobalStore, setFreshMin, updateNodePins, updateLocalFacts } from '../src/server/globalstore.js'
+import { reconcileSettings, overlaySettingsAt } from '../src/server/reconcile.js'
+import { agentsMdPath, syncAgentsMd } from '../src/server/agentsmd.js'
 import { writeSessionConfig } from '../src/server/project.js'
 import { runSelfcheckAction } from '../src/tools/selfcheck.js'
 import { verifyRun, siValue } from '../src/scripts/selfcheck/selfcheck_verify.mjs'
@@ -545,7 +547,33 @@ test('settings: defaults, validation, persistence, workspace section', async () 
     selfcheck_remote_dir: '.harnessams/selfcheck',
     scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python',
     remote_python: null, remote_spectre_cmd: null,
+    local_python_version: null, local_python_path: null, local_python_numpy: null, remote_python_numpy: null,
   })
+  // D-021 python facts: the numpy tri-states are enum-or-null; the loose string
+  // facts are string-or-null with a length and control-character gate (a valid
+  // base: the bare defaults fail the out-of-cluster local-spectre coupling)
+  const factsBase = { ...defaultSettings(), cluster_env: 'in-cluster' }
+  for (const k of ['local_python_numpy', 'remote_python_numpy']) {
+    assert.equal(validateSettings({ ...factsBase, [k]: null }).settings[k], null)
+    for (const v of ['yes', 'no', 'fallback']) {
+      assert.equal(validateSettings({ ...factsBase, [k]: v }).settings[k], v)
+    }
+    assert.match(validateSettings({ ...factsBase, [k]: 'maybe' }).error, new RegExp(`${k} must be one of`))
+  }
+  const facts = validateSettings({ ...factsBase, local_python_version: '3.14.0', local_python_path: 'C:\\Python314\\python.exe' })
+  assert.ok(!facts.error, facts.error)
+  assert.equal(facts.settings.local_python_path, 'C:\\Python314\\python.exe', 'Windows paths are legal for the local facts')
+  assert.match(validateSettings({ ...factsBase, local_python_version: 'x'.repeat(401) }).error, /local_python_version too long/)
+  assert.match(validateSettings({ ...factsBase, local_python_path: 'a\nb' }).error, /control characters/)
+  // D-021 plotly_url: a workspace-section key, defaulted to the bundled copy
+  // seeded into .harnessams/assets (the project root stays clean)
+  const cfgDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hams-cfg-'))
+  try {
+    const { config: cfg } = await readConfig(cfgDir)
+    assert.equal(cfg.workspace.plotly_url, '.harnessams/assets/plotly.min.js')
+  } finally {
+    await rmRetry(cfgDir)
+  }
   // valid full object round-trips
   const v = validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1',
     remote_root: '/home/op/sim', selfcheck_remote_dir: '/abs/path', scheduler: 'ssh', compute_script_remote: 'js' })
@@ -935,19 +963,19 @@ test('globalstore + heal (D-017): node memory, remembered clears stick, heal pre
     const ws = path.join(tmp, 'proj-heal')
     await writeSettings(ws, { ...defaultSettings(), run_mode: 'remote', machine_id: 'nodeY', remote_root: '/home/op/sim' })
     await updateNodePins('nodeY', { remote_python: PIN_PY })
-    const r1 = await healToolchainPins(ws)
+    const r1 = await healFromGlobalMemory(ws)
     assert.deepEqual(r1.healed, ['remote_python'])
     let healed = (await readSettings(ws)).settings
     assert.equal(healed.remote_python, PIN_PY)
     assert.equal(healed.remote_spectre_cmd, null, 'nothing remembered for spectre -> stays null')
     await writeSettings(ws, { ...defaultSettings(), run_mode: 'remote', machine_id: 'nodeZ', remote_root: '/home/op/sim', remote_python: PIN_PY })
     await updateNodePins('nodeZ', { remote_python: PIN_PY, remote_spectre_cmd: null })
-    assert.ok(!(await healToolchainPins(ws)).healed, 'the memory itself says unpinned: no refill')
+    assert.ok(!(await healFromGlobalMemory(ws)).healed, 'the memory itself says unpinned: no refill')
     assert.equal((await readSettings(ws)).settings.remote_spectre_cmd, null)
     // local-only project: no machine to look up, nothing heals
     const ws2 = path.join(tmp, 'proj-local')
     await writeSettings(ws2, { ...defaultSettings(), cluster_env: 'in-cluster' })
-    assert.ok(!(await healToolchainPins(ws2)).healed)
+    assert.ok(!(await healFromGlobalMemory(ws2)).healed)
   } finally {
     if (prevStore === undefined) delete process.env.HARNESSAMS_GLOBAL_STORE
     else process.env.HARNESSAMS_GLOBAL_STORE = prevStore
@@ -1044,6 +1072,119 @@ test('autoPin (D-016/D-017): a green run pins the MEASURED toolchain and remembe
     const run4 = { summary: { ok: false }, _priv: { ...run._priv, toolchainTelemetry: { python: PIN_PY, spectre: PIN_SPECTRE } } }
     await autoPinToolchain(run4)
     assert.equal(run4.summary.toolchain_pinned, false)
+  } finally {
+    if (prevStore === undefined) delete process.env.HARNESSAMS_GLOBAL_STORE
+    else process.env.HARNESSAMS_GLOBAL_STORE = prevStore
+    await fsp.rm(tmp, { recursive: true, force: true })
+  }
+})
+
+// ---------------------------------------------------------------------------
+// D-021: AGENTS.md reconcile (write + read), the python-fact families
+// ---------------------------------------------------------------------------
+
+test('reconcile (D-021): a SYNCED block adopts legal hand-edits; illegal rows warn (agent) or block (user); unsynced templates never adopt', async () => {
+  const tmp = await tmpDir()
+  const ws = path.join(tmp, 'proj-rec')
+  try {
+    const base = { ...defaultSettings(), run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim' }
+    await writeSettings(ws, base)
+    // the values sync marks the block (synced_at becomes a timestamp)
+    await syncAgentsMd({}, { project: { path: ws, title: 'P' }, settings: base })
+
+    // a legal hand-edit: flip the yaml scheduler row
+    const file = agentsMdPath(ws)
+    const md = await fsp.readFile(file, 'utf8')
+    await fsp.writeFile(file, md.replace('  scheduler: "lsf"', '  scheduler: "ssh"'), 'utf8')
+    const rec = await reconcileSettings(ws)
+    assert.deepEqual(rec.adopted, ['scheduler'])
+    assert.equal((await readSettings(ws)).settings.scheduler, 'ssh', 'the hand-edit landed in the json')
+    assert.equal(rec.warnings.length, 0)
+
+    // an illegal hand-edit: a bare-name interpreter pin
+    await fsp.writeFile(file, (await fsp.readFile(file, 'utf8')).replace('  remote_python: null', '  remote_python: "python3"'), 'utf8')
+    const recA = await reconcileSettings(ws)
+    assert.match(recA.warnings.join('\n'), /remote_python .*not adopted/, 'agent callers get a warning')
+    assert.equal((await readSettings(ws)).settings.remote_python, null, 'the illegal row is not adopted')
+    const recU = await reconcileSettings(ws, { source: 'user' })
+    assert.equal(recU.code, 400, 'user callers get the save BLOCKED')
+    assert.match(recU.error, /refuses to adopt/)
+
+    // the read-side overlay (batch tools): a legal row wins, the illegal row
+    // keeps the json value and warns
+    await fsp.writeFile(file, (await fsp.readFile(file, 'utf8')).replace('  simulator: "spectre"', '  simulator: "none"'), 'utf8')
+    const ov = overlaySettingsAt(ws)
+    assert.equal(ov.settings.simulator, 'none', 'a legal overlay wins at read time')
+    assert.equal(ov.settings.remote_python, null)
+    assert.match(ov.warnings.join('\n'), /remote_python .*not adopted/)
+
+    // null/absent rows never CLEAR a stored value (omission is rendering)
+    await fsp.writeFile(file, (await fsp.readFile(file, 'utf8')).replace('  scheduler: "ssh"\n', ''), 'utf8')
+    await reconcileSettings(ws)
+    assert.equal((await readSettings(ws)).settings.scheduler, 'ssh', 'a deleted row does not clear the value')
+
+    // an UNSYNCED template (first fill, synced_at empty) never adopts: after a
+    // second settings write the template still carries the FIRST values —
+    // those are placeholders, not hand-edits
+    const ws2 = path.join(tmp, 'proj-tpl')
+    await writeSettings(ws2, { ...defaultSettings(), cluster_env: 'in-cluster', scheduler: 'ssh' })
+    await writeSettings(ws2, { ...defaultSettings(), cluster_env: 'in-cluster', scheduler: 'lsf' })
+    const rec3 = await reconcileSettings(ws2)
+    assert.equal(rec3.adopted, undefined, 'an unsynced template never adopts')
+    assert.equal((await readSettings(ws2)).settings.scheduler, 'lsf')
+  } finally {
+    await fsp.rm(tmp, { recursive: true, force: true })
+  }
+})
+
+test('python facts (D-021): local memory prefills init and heals NULLs only; the numpy telemetry lands with the pins', async () => {
+  const tmp = await tmpDir()
+  const prevStore = process.env.HARNESSAMS_GLOBAL_STORE
+  process.env.HARNESSAMS_GLOBAL_STORE = path.join(tmp, 'facts-global.json')
+  try {
+    // the host-scoped local memory: version, path, and the numpy tri-state
+    await updateLocalFacts({ local_python_version: '3.14.0', local_python_path: 'C:/Python314/python.exe', local_python_numpy: 'fallback' })
+    assert.equal((await getLocalFacts()).local_python_numpy, 'fallback')
+
+    // init fresh: the remembered facts prefill the settings AND the template
+    // (fill at establishment — the node rows render from process, always)
+    const ws = path.join(tmp, 'proj-init-facts')
+    await initProjectStorage(ws)
+    assert.equal((await readSettings(ws)).settings.local_python_version, '3.14.0')
+    assert.equal((await readSettings(ws)).settings.local_python_numpy, 'fallback')
+    const tpl = await fsp.readFile(agentsMdPath(ws), 'utf8')
+    assert.ok(tpl.includes(`  local_node_version: "${process.version}"`), 'node rows filled at establishment (process facts)')
+    assert.ok(tpl.includes('  local_python_version: "3.14.0"'))
+    assert.ok(tpl.includes('  local_python_numpy: "fallback"'))
+    assert.ok(tpl.includes('  remote_python_numpy: null'), 'the remote tri-state renders null until measured')
+
+    // heal: NULL fields only — node memory carries remote_python_numpy,
+    // a non-null local value is never overwritten by the memory
+    await updateNodePins('nodeQ', { remote_python: PIN_PY, remote_python_numpy: 'no' })
+    const cur = (await readSettings(ws)).settings
+    await writeSettings(ws, { ...cur, run_mode: 'remote', machine_id: 'nodeQ', remote_root: '/home/op/sim', local_python_numpy: 'yes' })
+    const healed = await healFromGlobalMemory(ws)
+    assert.ok(healed.healed.includes('remote_python_numpy'), 'the node-scoped tri-state heals')
+    assert.ok(healed.healed.includes('remote_spectre_cmd') === false, 'nothing remembered for spectre')
+    assert.ok(!healed.healed.includes('local_python_numpy'), 'a non-null local value never refills')
+    assert.equal((await readSettings(ws)).settings.remote_python_numpy, 'no')
+    assert.equal((await readSettings(ws)).settings.local_python_numpy, 'yes', 'local wins over the memory')
+
+    // autoPin: the worker's numpy telemetry lands with the pins
+    const run = {
+      summary: { ok: true },
+      _priv: {
+        settings: (await readSettings(ws)).settings,
+        project: { path: ws },
+        machine: { host: '10.0.0.9' },
+        toolchainTelemetry: { python: PIN_PY, spectre: PIN_SPECTRE, node: 'nodeQ', numpy: 'yes' },
+      },
+    }
+    await autoPinToolchain(run)
+    assert.equal(run.summary.toolchain_pinned, true)
+    assert.equal((await readSettings(ws)).settings.remote_python_numpy, 'yes')
+    const mem = await getNodePins('nodeQ')
+    assert.equal(mem.remote_python_numpy, 'yes', 'node memory carries the tri-state')
   } finally {
     if (prevStore === undefined) delete process.env.HARNESSAMS_GLOBAL_STORE
     else process.env.HARNESSAMS_GLOBAL_STORE = prevStore
@@ -1681,8 +1822,10 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
   // working-environment switch (D-002): confirm dialog gates the write
   assert.ok(src.includes('const [envDialog, setEnvDialog]'), 'pending-switch state exists')
   assert.ok(src.includes('const commitEnv = async (next)'), 'confirm handler commits the switch')
-  assert.ok(src.includes("action: 'save_agentsmd', lang: effectiveLang(), settings: base"),
-    'the switch rides the single write funnel (save_agentsmd + settings)')
+  assert.ok(src.includes("action: 'save_agentsmd', lang: effectiveLang(), settings: { cluster_env: next }"),
+    'the switch rides the single write funnel with a ONE-KEY payload (D-021: a full base would clobber server-side adoptions)')
+  assert.ok(src.includes('const pendingSettings = () => {'),
+    'pendingSettings computes a dirty DIFF, not a full draft (D-021: server-side adoptions survive UI saves)')
   assert.ok(src.includes("tr('envc.ok')") && src.includes("tr('common.cancel')"), 'confirm/cancel labels')
 })
 

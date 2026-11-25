@@ -1,9 +1,15 @@
 // Plugin-global store (D-017, 2026-11-25): machine-scope facts that outlive any
-// one project. Two tenants:
+// one project. Three tenants:
 //   nodes   — the cluster toolchain pins a node MEASURED for any project (a
 //             green self-check pins them, see selfcheck.js finalize); the next
 //             fresh project on the same node prefills from here, so its
-//             AGENTS.md yaml never starts with null pins.
+//             AGENTS.md yaml never starts with null pins. Entries also carry
+//             the measured remote_python_numpy tri-state (yes / no / fallback
+//             — the numpy mode of the interpreter the worker ran under).
+//   local   — THIS host's own python facts (local_python_version / _path, and
+//             the local_python_numpy tri-state): measured by a self-check's
+//             finalize-side probe, remembered here, prefilling fresh projects
+//             on the same machine. Null until the first measurement.
 //   display — the UI globals; today one: selfcheck_fresh_min, the freshness
 //             window the settings-table status cells restore by (a verdict
 //             within the window shows its check mark, past it the table says
@@ -20,6 +26,13 @@ import os from 'node:os'
 
 const DEFAULT_FRESH_MIN = 30
 
+// The numpy tri-state both python-fact fields use (2026-11-25 ruling): "yes"
+// the interpreter imports numpy natively, "fallback" it does not but the staged
+// numfallback asset imports, "no" neither works (e.g. a python 2 shell where
+// even the pure-stdlib fallback has py3 syntax). null = not measured yet.
+const NUMPY_STATES = ['yes', 'no', 'fallback']
+const numpyState = (v) => (typeof v === 'string' && NUMPY_STATES.includes(v) ? v : null)
+
 function storePath() {
   const env = process.env.HARNESSAMS_GLOBAL_STORE
   if (env) return path.resolve(env)
@@ -28,7 +41,7 @@ function storePath() {
 }
 
 function emptyStore() {
-  return { version: 1, nodes: {}, display: { selfcheck_fresh_min: DEFAULT_FRESH_MIN } }
+  return { version: 1, nodes: {}, local: null, display: { selfcheck_fresh_min: DEFAULT_FRESH_MIN } }
 }
 
 async function writeStore(store) {
@@ -60,9 +73,21 @@ export async function readGlobalStore() {
         host: str(v.host),
         remote_python: str(v.remote_python),
         remote_spectre_cmd: str(v.remote_spectre_cmd),
+        remote_python_numpy: numpyState(v.remote_python_numpy),
         updatedAt: typeof v.updatedAt === 'string' ? v.updatedAt : null,
       }
     }
+  }
+  if (raw.local && typeof raw.local === 'object' && !Array.isArray(raw.local)) {
+    const str = (x) => (typeof x === 'string' && x.trim() ? x.slice(0, 400) : null)
+    const v = raw.local
+    const facts = {
+      local_python_version: str(v.local_python_version),
+      local_python_path: str(v.local_python_path),
+      local_python_numpy: numpyState(v.local_python_numpy),
+      updatedAt: typeof v.updatedAt === 'string' ? v.updatedAt : null,
+    }
+    if (facts.local_python_version || facts.local_python_path || facts.local_python_numpy) store.local = facts
   }
   return store
 }
@@ -74,15 +99,24 @@ export async function getNodePins(nodeKey) {
   const { nodes } = await readGlobalStore()
   const v = nodes[nodeKey]
   if (!v) return null
-  return { host: v.host, remote_python: v.remote_python, remote_spectre_cmd: v.remote_spectre_cmd, updatedAt: v.updatedAt }
+  return {
+    host: v.host,
+    remote_python: v.remote_python,
+    remote_spectre_cmd: v.remote_spectre_cmd,
+    remote_python_numpy: v.remote_python_numpy,
+    updatedAt: v.updatedAt,
+  }
 }
 
 // Remember what a node runs. The caller states the FULL current pin pair (a
 // green run's measurement, or an explicit pin write): null means unpinned for
 // that key, and both-null removes the entry — so an explicit clear keeps
 // sticking (heal reads this store and never re-fills a cleared key; only a
-// later green run re-measures). An omitted host keeps the remembered one.
-export async function updateNodePins(nodeKey, { host, remote_python, remote_spectre_cmd } = {}) {
+// later green run re-measures). An omitted host keeps the remembered one; the
+// measured remote_python_numpy tri-state is preserved the same way (only a
+// valid yes/no/fallback value overwrites, so an explicit pin write cannot
+// erase the last measurement).
+export async function updateNodePins(nodeKey, { host, remote_python, remote_spectre_cmd, remote_python_numpy } = {}) {
   if (!nodeKey || typeof nodeKey !== 'string') return { error: 'node key required' }
   const python = remote_python ?? null
   const spectre = remote_spectre_cmd ?? null
@@ -99,8 +133,32 @@ export async function updateNodePins(nodeKey, { host, remote_python, remote_spec
     host: typeof host === 'string' && host.trim() ? host.slice(0, 200) : prev?.host ?? null,
     remote_python: python,
     remote_spectre_cmd: spectre,
+    remote_python_numpy: numpyState(remote_python_numpy) ?? prev?.remote_python_numpy ?? null,
     updatedAt: new Date().toISOString(),
   }
+  await writeStore(store)
+  return { ok: true }
+}
+
+// This host's remembered python facts (the local_python_* prefill source —
+// the field names match the settings keys one-to-one). Null when nothing has
+// been measured yet. updateLocalFacts states the full current triple — a null
+// field clears that fact (only a fresh measurement refills).
+export async function getLocalFacts() {
+  const { local } = await readGlobalStore()
+  return local
+}
+
+export async function updateLocalFacts({ local_python_version, local_python_path, local_python_numpy } = {}) {
+  const str = (x) => (typeof x === 'string' && x.trim() ? x.slice(0, 400) : null)
+  const facts = {
+    local_python_version: str(local_python_version),
+    local_python_path: str(local_python_path),
+    local_python_numpy: numpyState(local_python_numpy),
+    updatedAt: new Date().toISOString(),
+  }
+  const store = await readGlobalStore()
+  store.local = facts.local_python_version || facts.local_python_path || facts.local_python_numpy ? facts : null
   await writeStore(store)
   return { ok: true }
 }

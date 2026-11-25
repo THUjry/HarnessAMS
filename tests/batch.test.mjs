@@ -23,6 +23,7 @@ import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { resolveMachine } from '../src/remote.js'
+import { syncAgentsMd } from '../src/server/agentsmd.js'
 import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginAssets, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
 
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
@@ -77,13 +78,40 @@ function pollValue({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN
 // src/tools.ts (ssh_exec failures are values, not throws). Commands arrive
 // already wrapped by execRemote (timeout -s KILL ... -- sh -c "..."); routing
 // matches substrings inside the wrapper, exactly like the assertions below.
-function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false, existing = 0, ls = '', post = '777 RUN\n__STARTED__\n', preCheck = {} } = {}) {
+// D-021 anchoring fixture: a registered workspace root the harness injects as
+// the explicit `project` argument of every tool call — the tools resolve the
+// project through the registry/session seam now, the findProjectRoot walk-up
+// is gone. The default mirrors the old walk-up-fail-open behavior (defaults,
+// out-of-cluster); tests with a planted root pass it as `project`.
+function makeAnchoredProject(clusterEnv = 'out-of-cluster', extra = {}) {
+  const root = tmp('hams-anchor-')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      cluster_env: clusterEnv, run_mode: 'local', machine_id: null, remote_root: null,
+      selfcheck_remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+      compute_script_local: 'python', compute_script_remote: 'python',
+      ...extra,
+    },
+  }, null, 2))
+  return root
+}
+
+function registryFor(project) {
+  return { list: () => [{ id: 'ws-fixture', path: project, title: 'fixture' }] }
+}
+
+function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false, existing = 0, ls = '', post = '777 RUN\n__STARTED__\n', preCheck = {}, project = null } = {}) {
   const calls = []
   const ok = (value) => ({ isError: false, value })
   let seqIdx = 0 // pollSeq cursor: successive __BJOB__ polls shift through the
   // scripted states (last entry repeats) — the wait_sec loop re-polls
+  const proj = project ?? makeAnchoredProject('out-of-cluster')
   return {
     calls,
+    __fixtureProject: proj,
+    workspaceRegistry: registryFor(proj),
     tools: {
       // spectre_pre_check: registered by default (a passing check); the
       // preCheck option drives the D-020 submit-gate tests
@@ -170,7 +198,8 @@ function makeProjectRoot(clusterEnv = 'in-cluster') {
 // A mocked ctx.shell seam (the in-cluster local executor): records every
 // command and answers the same probe shapes the ssh mock does. Any ssh tool
 // call throws — in-cluster paths must never touch dsh-ssh.
-function makeShellCtx({ existing = 0, poll = null } = {}) {
+function makeShellCtx({ existing = 0, poll = null, project = null } = {}) {
+  const proj = project ?? makeAnchoredProject('in-cluster')
   const commands = []
   const okExec = (stdout) => ({
     exitCode: 0, signal: null, timedOut: false, aborted: false, timeoutMs: 30_000,
@@ -178,6 +207,8 @@ function makeShellCtx({ existing = 0, poll = null } = {}) {
   })
   return {
     commands,
+    __fixtureProject: proj,
+    workspaceRegistry: registryFor(proj),
     shell: {
       resolve: (req) => ({ onExpiry: 'kill', stdoutMaxBytes: 1 << 20, ...req, workdir: req.workdir || process.cwd() }),
       execute: async (spec) => {
@@ -213,7 +244,15 @@ function makeSharedRoot() {
 function tool(ctx, name) {
   const def = toolDefinitions(ctx).find((d) => d.name === name)
   assert.ok(def, name)
-  return makeTool(def)
+  const t = makeTool(def)
+  // D-021: inject the harness's anchored project as the explicit `project`
+  // argument of every call (the session seam itself is covered in
+  // server.test.mjs / selfcheck.test.mjs)
+  const proj = ctx.__fixtureProject
+  if (!proj) return t
+  const run = t.execute
+  t.execute = (args = {}, exec) => run({ project: proj, ...args }, exec)
+  return t
 }
 
 test('worker scripts root: env override resolves, bad values and pluginScripts layout', () => {
@@ -269,9 +308,10 @@ test('batch_submit resolves machine/root from the project settings and uploads t
   }, null, 2))
   try {
     const run = makeRunDir({ under: root })
-    const ctx = makeCtx()
+    const ctx = makeCtx({ project: root })
     // machine_id and remote_root deliberately omitted: both must resolve from
-    // the project settings the run dir walks up to (2026-11-24)
+    // the project settings (D-021: the session-resolved project, injected by
+    // the harness registry — no walk-up)
     const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
     }, {})
@@ -283,6 +323,55 @@ test('batch_submit resolves machine/root from the project settings and uploads t
       'worker uploaded from the configured scripts root')
     assert.ok(uploads.includes('/home/op/sim/.harnessams/assets/numfallback.py'),
       'the sibling assets bucket uploads beside the scripts root (D-015)')
+  } finally {
+    restoreEnv()
+    fs.rmSync(base, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// D-021 (read-side reconcile): a hand-edited AGENTS.md yaml row takes effect
+// at the very next batch_submit read — no write in between; an illegal row
+// keeps the stored value and warns into the submit result.
+test('batch_submit overlays a hand-edited AGENTS.md block at READ time (D-021)', async () => {
+  const base = tmp('hams-ov-')
+  const scriptsRoot = path.join(base, 'scripts')
+  fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), '# worker\n')
+  process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
+  const root = tmp('hams-proj-')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  const settings = {
+    cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
+    selfcheck_remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+    compute_script_local: 'python', compute_script_remote: 'python',
+  }
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1, settings,
+  }, null, 2))
+  try {
+    // a values sync marks the block (synced_at); the hand-edit then rewrites
+    // the remote_root row to a different root
+    await syncAgentsMd({}, { project: { path: root, title: 'P' }, settings })
+    const file = path.join(root, 'AGENTS.md')
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('  remote_root: "/home/op/sim"', '  remote_root: "/home/op/other"'))
+    const run = makeRunDir({ under: root })
+    const res = await tool(makeCtx({ project: root }), 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.remote_dir, '/home/op/other/batch1', 'the hand-edited remote_root won at read time')
+
+    // an illegal row (a bare-name interpreter pin): the stored value stands and
+    // the submit result carries the warning
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8')
+      .replace('  remote_root: "/home/op/other"', '  remote_root: "/home/op/sim"')
+      .replace('  remote_python: null', '  remote_python: "python3"'))
+    const res2 = await tool(makeCtx({ project: root }), 'batch_submit').execute({
+      run_dir: makeRunDir({ under: root }), remote_dir: 'batch2', worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.equal(res2.ok, true, JSON.stringify(res2))
+    assert.match(res2.warnings.join('\n'), /remote_python .*not adopted/)
   } finally {
     restoreEnv()
     fs.rmSync(base, { recursive: true, force: true })
@@ -312,7 +401,7 @@ test('batch_submit classifies a queued (PEND) job as expected — state queued, 
   }, null, 2))
   try {
     const run = makeRunDir({ under: root })
-    const ctx = makeCtx({ post: '777 PEND\n' })
+    const ctx = makeCtx({ project: root, post: '777 PEND\n' })
     const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
     }, {})
@@ -360,14 +449,14 @@ test('batch_submit enforces the session max-points-per-scan gate (D-019)', async
     } })
     const exec = { agent: { id: 'sess-gate' } }
     writeSessions(100)
-    const gateCtx = makeCtx()
+    const gateCtx = makeCtx({ project: root })
     await assert.rejects(tool(gateCtx, 'batch_submit').execute({
       run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
     }, exec), /max points per scan: 222 > 100/)
     // the reject happens before anything is staged: no ssh call left the mock
     assert.equal(gateCtx.calls.length, 0)
     writeSessions(250)
-    const res = await tool(makeCtx(), 'batch_submit').execute({
+    const res = await tool(makeCtx({ project: root }), 'batch_submit').execute({
       run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
     }, exec)
     assert.equal(res.ok, true, JSON.stringify(res))
@@ -636,7 +725,7 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
   const proj = makeProjectRoot('in-cluster')
   const run = makeRunDir({ under: proj })
   try {
-    const ctx = makeCtx()
+    const ctx = makeCtx({ project: proj })
     const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run,
       worker: 'spectre/spectre_sweep_worker.py',
@@ -1069,7 +1158,7 @@ test('in-cluster scheduler=ssh (D-002): exec over ssh, staging stays a local cop
   const shared = makeSharedRoot()
   const localShared = path.resolve(shared)
   try {
-    const ctx = makeCtx()
+    const ctx = makeCtx({ project: proj })
     const run = makeRunDir({ under: proj })
     const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run,
@@ -1143,7 +1232,7 @@ test('toolchain pins (D-016): remote_python / remote_spectre_cmd resolve from th
   const submit = (ctx, extra) => tool(ctx, 'batch_submit').execute({ run_dir: makeRunDir({ under: root }), worker: WORKER, ...extra }, {})
   try {
     // LSF: machine_id / remote_root / remote_python / --spectre-cmd all omitted
-    const ctx = makeCtx()
+    const ctx = makeCtx({ project: root })
     const res = await submit(ctx, { remote_dir: 'batch1', worker_args: ['--config', 'sweep_config.json'] })
     assert.equal(res.ok, true, JSON.stringify(res))
     const bsub = flatCommand(ctx, 'bsub -q')
@@ -1154,14 +1243,14 @@ test('toolchain pins (D-016): remote_python / remote_spectre_cmd resolve from th
     assert.deepEqual(job.worker_args, ['--config', 'sweep_config.json', '--spectre-cmd', PIN_SPECTRE])
 
     // ssh scheduler: the same pair, foreground
-    const sshCtx = makeCtx()
+    const sshCtx = makeCtx({ project: root })
     const res2 = await submit(sshCtx, { remote_dir: 'fore', scheduler: 'ssh' })
     assert.equal(res2.ok, true, JSON.stringify(res2))
     const ssh = flatCommand(sshCtx, '.hams_ssh_done')
     assert.ok(ssh.includes(`"${PIN_PY}" "/home/op/sim/.harnessams/scripts/spectre/spectre_sweep_worker.py" "--spectre-cmd" "${PIN_SPECTRE}" `), ssh)
 
     // a per-call remote_python (an absolute path) wins over the pin
-    const ctx3 = makeCtx()
+    const ctx3 = makeCtx({ project: root })
     await submit(ctx3, { remote_dir: 'batch3', remote_python: '/opt/tools/other/bin/python3' })
     const bsub3 = flatCommand(ctx3, 'bsub -q')
     assert.ok(bsub3.includes('"/opt/tools/other/bin/python3" '), bsub3)
@@ -1171,18 +1260,18 @@ test('toolchain pins (D-016): remote_python / remote_spectre_cmd resolve from th
     // a bare remote_python is refused BEFORE anything is staged — it resolves
     // to whatever tool python comes first on PATH (the 2026-11-24 incident)
     for (const bare of ['python3', 'python', 'rel/python3']) {
-      const ctx4 = makeCtx()
+      const ctx4 = makeCtx({ project: root })
       await assert.rejects(() => submit(ctx4, { remote_dir: 'batch4', remote_python: bare }),
         /remote_python must be an ABSOLUTE path to the executable/)
       assert.equal(ctx4.calls.filter((c) => c.name === 'ssh_upload').length, 0, 'rejected before the uploads')
     }
 
     // the spectre pin is the BUNDLED worker's contract only
-    const ctx5 = makeCtx()
+    const ctx5 = makeCtx({ project: root })
     await submit(ctx5, { remote_dir: 'batch5', worker: 'common/common_sweep_engine.py' })
     assert.ok(!flatCommand(ctx5, 'bsub -q').includes('--spectre-cmd'), 'a custom worker keeps its own argument contract')
     // ... and a worker_args entry the caller wrote always wins
-    const ctx6 = makeCtx()
+    const ctx6 = makeCtx({ project: root })
     await submit(ctx6, { remote_dir: 'batch6', worker_args: ['--spectre-cmd', '/opt/tools/legacy/bin/spectre'] })
     const own = flatCommand(ctx6, 'bsub -q')
     assert.equal(own.split('--spectre-cmd').length - 1, 1, 'exactly one --spectre-cmd')
@@ -1215,7 +1304,7 @@ test('toolchain pins (D-016): in-cluster — the local bsub carries the pins, th
   const localShared = path.resolve(shared)
   try {
     // local bsub through ctx.shell: the same resolution as the ssh schedulers
-    const ctx = makeShellCtx()
+    const ctx = makeShellCtx({ project: proj })
     const res = await tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir({ under: proj }), remote_dir: 'batch1', remote_root: shared, worker: 'spectre/spectre_sweep_worker.py',
     }, {})

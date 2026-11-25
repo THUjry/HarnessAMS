@@ -34,7 +34,8 @@ import os from 'node:os'
 import { sessionProject, readSessionConfigs, writeSessionConfig } from './server/project.js'
 import { isForkSession } from './server/forkdetect.js'
 import { remoteMachinesStatus, fetchMachines, checkableMachines } from './server/machines.js'
-import { initProjectStorage, healToolchainPins, readSettings } from './server/settings.js'
+import { initProjectStorage, healFromGlobalMemory, readSettings } from './server/settings.js'
+import { reconcileSettings } from './server/reconcile.js'
 import { parseFacts } from './server/agentsmd.js'
 import { getFreshMin, setFreshMin } from './server/globalstore.js'
 import { readCheckParams } from './server/checkparams.js'
@@ -79,7 +80,7 @@ export const REMOTE_WAIT_POLICY = 'HarnessAMS execution safety rules: if the sta
 export const MODEL_SOURCE_DISCIPLINE = 'HarnessAMS model-source discipline: never read files under PDK or model-library directories (no browsing, no grepping, no listing to discover model names or sections). The only sanctioned source of model includes, sections and simulator setup is the include lines already present in simulation logs the user provides (the input.scs of a run_dir, or artifacts of past runs) — reuse them verbatim. For a process that has never been run in this workspace, ask the user for the run_dir/log of one minimal no-parameter simulation first and learn the setup from it; afterwards prefer learning from past projects over re-deriving. When unsure which section or include applies, stop and ask the user instead of inspecting PDK trees.'
 
 export function toolDefinitions(ctx = {}) {
-  return [...selfcheckTools(ctx), ...batchTools(ctx), ...genReportTools(ctx), safeTrashTool()]
+  return [...selfcheckTools(ctx), ...batchTools(ctx), ...genReportTools(ctx), safeTrashTool(ctx)]
 }
 // Current tool surface: harnessams_selfcheck (self-check + project config),
 // batch_submit (local/ssh/lsf, per cluster_env) / batch_poll (monitor + terminal
@@ -191,6 +192,10 @@ async function handle(req, res, ctx) {
         settings: body?.settings,
         runId: body?.run_id,
         lang: body?.lang === 'zh' ? 'zh' : 'en',
+        // the UI funnel is USER-initiated (D-021): an AGENTS.md reconcile
+        // problem blocks the save with an error here, where the in-chat agent
+        // caller only gets warnings
+        source: 'user',
       })
       if (r.error) { json(r.code ?? 400, { error: r.error }); return }
       json(200, r)
@@ -210,8 +215,20 @@ async function handle(req, res, ctx) {
       if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
       try {
         const init = await initProjectStorage(project.path)
-        const healed = await healToolchainPins(project.path)
-        json(200, { ok: true, project, ...init, healed: healed.healed ?? [] })
+        // D-021: reconcile json ← AGENTS.md BEFORE the heal — a hand-edited
+        // block (e.g. a .harnessams deletion that kept AGENTS.md) adopts at the
+        // sidebar-open moment; invalid rows warn into the response (this is an
+        // automatic surface, no user to block). Agent semantics by design.
+        const rec = await reconcileSettings(project.path).catch(() => null)
+        const healed = await healFromGlobalMemory(project.path)
+        json(200, {
+          ok: true,
+          project,
+          ...init,
+          adopted: rec?.adopted ?? [],
+          warnings: rec?.warnings ?? [],
+          healed: healed.healed ?? [],
+        })
       } catch (e) {
         json(500, { error: `project init failed: ${String(e?.message ?? e)}` })
       }

@@ -98,10 +98,16 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
     assert.ok(!md.includes('remote_node:'), 'the alias row is gone')
     assert.ok(!md.includes('other_nodes:'), 'the alias-list row is gone')
     assert.ok(!md.includes('This is an out-of-cluster project'), 'the env prose statement is gone (yaml carries it)')
-    // the workflow table rides the values build
+    // the workflow table rides the values build (D-021 slim: purpose rows,
+    // parameter semantics live in the tool descriptions)
     assert.ok(md.includes(WORKFLOW_TABLE), 'the values sync renders the workflow table')
     assert.ok(md.includes('| Submit | batch_submit |'))
-    assert.ok(md.includes('"local" is unavailable out-of-cluster'), 'the scheduler cell forks on cluster_env')
+    assert.ok(md.includes('omit machine_id / remote_root / remote_python'),
+      'the submit row states what resolves from the config, not parameter semantics')
+    assert.ok(!md.includes('scheduler = "lsf"'), 'the scheduler cell moved to the batch_submit description')
+    // the two numpy tri-state rows (D-021): null until a green run measures
+    assert.ok(md.includes('  remote_python_numpy: null'), 'the remote numpy tri-state row renders null (unmeasured)')
+    assert.ok(md.includes('  local_python_numpy: null'), 'the local numpy tri-state row renders null (unmeasured)')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block after the sync')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
@@ -123,7 +129,9 @@ test('agentsmd: the toolchain pins mirror as yaml rows a session reads for remot
     assert.ok(md.indexOf('  compute_remote: "python"') < md.indexOf('  remote_python: ')
       && md.indexOf('  remote_python: ') < md.indexOf('  remote_spectre_cmd: ')
       && md.indexOf('  remote_spectre_cmd: ') < md.indexOf('  remote_root: '), 'row order: compute_remote, pins, remote paths')
-    assert.ok(md.includes('the interpreter named by the remote_python row'), 'the workflow table points at the row')
+    // D-021: the analyze recipe moved into the batch_poll DESCRIPTION — the
+    // table only points at it
+    assert.ok(md.includes('the interpreter per the remote_python row'), 'the analyze row points at the row via the recipe pointer')
     // an untyped settings object (no pin keys at all) still renders the rows as null
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: { ...settings, remote_python: undefined, remote_spectre_cmd: undefined } })
     const md2 = await readFile(agentsMdPath(ws), 'utf8')
@@ -141,11 +149,11 @@ test('agentsmd: re-syncing under different settings switches the table wording w
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: remoteLsf })
     let md = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(md.includes('"local" is unavailable out-of-cluster'))
+    // D-021: the scheduler matrix moved into the batch_submit description —
+    // the only remaining cluster_env fork in the block is the Analyze tool cell
+    assert.ok(md.includes('| Analyze | ssh_exec + ssh_download |'), 'out-of-cluster analyze over ssh')
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: localSpectre })
     md = await readFile(agentsMdPath(ws), 'utf8')
-    assert.ok(!md.includes('unavailable out-of-cluster'), 'cell switched to the in-cluster wording')
-    assert.ok(md.includes('bsub on this host'), 'in-cluster scheduler semantics')
     assert.ok(md.includes('| Analyze | python (direct) |'), 'analyze switched to direct python')
     assert.ok(!md.includes('| Analyze | ssh_exec'), 'old analyze wording fully replaced')
     // local mode: the non-applicable remote rows are OMITTED, not null — a

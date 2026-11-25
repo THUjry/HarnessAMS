@@ -2,17 +2,23 @@
 // analysis-surface tool — a pure report renderer. Raw-data processing is the
 // MODEL's job (remote analysis by default; only compact results are pulled
 // back), so this tool consumes a model-written spec JSON (points/curves inline
-// or via {"$file"} references), renders the sweep dashboard at the project
-// root (its data JS in SimResults/<report name>/ — one directory per report)
+// or via {"$file"} references), renders the sweep dashboard in the DESIGN
+// FOLDER (D-021, 2026-11-25: <project>/<design>/ holds the report HTML, its
+// data JS in SimResults/<report name>/ — one directory per report — and Figs/)
 // and registers the report into the CALLING session's dashboard. Chart PNGs go
-// into Figs/ ONLY when that session's "Report figures" option is on (HarnessAMS
-// session panel, default off — headless jsdom+plotly+resvg, fail-open).
+// into <design>/Figs/ ONLY when that session's "Report figures" option is on
+// (HarnessAMS session panel, default off — headless jsdom+plotly+resvg,
+// fail-open). Project anchoring (D-021): the OUTPUT root comes from the spec
+// (spec.project_dir, or the spec sitting in a SimResults/ directory — its
+// parent is the design folder); the CONFIG root (sessions store, plotly
+// source) comes from the calling session's project — no walk-up from paths.
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import { resolveDir } from '../py.js'
 import { readJsonBom, chartSpecs, curveMids, genReportFromSpec } from '../report_render.js'
 import { exportFigs } from '../figs_export.js'
+import { resolveProjectTool } from '../server/project.js'
 
 // --- report auto-registration target: the calling session's HarnessAMS ----
 // dashboard. Since the task retirement (2026-11-19, D-005) each DSH session
@@ -25,18 +31,11 @@ import { exportFigs } from '../figs_export.js'
 const SESSIONS_DIR = '.harnessams'
 const MAX_REPORTS = 32 // same cap as the sidebar's writer (server/project.js)
 
-// Walk up from startDir (max 8 levels) to the nearest ancestor holding a
-// .harnessams/ store directory. Returns { storeDir } or null.
-export function findSessionsStore(startDir) {
-  let d = path.resolve(startDir)
-  for (let i = 0; i < 8; i++) {
-    const storeDir = path.join(d, SESSIONS_DIR)
-    if (fs.existsSync(storeDir) && fs.statSync(storeDir).isDirectory()) return { storeDir }
-    const parent = path.dirname(d)
-    if (parent === d) break
-    d = parent
-  }
-  return null
+// Sessions store at a KNOWN project root (D-021: the config root comes from
+// the calling session — no ancestor walk-up). Returns { storeDir } always
+// (readSessionConfigs fails open on a missing store).
+export function sessionsStoreAt(projectRoot) {
+  return { storeDir: path.join(path.resolve(String(projectRoot ?? '.')), SESSIONS_DIR) }
 }
 
 // Append (or reuse) `reportPath` in session `sessionId`'s entry and select it
@@ -168,8 +167,9 @@ function buildRoundData(specRound, projectRoot, at) {
   return rd
 }
 
-// Project root: spec.project_dir > the spec file's parent's parent when the
-// spec sits directly in <project>/SimResults/ > error.
+// OUTPUT root (the design folder, D-021): spec.project_dir > the spec file's
+// parent's parent when the spec sits directly in <design>/SimResults/ > error.
+// Purely local — no project-root verification, no walk-up.
 function deriveProjectRoot(specFile, specObj) {
   if (specObj.project_dir) return path.resolve(String(specObj.project_dir))
   const abs = path.resolve(specFile)
@@ -177,7 +177,7 @@ function deriveProjectRoot(specFile, specObj) {
   return null
 }
 
-export function genReportTools() {
+export function genReportTools(ctx) {
   return [
     {
       name: 'gen_sweep_report',
@@ -186,10 +186,10 @@ export function genReportTools() {
         + 'extraction, dB conversion, batch aggregation) is yours — run it remotely by default and pull back only '
         + 'compact results. Spec: {project_dir?, title?, conclusions?, out?, meta?, rounds:[{id, title?, points, '
         + 'curves?, note?}]}; points/curves are inline arrays or {"$file": path} references resolved against the '
-        + 'project root (write big curve arrays to files, keep the spec small); each point is {index?, label?, '
+        + 'output root (write big curve arrays to files, keep the spec small); each point is {index?, label?, '
         + 'params:{}, metrics:{}, status?}; curves is {x_signal, signals:[{name, dB?}], points:[{index, label?, '
         + 'x:[], y:{}}]}. Pitfalls: "out" is the LITERAL report filename — bare, ends with .html, no directories '
-        + '(write "MyReport.html", not "MyReport"; the report lands at <project>/<out>, its data JS in '
+        + '(write "MyReport.html", not "MyReport"; the report lands at <design>/<out>, its data JS in '
         + 'SimResults/<out minus .html>/); "meta" must be a plain string (any other type is silently dropped). '
         + 'project_dir defaults to the spec location\'s parent when the spec sits in '
         + '<project>/SimResults/. Outputs: report at <project>/<out>, its data JS in SimResults/<report name>/ '
@@ -201,6 +201,7 @@ export function genReportTools() {
         + 'dropdown lists rounds newest-first; charts and table cross-highlight.',
       parameters: {
         spec: { type: 'string', required: true, description: 'Path to the report spec JSON (see description for the schema)' },
+        project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
       },
       async execute(args, exec) {
         const specFile = resolveDir(args.spec)
@@ -214,11 +215,20 @@ export function genReportTools() {
         if (!spec || typeof spec !== 'object' || Array.isArray(spec)) {
           throw new Error(`spec must be a JSON object: ${specFile}`)
         }
+        // OUTPUT root = the design folder (spec-anchored, local rule); CONFIG
+        // root = the calling session's project (D-021: the sessions store, the
+        // plotly source, and the registration all resolve there — no walk-up).
         const project = deriveProjectRoot(specFile, spec)
         if (!project) {
-          throw new Error('cannot determine the project root — set project_dir in the spec, or place the spec '
-            + 'directly inside <project>/SimResults/')
+          throw new Error('cannot determine the output root (the design folder) — set project_dir in the spec, or place the spec '
+            + 'directly inside <design>/SimResults/')
         }
+        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        const p = sid || args.project
+          ? resolveProjectTool(ctx.workspaceRegistry, sid, args.project)
+          : null
+        if (p?.error) throw new Error(p.error)
+        const configRoot = p?.project?.path ?? null
         if (!Array.isArray(spec.rounds) || !spec.rounds.length) {
           throw new Error('spec.rounds must be a non-empty array of {id, points, curves?}')
         }
@@ -240,13 +250,13 @@ export function genReportTools() {
           outName,
           rounds: roundData,
         }
-        const gen = genReportFromSpec(project, prepared)
+        const gen = genReportFromSpec(project, prepared, { configRoot })
 
         // The calling session (identity = exec.agent.id, which IS the SessionId
         // — D-005) and its store: the PNG gate and the registration both key
-        // off them.
-        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
-        const found = sid ? findSessionsStore(project) : null
+        // off them. No session-resolved project → no store lookup (the report
+        // still renders; the plotly source falls to the CDN).
+        const found = configRoot ? sessionsStoreAt(configRoot) : null
 
         // PNG export is OPT-IN per session: the "Report figures" option of the
         // calling session in the HarnessAMS session panel (default off —
@@ -285,7 +295,8 @@ export function genReportTools() {
             + result.report_path + ' but not registered (add it in the HarnessAMS sidebar dashboard)'
         } else if (!found) {
           result.registered = false
-          result.register_error = `no HarnessAMS session store (.harnessams) found above ${project} — open the HarnessAMS sidebar in this workspace once first`
+          result.register_error = 'no project resolved for the calling session — report generated at '
+            + result.report_path + ' but not registered (open the HarnessAMS sidebar in this workspace once first)'
         } else {
           const r = await registerReportIntoSession(found.storeDir, sid, gen.reportPath)
           if (r.error) { result.registered = false; result.register_error = r.error }

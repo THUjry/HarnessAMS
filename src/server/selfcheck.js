@@ -56,8 +56,10 @@ import { runPython } from '../py.js'
 import { callTool, execRemote, uploadFile, downloadFile, shq } from '../remote.js'
 import { execLocal, localCopy } from '../localchannel.js'
 import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
-import { healToolchainPins, readSettings, resolveScriptsSource, validateSettings, writeSettings, PIN_KEYS, normalizePin } from './settings.js'
-import { updateNodePins } from './globalstore.js'
+import { healFromGlobalMemory, readSettings, resolveScriptsSource, validateSettings, writeSettings, PIN_KEYS, normalizePin, NUMPY_STATES } from './settings.js'
+import { reconcileSettings } from './reconcile.js'
+import { updateNodePins, updateLocalFacts } from './globalstore.js'
+import { localEnvFacts } from './checks.js'
 import { ensureProjectScripts, genSelfcheckRcPath } from './scriptStage.js'
 import { syncAgentsMd } from './agentsmd.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
@@ -307,11 +309,22 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
   } catch (e) {
     return { error: `workspace_config.json unreadable: ${e?.message ?? e}`, code: 400 }
   }
-  // D-017 prefill: null pins heal from the plugin-global node memory before
-  // anything runs, so the run submits under the paths the AGENTS.md yaml will
-  // claim (best-effort — an unreadable memory keeps what was just read)
+  // D-021: reconcile json ← AGENTS.md BEFORE the prefill — a hand-edited block
+  // (the agent's natural config-edit route) adopts here so the run submits
+  // under the edited values; invalid rows warn into the run record and keep
+  // the json values (agent semantics: a run is not a save, nothing blocks).
+  const reconcileWarnings = []
   try {
-    const healed = await healToolchainPins(project.path)
+    const rec = await reconcileSettings(project.path)
+    if (rec.settings) settings = rec.settings
+    if (rec.warnings?.length) reconcileWarnings.push(...rec.warnings)
+  } catch { /* keep the settings as read */ }
+  // D-017/D-021 prefill: null pins and python facts heal from the
+  // plugin-global memories before anything runs, so the run submits under the
+  // paths the AGENTS.md yaml will claim (best-effort — an unreadable memory
+  // keeps what was just read)
+  try {
+    const healed = await healFromGlobalMemory(project.path)
     if (healed.settings) settings = healed.settings
   } catch { /* keep the settings as read */ }
 
@@ -405,8 +418,9 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     if (store.get(id).status === 'running') continue
     store.delete(id)
   }
+  if (reconcileWarnings.length) run.reconcileWarnings = reconcileWarnings
   void orchestrate(run)
-  return { runId }
+  return { runId, ...(reconcileWarnings.length ? { warnings: reconcileWarnings } : {}) }
 }
 
 // A run is only reachable by its id (action=run returns the run_id; the client
@@ -735,7 +749,7 @@ async function localChain(run, sim) {
       const runDir = path.join(run.runDir, topo)
       const step = await timedStep(run, { item: `batch_submit local ${topo.toUpperCase()} (9 pts)`, settingColumn: 'run_mode' }, async (stepRef) => {
         const sub = await callTool(ctx, 'batch_submit',
-          { run_dir: runDir, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' },
+          { run_dir: runDir, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local', project: run._priv.project.path },
           { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
         if (sub.isError) {
           return { ok: false, result: 'submit failed', detail: String(sub.text || '').slice(0, 400) }
@@ -747,7 +761,7 @@ async function localChain(run, sim) {
         const budget = Date.now() + POLL_BUDGET_MS
         while (Date.now() < budget) {
           checkCancelled(run)
-          last = await callTool(ctx, 'batch_poll', { run_dir: runDir },
+          last = await callTool(ctx, 'batch_poll', { run_dir: runDir, project: run._priv.project.path },
             { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
           const parsed = extractStateJson(last.text)
           state = parsed?.state ?? null
@@ -920,6 +934,7 @@ async function remoteSpectreChain(run) {
         machine_id: settings.machine_id,
         remote_root: settings.remote_root,
         scheduler,
+        project: run._priv.project.path,
       }, { timeoutMs: scheduler === 'ssh' ? 660_000 : 900_000, signal: run._priv.cancel.controller.signal })
       const job = readJob(staging)
       if (r.isError || !job) ok = false
@@ -954,7 +969,7 @@ async function remoteSpectreChain(run) {
       let last = null
       while (Date.now() < budget) {
         checkCancelled(run) // user stop lands within one poll interval (5 s)
-        const r = await callTool(ctx, 'batch_poll', { run_dir: staging, machine_id: settings.machine_id },
+        const r = await callTool(ctx, 'batch_poll', { run_dir: staging, machine_id: settings.machine_id, project: run._priv.project.path },
           { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
         last = r
         const parsed = extractStateJson(r.text)
@@ -1182,7 +1197,11 @@ export async function autoPinToolchain(run) {
   const patch = {}
   if (tel.python && normalizePin(tel.python, 'remote_python').value) patch.remote_python = tel.python
   if (tel.spectre && normalizePin(tel.spectre, 'remote_spectre_cmd').value) patch.remote_spectre_cmd = tel.spectre
-  if (!PIN_KEYS.some((k) => patch[k] != null)) return
+  // D-021: the numpy tri-state of the interpreter that ran the worker (the
+  // worker probes it at startup — yes / fallback / no); it lands alongside
+  // the pins it describes
+  if (NUMPY_STATES.includes(tel.numpy)) patch.remote_python_numpy = tel.numpy
+  if (!PIN_KEYS.some((k) => patch[k] != null) && patch.remote_python_numpy == null) return
   const stored = run._priv.settings
   const v = validateSettings({ ...stored, ...patch })
   if (v.error) return
@@ -1197,8 +1216,38 @@ export async function autoPinToolchain(run) {
       host: run._priv.machine?.host ?? (tel.node ? String(tel.node) : null),
       remote_python: patch.remote_python ?? v.settings.remote_python ?? null,
       remote_spectre_cmd: patch.remote_spectre_cmd ?? v.settings.remote_spectre_cmd ?? null,
+      remote_python_numpy: v.settings.remote_python_numpy ?? null,
     }).catch(() => { /* best-effort memory; the settings pin already landed */ })
   }
+}
+
+// D-021: measure THIS host's python facts once (version + executable + the
+// numpy tri-state, one probe with the project's staged numfallback asset in
+// scope) and persist them into the settings AND the plugin-global local
+// memory — the finalize sync right after renders the fresh rows, and fresh
+// projects on this machine prefill from the memory. Best-effort: a degraded
+// probe (no executable path) keeps the existing facts untouched.
+async function persistLocalFacts(run) {
+  const project = run._priv.project
+  const facts = await localEnvFacts(project.path).catch(() => null)
+  const p = facts?.python
+  if (!p?.version || !p?.path) return
+  const patch = {
+    local_python_version: p.version,
+    local_python_path: p.path,
+    ...(p.numpy ? { local_python_numpy: p.numpy } : {}),
+  }
+  let cur
+  try {
+    ({ settings: cur } = await readSettings(project.path))
+  } catch {
+    return
+  }
+  const v = validateSettings({ ...cur, ...patch })
+  if (v.error) return
+  await writeSettings(project.path, v.settings).catch(() => {})
+  run._priv.settings = v.settings
+  await updateLocalFacts(patch).catch(() => { /* best-effort memory */ })
 }
 
 function finalize(run) {
@@ -1260,12 +1309,20 @@ function finalize(run) {
     void cleanRunArtifacts(run.runDir).catch(() => {})
   }
   // the auto-pin must land BEFORE the AGENTS.md sync — the yaml then renders
-  // with the just-measured pins, not the nulls the run started with
+  // with the just-measured pins, not the nulls the run started with.
+  // D-021 order: (1) reconcile json ← AGENTS.md — a hand-edit made DURING the
+  // run would otherwise be clobbered by this re-render (non-pin keys keep the
+  // edit; pin keys keep the measurement below, D-016); (2) auto-pin the
+  // measured toolchain + the remote numpy tri-state; (3) measure and persist
+  // the local python facts; (4) re-render.
   void (async () => {
     try {
+      const rec = await reconcileSettings(run._priv.project.path).catch(() => null)
+      if (rec?.settings) run._priv.settings = rec.settings
       await autoPinToolchain(run)
       void persistRun(run)
     } catch { /* best-effort: the honest nulls simply stay */ }
+    await persistLocalFacts(run).catch(() => { /* best-effort: existing facts stand */ })
     await syncAgentsMd(run._priv.ctx, { project: run._priv.project, settings: run._priv.settings })
       .catch(() => { /* best-effort at finalize; the save button can always re-sync */ })
   })()

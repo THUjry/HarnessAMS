@@ -11,11 +11,18 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { genReportTools, findSessionsStore, registerReportIntoSession, sessionReportFigs } from '../src/tools/gen_report.js'
+import { genReportTools, sessionsStoreAt, registerReportIntoSession, sessionReportFigs } from '../src/tools/gen_report.js'
 import { makeTool } from '../src/tool.js'
 
 const SID_A = 'session-aaaa1111-2222-3332-4444-555555555555'
 const SID_B = 'session-bbbb1111-2222-3332-4444-555555555555'
+
+// D-021 anchoring: the report tool resolves the calling session's project
+// through ctx.workspaceRegistry (no path walk-up) — a minimal registry mapping
+// the fixture workspace to the session ids the tests use.
+function registryCtx(ws) {
+  return { workspaceRegistry: { list: () => [{ id: 'ws-inject', path: ws, title: 'inject', sessionIds: [SID_A, SID_B] }] } }
+}
 
 async function makeWorkspace() {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-inject-'))
@@ -45,21 +52,17 @@ async function setSessionFigs(storeDir, sid, on) {
   await writeFile(file, JSON.stringify(store, null, 2) + '\n', 'utf8')
 }
 
-test('inject: findSessionsStore walks up to the nearest .harnessams and returns null without one', async () => {
+test('inject: sessionsStoreAt anchors at a GIVEN project root (D-021: no walk-up)', async () => {
   const { ws } = await makeWorkspace()
-  const deep = path.join(ws, 'proj', 'sub')
-  await mkdir(deep, { recursive: true })
-  assert.deepEqual(findSessionsStore(deep), { storeDir: path.join(ws, '.harnessams') })
-
-  // nearest ancestor wins over a farther one
-  const inner = path.join(deep, '.harnessams')
-  await mkdir(inner, { recursive: true })
-  assert.deepEqual(findSessionsStore(deep), { storeDir: inner })
-
-  const bare = await mkdtemp(path.join(tmpdir(), 'hams-inject-bare-'))
-  assert.equal(findSessionsStore(bare), null)
-  await rm(bare, { recursive: true, force: true })
-  await rm(ws, { recursive: true, force: true })
+  try {
+    // the store dir is always <projectRoot>/.harnessams — a nested design
+    // folder is NOT discovered (the caller passes the session-resolved root)
+    assert.deepEqual(sessionsStoreAt(ws), { storeDir: path.join(ws, '.harnessams') })
+    const design = path.join(ws, 'Pi12dB')
+    assert.deepEqual(sessionsStoreAt(design), { storeDir: path.join(design, '.harnessams') })
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
 })
 
 test('inject: registerReportIntoSession appends, selects, dedupes by path, preserves siblings + check_params', async () => {
@@ -160,7 +163,7 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
       ],
     }), 'utf8')
 
-    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
+    const tool = makeTool(genReportTools(registryCtx(ws)).find((d) => d.name === 'gen_sweep_report'))
     const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
     assert.equal(res.ok, true)
     assert.equal(res.registered, true)
@@ -248,7 +251,7 @@ test('gen_sweep_report: spec errors are actionable; project root derives from a 
     const proj = path.join(ws, 'projY')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
-    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
+    const tool = makeTool(genReportTools(registryCtx(ws)).find((d) => d.name === 'gen_sweep_report'))
 
     // spec in <project>/SimResults/ → project root derived, no project_dir
     await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
@@ -281,7 +284,7 @@ test('gen_sweep_report: spec errors are actionable; project root derives from a 
 
     // a spec outside SimResults without project_dir → derivation error
     await writeFile(path.join(ws, 'loose.json'), JSON.stringify({ rounds: [{ id: 'r1', points: [{ index: 0 }] }] }), 'utf8')
-    await assert.rejects(() => tool.execute({ spec: path.join(ws, 'loose.json') }), /project root/)
+    await assert.rejects(() => tool.execute({ spec: path.join(ws, 'loose.json') }), /output root/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }
@@ -295,7 +298,7 @@ test('gen_sweep_report: PNG export fails open — no charts or a broken renderer
     const proj = path.join(ws, 'projZ')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
-    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
+    const tool = makeTool(genReportTools(registryCtx(ws)).find((d) => d.name === 'gen_sweep_report'))
 
     // a round with no metrics and no curves → zero charts → skipped, ok
     await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
@@ -334,7 +337,7 @@ test('gen_sweep_report: PNG export is opt-in — report_figs off (default) skips
     const proj = path.join(ws, 'projW')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
-    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
+    const tool = makeTool(genReportTools(registryCtx(ws)).find((d) => d.name === 'gen_sweep_report'))
     await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
       project_dir: proj,
       rounds: [{
@@ -409,7 +412,7 @@ test('gen_sweep_report: two reports of one project keep separate data (the v1-sh
     const proj = path.join(ws, 'projV')
     const simres = path.join(proj, 'SimResults')
     await mkdir(simres, { recursive: true })
-    const tool = makeTool(genReportTools().find((d) => d.name === 'gen_sweep_report'))
+    const tool = makeTool(genReportTools(registryCtx(ws)).find((d) => d.name === 'gen_sweep_report'))
     // the SAME round id with different numbers: v1 says m=1, v2 says m=2
     const spec = (metric, out) => JSON.stringify({
       project_dir: proj, ...(out ? { out } : {}),

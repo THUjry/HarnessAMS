@@ -22,9 +22,9 @@
 // cache intact. The yaml is pure English by ruling and single-level; UI
 // table = config file = AGENTS.md by construction (the same tool writes
 // both).
+import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { localEnvFacts } from './checks.js'
 import { workflowTable } from './selfcheckWorkflow.js'
 
 const BEGIN = '<!-- hams-config:begin (HarnessAMS plugin-managed block; the harnessams_selfcheck tool overwrites it — keep edits outside the markers) -->'
@@ -51,19 +51,26 @@ export function agentsMdPath(workspacePath) {
 const q = (v) => JSON.stringify(String(v))
 const scalar = (v) => (v === null || v === undefined ? 'null' : typeof v === 'boolean' ? String(v) : q(v))
 
-// Single-level projection: meta + workspace root + the settings mirror + local
-// env facts + the latest finished self-check verdict. Machine rendering
-// (D-018, revising the 2026-11-24 alias-absent clause): the CONFIGURED
+// Single-level projection: meta + workspace root + the settings mirror + the
+// python-fact rows + the latest finished self-check verdict. Machine rendering
+// (D-018, revising the 2024-11-24 alias-absent clause): the CONFIGURED
 // machine_id renders as one row so the model sees which ssh alias the
 // project's batches and remote-first analysis use; alias INVENTORIES and host
 // addresses never appear — the machine card / ssh_list is the inventory. The
 // remote side is stated as paths (remote_root, remote_scripts_dir, the
-// toolchain pins remote_python / remote_spectre_cmd, and the self-check dir).
+// toolchain pins remote_python / remote_spectre_cmd, the remote_python_numpy
+// tri-state, and the self-check dir).
 // 2026-11-25 shape (D-016/D-017): the local env rows carry the local_ prefix,
 // the selfcheck group sits at the tail (selfcheck_remote_dir + the verdicts),
 // and rows that would render null because they do not apply (machine_id,
 // remote_root / remote_scripts_dir in local mode) are OMITTED, not left
 // empty — a synced values build never leaves an unfilled row behind.
+// 2026-11-25 D-021: the local_node_* rows render from PROCESS facts (dsh runs
+// on node — always available, never a subprocess probe; filled at template
+// establishment too); the local_python_* rows (version, path, numpy
+// tri-state) render from the PERSISTED settings — measured at self-check
+// finalize and prefilled from the plugin-global local memory, so the yaml
+// never spawns a probe per sync.
 function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   const s = settings ?? {}
   const lines = ['hams_project_config:']
@@ -82,14 +89,16 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   }
   row('remote_python', s.remote_python ?? null)
   row('remote_spectre_cmd', s.remote_spectre_cmd ?? null)
+  row('remote_python_numpy', s.remote_python_numpy ?? null)
   if (s.remote_root) {
     row('remote_root', s.remote_root)
     row('remote_scripts_dir', `${String(s.remote_root).replace(/\/+$/, '')}/.harnessams/scripts`)
   }
   row('local_node_version', env?.node?.version)
   row('local_node_path', env?.node?.path)
-  row('local_python_version', env?.python?.version)
-  row('local_python_path', env?.python?.path)
+  row('local_python_version', s.local_python_version ?? null)
+  row('local_python_path', s.local_python_path ?? null)
+  row('local_python_numpy', s.local_python_numpy ?? null)
   row('selfcheck_remote_dir', s.selfcheck_remote_dir)
   row('last_selfcheck_run_id', run?.run_id ?? null)
   row('last_selfcheck_finished_at', run?.finished_at ?? null)
@@ -99,13 +108,20 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   return lines
 }
 
+// Process facts for the local_node_* rows — free (no probe), always current.
+function nodeEnv() {
+  return { node: { version: process.version, path: process.execPath } }
+}
+
 // The whole block between the markers, header included: constraints bullets,
-// then the yaml table, then (values builds only — settings present) the
+// then the yaml table, then (values builds only — facts.table set) the
 // recommended-workflow table. The first-fill template renders constraints +
-// an empty yaml; the values rewrite adds the workflow table.
+// a yaml whose local_node_* rows carry the process facts and whose python
+// rows carry whatever was prefilled (null on a never-measured machine); the
+// values rewrite adds the workflow table.
 function buildSection(facts) {
   const parts = [BEGIN, HEADER, '', ...CONSTRAINTS, '', '```yaml', yamlLines(facts).join('\n'), '```']
-  if (facts.settings) parts.push('', workflowTable(facts.settings))
+  if (facts.table) parts.push('', workflowTable(facts.settings ?? {}))
   parts.push(END)
   return parts.join('\n')
 }
@@ -130,14 +146,21 @@ async function atomicWrite(file, text) {
 
 // Idempotent first-fill template: only writes when the file or the marked
 // block is missing, never overwrites values, never throws (a broken template
-// must not fail the settings/session write that calls it).
-export async function ensureAgentsMdTemplate(workspacePath) {
+// must not fail the settings/session write that calls it). `facts.settings`
+// (optional) prefills the python-fact rows — initProjectStorage passes the
+// freshly global-memory-prefilled settings so establishment already shows
+// them (D-021 "fill at establishment"); the local_node_* rows always render
+// from process. No workflow table at first fill (facts.table unset).
+export async function ensureAgentsMdTemplate(workspacePath, facts = {}) {
   try {
     if (!workspacePath || typeof workspacePath !== 'string') return { ok: false, error: 'workspacePath is required' }
     const file = agentsMdPath(workspacePath)
     const existing = await fsp.readFile(file, 'utf8').catch((e) => (e.code === 'ENOENT' ? null : Promise.reject(e)))
     if (existing != null && existing.includes(BEGIN)) return { ok: true, created: false }
-    await atomicWrite(file, spliceSection(existing ?? '', buildSection({})))
+    await atomicWrite(file, spliceSection(existing ?? '', buildSection({
+      settings: facts.settings,
+      env: nodeEnv(),
+    })))
     return { ok: true, created: true }
   } catch (e) {
     return { ok: false, error: String(e?.message ?? e) }
@@ -175,15 +198,10 @@ export async function latestSelfcheckRun(workspacePath) {
 // block is the per-project record, so no global "latest run" surface is
 // needed. Rows are `  key: value` single-level scalars: the YAML null literal
 // or a JSON double-quoted string. Returns null when the file/block/fence is
-// missing (nothing to restore yet).
-export async function parseFacts(workspacePath) {
-  if (!workspacePath || typeof workspacePath !== 'string') return null
-  let text
-  try {
-    text = await fsp.readFile(agentsMdPath(workspacePath), 'utf8')
-  } catch {
-    return null
-  }
+// missing (nothing to restore yet). parseFactsSync is the same parse for the
+// synchronous read paths (the batch tools' AGENTS.md overlay, D-021).
+function parseFactsText(text) {
+  if (typeof text !== 'string') return null
   const begin = text.indexOf(BEGIN)
   if (begin < 0) return null
   const end = text.indexOf(END, begin)
@@ -205,22 +223,45 @@ export async function parseFacts(workspacePath) {
   return facts
 }
 
+export async function parseFacts(workspacePath) {
+  if (!workspacePath || typeof workspacePath !== 'string') return null
+  let text
+  try {
+    text = await fsp.readFile(agentsMdPath(workspacePath), 'utf8')
+  } catch {
+    return null
+  }
+  return parseFactsText(text)
+}
+
+export function parseFactsSync(workspacePath) {
+  if (!workspacePath || typeof workspacePath !== 'string') return null
+  let text
+  try {
+    text = fs.readFileSync(agentsMdPath(workspacePath), 'utf8')
+  } catch {
+    return null
+  }
+  return parseFactsText(text)
+}
+
 // Values sync behind the harnessams_selfcheck tool (action=save_agentsmd) and
 // the self-check finalize. settings come from the caller (readSettings at the
 // action — keeps this module free of a settings.js import cycle, since
-// settings.js hooks ensureAgentsMdTemplate). Degrades to empty strings instead
-// of failing the write when a fact is unprobeable.
+// settings.js hooks ensureAgentsMdTemplate). No python probe here anymore
+// (D-021): the local_node_* rows render from process, the local_python_* rows
+// from the persisted settings the caller passes.
 export async function syncAgentsMd(ctx, { project, settings }) {
   try {
     if (!project?.path) return { error: 'project.path is required' }
-    const env = await localEnvFacts()
     const run = await latestSelfcheckRun(project.path)
     const section = buildSection({
       syncedAt: new Date().toISOString(),
       workspaceRoot: project.path,
       settings,
-      env,
+      env: nodeEnv(),
       run,
+      table: true,
     })
     const file = agentsMdPath(project.path)
     const existing = await fsp.readFile(file, 'utf8').catch((e) => (e.code === 'ENOENT' ? null : Promise.reject(e)))

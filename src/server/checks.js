@@ -11,28 +11,60 @@ import { promisify } from 'node:util'
 
 const execFileAsync = promisify(execFile)
 
-// One python probe: version + absolute executable in a single call
-// (sys.executable is the interpreter's own path — no PATH guessing, which the
-// old `python --version` row could not provide). Falls back to `--version`
-// (path stays empty) for exotic shells; throws only when both probes fail.
-async function probePython() {
+// One python probe: version + absolute executable + the numpy tri-state in a
+// single call (sys.executable is the interpreter's own path — no PATH
+// guessing, which the old `python --version` row could not provide). The
+// numpy leg answers yes / fallback / no (D-021): native `import numpy`; else
+// the staged numfallback asset (assetsDir as argv[1]) imports; else neither
+// (a python 2 shell where even the pure-stdlib fallback has py3 syntax).
+// Falls back to `--version` (path empty, numpy unmeasured) for exotic shells;
+// throws only when both probes fail.
+const PROBE_CODE = [
+  'import sys',
+  'print(sys.version.split()[0])',
+  'print(sys.executable)',
+  'try:',
+  '    import numpy',
+  '    print("yes")',
+  'except Exception:',
+  '    try:',
+  '        if len(sys.argv) > 1 and sys.argv[1]:',
+  '            sys.path.insert(0, sys.argv[1])',
+  '        import numfallback',
+  '        print("fallback")',
+  '    except Exception:',
+  '        print("no")',
+].join('\n')
+
+async function probePython(assetsDir) {
   try {
-    const { stdout } = await execFileAsync('python',
-      ['-c', 'import sys; print(sys.version.split()[0]); print(sys.executable)'], { timeout: 15000 })
-    const [version, exe] = stdout.trim().split(/\r?\n/)
-    if (version) return { version: version.trim(), path: (exe ?? '').trim() }
+    const { stdout } = await execFileAsync('python', ['-c', PROBE_CODE, assetsDir ?? ''], { timeout: 15000 })
+    const [version, exe, numpy] = stdout.trim().split(/\r?\n/)
+    if (version) {
+      return {
+        version: version.trim(),
+        path: (exe ?? '').trim(),
+        numpy: ['yes', 'no', 'fallback'].includes(numpy) ? numpy : null,
+      }
+    }
   } catch { /* fall through to --version */ }
   const { stdout } = await execFileAsync('python', ['--version'], { timeout: 15000 })
-  return { version: stdout.trim().replace(/^Python\s+/i, ''), path: '' }
+  return { version: stdout.trim().replace(/^Python\s+/i, ''), path: '', numpy: null }
 }
 
-// Node + python facts ({ version, path } each) for the AGENTS.md config table
-// and the local-env rows. Never throws: a missing python degrades to empty
-// strings plus .error so one absent interpreter cannot fail a config sync.
-export async function localEnvFacts() {
+// Node + python facts for the AGENTS.md config table, the local-env rows, and
+// the finalize-side measurement (persistLocalFacts). Never throws: a missing
+// python degrades to empty strings plus .error so one absent interpreter
+// cannot fail a config sync. `projectPath` anchors the numfallback probe (the
+// project's staged .harnessams/assets bucket); without one the fallback leg
+// is skipped and the numpy answer degrades to yes/no.
+export async function localEnvFacts(projectPath) {
   const node = { version: process.version, path: process.execPath }
-  const p = await probePython().catch((e) => ({ error: String(e?.message ?? e) }))
-  const python = { version: p?.version ?? '', path: p?.path ?? '', error: p?.error ?? '' }
+  const assetsDir = typeof projectPath === 'string' && projectPath
+    ? path.join(projectPath, '.harnessams', 'assets')
+    : null
+  const p = await probePython(assetsDir).catch((e) => ({ error: String(e?.message ?? e) }))
+  const python = { version: p?.version ?? '', path: p?.path ?? '', numpy: p?.numpy ?? null, error: p?.error ?? '' }
   return { node, python }
 }
 
@@ -52,8 +84,9 @@ export async function runLocalChecks(rootPath) {
   // config table stores version + path, and the row keeps the same facts.
   await t('Node', async () => ({ result: process.version, detail: process.execPath }))
   await t('Python', async () => {
-    const p = await probePython()
-    return { result: 'Python ' + p.version, detail: p.path || '(executable path not resolved)' }
+    const p = await probePython(path.join(root, '.harnessams', 'assets'))
+    return { result: 'Python ' + p.version, detail: (p.path || '(executable path not resolved)')
+      + (p.numpy ? `, numpy: ${p.numpy}` : '') }
   })
   await t('Disk capacity (workspace)', async () => {
     const st = await fsp.statfs(root)

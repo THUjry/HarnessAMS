@@ -1834,8 +1834,20 @@ window.__ModuleLoader__.load({
       }
 
       const dirty = !!draft && !!settings && JSON.stringify(draft) !== JSON.stringify(settings)
-      // pending edits ride along on every action (strict UI = config = AGENTS.md)
-      const pendingSettings = () => (dirty ? draft : undefined)
+      // pending edits ride along on every action (strict UI = config = AGENTS.md).
+      // D-021: send only the DIRTY KEYS, not the full draft — a full draft would
+      // clobber values the server just adopted from a hand-edited AGENTS.md block
+      // (or another writer changed between our last poll and this save) with the
+      // stale copies this browser still holds; the server merges partial
+      // payloads key by key.
+      const pendingSettings = () => {
+        if (!dirty || !draft || !settings) return undefined
+        const diff = {}
+        for (const k of Object.keys(draft)) {
+          if (JSON.stringify(draft[k]) !== JSON.stringify(settings[k])) diff[k] = draft[k]
+        }
+        return Object.keys(diff).length ? diff : undefined
+      }
 
       const commitOk = (r) => {
         if (r && dirty) setSettings({ ...draft })
@@ -1907,16 +1919,16 @@ window.__ModuleLoader__.load({
       }, [checkAllPending, run?.status])
 
       // Working-environment switch (cluster_env, D-002): the toggle opens a
-      // confirm dialog first; the write rides the SAVED settings (not the
-      // staged draft) so an unconfirmed table edit never sneaks along, and
-      // save_agentsmd re-renders the AGENTS.md workflow for the new
+      // confirm dialog first; the write sends ONLY the environment key (D-021:
+      // a full base would clobber server-side adoptions — the AGENTS.md
+      // reconcile, the global-memory heal — with this browser's stale copy),
+      // and save_agentsmd re-renders the AGENTS.md workflow for the new
       // environment in the same call.
       const commitEnv = async (next) => {
         setEnvDialog(null)
-        const base = { ...(lastServerRef.current ?? draft ?? {}), cluster_env: next }
         setSaveState({ status: 'running' })
         try {
-          const r = await callToolRoute({ sessionId, action: 'save_agentsmd', lang: effectiveLang(), settings: base })
+          const r = await callToolRoute({ sessionId, action: 'save_agentsmd', lang: effectiveLang(), settings: { cluster_env: next } })
           setDraft((prev) => (prev ? { ...prev, cluster_env: next } : prev))
           refetchSettings()
           setSaveState({ status: 'done', path: r.path })
