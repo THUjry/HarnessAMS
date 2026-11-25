@@ -2031,16 +2031,21 @@ window.__ModuleLoader__.load({
         fetchJson(API + '/project?sessionId=' + encodeURIComponent(sessionId))
           .then((r) => {
             if (!alive) return
-            if (!r?.project || r.project.path !== overviewMemory.path) {
+            // the facts ride the route as a SIBLING of project (the server's
+            // contract, see index.js /api/project + the selfcheck tests) —
+            // fold them onto the project object here, the cached shape the
+            // restore display reads (D-017)
+            const projectInfo = r?.project ? { ...r.project, selfcheck_facts: r.selfcheck_facts ?? null } : null
+            if (!projectInfo || projectInfo.path !== overviewMemory.path) {
               // different (or first) project: drop the cached surfaces so the
               // checks effect below refetches for the new workspace
-              overviewMemory.path = r?.project?.path ?? null
+              overviewMemory.path = projectInfo?.path ?? null
               overviewMemory.project = null
               overviewMemory.checksInfo = null
               setChecksInfo(null)
             }
-            setProject(r.project ?? null)
-            setReason(r.project ? null : r.reason ?? null)
+            setProject(projectInfo)
+            setReason(projectInfo ? null : r.reason ?? null)
           })
           .catch((e) => { if (alive) { setProject(null); setReason(String(e.message ?? e)) } })
         return () => { alive = false }

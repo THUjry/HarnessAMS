@@ -1637,6 +1637,8 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
   assert.ok(src.includes('SETTING_COLS'), 'row config drives the transposed three-column table (name / value / verdict)')
   assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath, facts: project.selfcheck_facts ?? null })'),
     'mounted in the Overview tab with the AGENTS.md facts (D-017 restore display)')
+  assert.ok(src.includes('selfcheck_facts: r.selfcheck_facts ?? null'),
+    'the route returns facts as a SIBLING of project — the client folds them onto the project object before the cached shape')
   assert.match(src, /,\s*3_000\s*\)/, '3s poll while running')
   assert.match(src, /,\s*1_000\s*\)/, '1s settings poll follows tool-side config writes')
   assert.ok(src.includes("'local'"), 'local dir display branch')
