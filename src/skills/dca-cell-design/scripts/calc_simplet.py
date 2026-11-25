@@ -9,7 +9,7 @@ R_shunt/4); the resistive part is the remainder Rpoly = R_shunt - Ron. The
 legacy ZTC ratio method is retired — residual temperature drift is accepted
 and recorded, not compensated.
 
-Switch data comes from the bundled sky130_examples/nfet_switch.json
+Switch data comes from the bundled sky130_examples/sky130proc/nfet_switch.json
 (sky130_fd_pr__nfet_01v8_lvt ron_w product, l=0.15, Vgs=1.8). R/C are IDEAL
 elements — no resistor geometry is computed.
 
@@ -26,7 +26,8 @@ R0 = 50.0
 FREQS = [1, 5, 10, 15, 20, 25, 30, 35, 40]  # GHz, flatness estimate band
 
 DEFAULT_DATA_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'sky130_examples'))
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
+                 'sky130_examples', 'sky130proc'))
 
 
 def load_pack(data_dir):
@@ -89,8 +90,9 @@ def design(attn_db, ron=None, data_dir=None):
 
     m0 = ron_to_switch(ron, nfet)
 
-    # Cp first estimate: ~ Coff of the shunt switch (the verified 8 dB Pi
-    # calibration had Cp* ~= Coff of the shunt device). Refined by the scan.
+    # Cp first estimate ~ Coff of the shunt switch, MEASURED in the
+    # cell-bias shunt config (0.42 fF/um; see sky130proc/nfet_switch.json).
+    # Advisory only -- the Cp scan is authoritative.
     cp_ff = m0['coff_ff']
 
     print("=" * 60)
@@ -131,7 +133,8 @@ if __name__ == '__main__':
                     help='direct input: shunt switch on-resistance [ohm] '
                          '(suggested 1/3..1/5 of R_shunt; default R_shunt/4)')
     ap.add_argument('--data-dir', default=None,
-                    help='dir holding nfet_switch.json (default: the bundled sky130_examples)')
+                    help='dir holding nfet_switch.json '
+                         '(default: the bundled sky130_examples/sky130proc)')
     ap.add_argument('--json', default=None, help='also write the design dict here')
     args = ap.parse_args()
     result = design(args.attn_db, args.ron, args.data_dir)

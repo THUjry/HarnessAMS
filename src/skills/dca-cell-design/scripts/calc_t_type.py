@@ -24,7 +24,8 @@ R0 = 50.0
 FREQS = [5, 10, 15, 20, 25, 30, 35, 40]  # GHz, flatness estimate band
 
 DEFAULT_DATA_DIR = os.path.normpath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'sky130_examples'))
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), '..',
+                 'sky130_examples', 'sky130proc'))
 
 
 def load_pack(data_dir):
@@ -150,7 +151,9 @@ def design(attn_db, ron1=None, ron2=None, data_dir=None):
 
     m1 = ron_to_switch(ron1, nfet)
     m2 = ron_to_switch(ron2, nfet)
-    # Cp first estimate ~ Coff of the shunt switch (verified 8 dB Pi calibration).
+    # Cp first estimate ~ Coff of the shunt switch, MEASURED in the
+    # cell-bias shunt config (0.42 fF/um; see sky130proc/nfet_switch.json).
+    # Advisory only -- the Cp scan is authoritative.
     cp_ff = m2['coff_ff']
 
     il_ref_dc = il_ref_t(ron1, rs)
@@ -188,7 +191,7 @@ def design(attn_db, ron1=None, ron2=None, data_dir=None):
         'M1': m1, 'M2': m2,
         'cp_first_estimate_ff': cp_ff,
         'method': 'arm total from ideal formulas + direct Ron input (1/3..1/5 guidance), '
-                  'sky130 switch data (sky130_examples/nfet_switch.json)',
+                  'sky130 switch data (sky130_examples/sky130proc/nfet_switch.json)',
     }
 
 
@@ -201,7 +204,8 @@ if __name__ == '__main__':
                     help='direct input: shunt switch Ron2 [ohm] '
                          '(suggested 1/3..1/5 of the shunt arm total; default arm/4)')
     ap.add_argument('--data-dir', default=None,
-                    help='dir holding nfet_switch.json (default: the bundled sky130_examples)')
+                    help='dir holding nfet_switch.json '
+                         '(default: the bundled sky130_examples/sky130proc)')
     ap.add_argument('--json', default=None, help='also write the design dict here')
     args = ap.parse_args()
     result = design(args.attn_db, args.ron1, args.ron, args.data_dir)
