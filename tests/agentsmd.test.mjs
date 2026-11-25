@@ -83,6 +83,11 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
     assert.ok(!md.includes('and the Overview settings table'), 'the settings-table pointer is gone from the constraints (2026-11-25 ruling)')
     assert.ok(md.includes('  cluster_env: "out-of-cluster"'), 'the working environment mirrors the config')
     assert.ok(md.includes('  run_mode: "remote"'))
+    // 2026-11-25 (D-018): the CONFIGURED machine renders as one row — the model
+    // sees which ssh alias the project's batches and remote-first analysis use
+    assert.ok(md.includes('  machine_id: "node1"'), 'the configured machine_id renders as a settings row')
+    assert.ok(md.indexOf('  compute_remote: "python"') < md.indexOf('  machine_id: ')
+      && md.indexOf('  machine_id: ') < md.indexOf('  remote_python: '), 'row order: machine_id opens the remote group')
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
     assert.ok(md.includes('  remote_scripts_dir: "/home/op/sim/.harnessams/scripts"'), 'the remote scripts path rides along')
     assert.ok(!md.includes('report_figs'), 'the PNG gate is a session option, never a project yaml row')
@@ -145,13 +150,14 @@ test('agentsmd: re-syncing under different settings switches the table wording w
     assert.ok(!md.includes('| Analyze | ssh_exec'), 'old analyze wording fully replaced')
     // local mode: the non-applicable remote rows are OMITTED, not null — a
     // values build never leaves an unfilled row behind (2026-11-25)
+    assert.ok(!md.includes('  machine_id:'), 'machine_id omitted in local mode (D-018: render only when set)')
     assert.ok(!md.includes('  remote_root:'), 'remote_root omitted in local mode')
     assert.ok(!md.includes('  remote_scripts_dir:'), 'remote_scripts_dir omitted in local mode')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: machine aliases never render even with a dsh-ssh registry in ctx', async () => {
+test('agentsmd: the registry inventory never renders — only the configured machine_id row (D-018)', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-nodes-'))
   try {
     await ensureAgentsMdTemplate(ws)
@@ -172,6 +178,9 @@ test('agentsmd: machine aliases never render even with a dsh-ssh registry in ctx
     const r = await syncAgentsMd(ctx, { project: { path: ws, title: 'demo' }, settings })
     assert.equal(r.ok, true)
     const md = await readFile(agentsMdPath(ws), 'utf8')
+    // the one configured machine renders; the registry (other aliases, hosts)
+    // never does — the machine card / ssh_list stays the inventory
+    assert.ok(md.includes('  machine_id: "node1"'), 'the configured machine renders (settings, not the registry)')
     assert.ok(!md.includes('remote_node:'), 'no alias row')
     assert.ok(!md.includes('other_nodes:'), 'no alias-list row')
     assert.ok(!md.includes('lab9') && !md.includes('node2') && !md.includes('192.0.2'), 'no alias names or hosts leak into the block')

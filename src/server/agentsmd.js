@@ -52,16 +52,18 @@ const q = (v) => JSON.stringify(String(v))
 const scalar = (v) => (v === null || v === undefined ? 'null' : typeof v === 'boolean' ? String(v) : q(v))
 
 // Single-level projection: meta + workspace root + the settings mirror + local
-// env facts + the latest finished self-check verdict. Machine ALIASES are
-// deliberately absent (2026-11-24): the dsh-ssh alias never appears in the
-// block — the batch tools resolve the configured machine themselves, and the
-// remote side is stated as paths only (remote_root, remote_scripts_dir, the
+// env facts + the latest finished self-check verdict. Machine rendering
+// (D-018, revising the 2026-11-24 alias-absent clause): the CONFIGURED
+// machine_id renders as one row so the model sees which ssh alias the
+// project's batches and remote-first analysis use; alias INVENTORIES and host
+// addresses never appear — the machine card / ssh_list is the inventory. The
+// remote side is stated as paths (remote_root, remote_scripts_dir, the
 // toolchain pins remote_python / remote_spectre_cmd, and the self-check dir).
 // 2026-11-25 shape (D-016/D-017): the local env rows carry the local_ prefix,
 // the selfcheck group sits at the tail (selfcheck_remote_dir + the verdicts),
-// and rows that would render null because they do not apply (remote_root /
-// remote_scripts_dir in local mode) are OMITTED, not left empty — a synced
-// values build never leaves an unfilled row behind.
+// and rows that would render null because they do not apply (machine_id,
+// remote_root / remote_scripts_dir in local mode) are OMITTED, not left
+// empty — a synced values build never leaves an unfilled row behind.
 function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   const s = settings ?? {}
   const lines = ['hams_project_config:']
@@ -75,6 +77,9 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   row('simulator', s.simulator)
   row('compute_local', s.compute_script_local)
   row('compute_remote', s.compute_script_remote)
+  if (s.machine_id) {
+    row('machine_id', s.machine_id)
+  }
   row('remote_python', s.remote_python ?? null)
   row('remote_spectre_cmd', s.remote_spectre_cmd ?? null)
   if (s.remote_root) {
