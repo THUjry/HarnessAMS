@@ -1538,6 +1538,16 @@ window.__ModuleLoader__.load({
       return { state: 'ok', text: steps[steps.length - 1].result, title }
     }
 
+    // Server timestamps are ISO-8601 UTC strings; render them in the SYSTEM
+    // timezone (a raw slice would show the UTC wall clock as if it were local).
+    function fmtLocalTime(iso) {
+      if (!iso) return ''
+      const d = new Date(iso)
+      if (!Number.isFinite(d.getTime())) return String(iso)
+      const p = (n) => String(n).padStart(2, '0')
+      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    }
+
     // Status restore from the AGENTS.md facts (D-017): when the in-memory run
     // state is gone (page reload, project switch away and back), the panel
     // falls back to the managed block's last_selfcheck_* rows — a verdict
@@ -1553,7 +1563,7 @@ window.__ModuleLoader__.load({
       const freshMin = Number(facts.fresh_min) > 0 ? Number(facts.fresh_min) : 30
       const verdictOf = (v) => (v == null ? null
         : String(v).startsWith('ok') ? 'ok' : v === 'failed' ? 'bad' : v === 'skipped' ? 'skip' : 'bad')
-      const title = `${facts.last_selfcheck_run_id ?? ''} · ${finished ?? ''}`
+      const title = `${facts.last_selfcheck_run_id ?? ''} · ${fmtLocalTime(finished)}`
       if (!Number.isFinite(finishedMs) || nowMs - finishedMs > freshMin * 60_000) {
         return { state: 'stale', text: tr('selfchk.stale', { min: String(freshMin) }), title }
       }
@@ -1633,7 +1643,7 @@ window.__ModuleLoader__.load({
           const freshMin = String(Number(facts?.fresh_min) > 0 ? Number(facts.fresh_min) : 30)
           const text = restored.state === 'stale'
             ? tr('selfchk.stale', { min: freshMin })
-            : tr('selfchk.lastRun', { time: finished.slice(0, 19).replace('T', ' ') }) + ' · ' + restored.text
+            : tr('selfchk.lastRun', { time: fmtLocalTime(finished) }) + ' · ' + restored.text
           return h('div', { className: cls, title: restored.title }, icon + ' ' + txt(text))
         }
         return h('div', { className: 'hams-dim' }, tr('selfchk.noneYet'))

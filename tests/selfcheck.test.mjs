@@ -1639,6 +1639,8 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
     'mounted in the Overview tab with the AGENTS.md facts (D-017 restore display)')
   assert.ok(src.includes('selfcheck_facts: r.selfcheck_facts ?? null'),
     'the route returns facts as a SIBLING of project — the client folds them onto the project object before the cached shape')
+  assert.ok(src.includes('function fmtLocalTime('), 'timestamps render in the SYSTEM timezone')
+  assert.ok(!src.includes('slice(0, 19).replace'), 'no raw UTC slice for displayed times')
   assert.match(src, /,\s*3_000\s*\)/, '3s poll while running')
   assert.match(src, /,\s*1_000\s*\)/, '1s settings poll follows tool-side config writes')
   assert.ok(src.includes("'local'"), 'local dir display branch')
