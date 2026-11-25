@@ -1,4 +1,4 @@
-// template_Pi.scs — Pi-type ATT cell, sky130 switches + IDEAL R/C
+// template_Pi.scs -- Pi-type ATT cell, sky130 switches + IDEAL R/C
 // Default values = the verified 8 dB design (reproduced by calc_pi.py 8).
 // Fill-in map from calc_pi.py output:
 //   R0  <- Rs (series arm)          Rp1/Rp2 <- Rp (per-side shunt poly value)
@@ -9,9 +9,10 @@
 // pick the nearest existing card from the transcribed library or extend its
 // generator, and update l/w/nf/nrd/nrs together.
 // R/C are IDEAL elements by decision: analytic flatness predictions are
-// advisory — ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
+// advisory -- ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
+simulator lang=spectre
 simulatorOptions options temp=@@temperature@@ reltol=2e-4
-include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model — in a real project point at the transcribed-library copy
+include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model -- in a real project point at the transcribed-library copy
 
 parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
 

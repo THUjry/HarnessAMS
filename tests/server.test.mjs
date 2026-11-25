@@ -63,13 +63,19 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     assert.equal(w.sessions[sid].dashboard_selected, null) // dangling selected drops
     assert.equal(w.sessions[sid].display, 'session')
 
-    // confirmed check_params persist with the entry (validated shape)
+    // confirmed check_params persist with the entry (validated shape; the
+    // 2026-11-25 table: rcl + mult + unit_check, legacy keys gone)
     w = await writeSessionConfig(dir, sid, {
       display: 'session', reports: [], dashboard_selected: null,
-      check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, unit_check: false, bias_check: true, strict_includes: true },
+      check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] },
+        mult: { nf: [1, 128], m: [1, 1000] }, unit_check: false },
     })
     assert.equal(w.sessions[sid].check_params.unit_check, false)
-    assert.equal(w.sessions[sid].check_params.strict_includes, true)
+    assert.deepEqual(w.sessions[sid].check_params.mult.nf, [1, 128])
+    // a pre-mult table (the old shape) is rejected — existing sessions are
+    // deliberately not kept compatible
+    assert.ok((await writeSessionConfig(dir, sid, { display: 'overview', reports: [], dashboard_selected: null,
+      check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, unit_check: false } })).error)
     // invalid check_params -> whole write rejected
     assert.ok((await writeSessionConfig(dir, sid, { display: 'overview', reports: [], dashboard_selected: null, check_params: { rcl: { r: [9, 9] } } })).error)
     // a relative/non-html report path is rejected

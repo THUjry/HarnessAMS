@@ -144,14 +144,20 @@ function makeHarness({ scenario = {} }) {
 
   let hangStarted = false
   const spectre = {
-    spectre_assemble: async (args) => {
-      if (scenario.hangTool === 'spectre_assemble') {
-        hangStarted = true
-        await new Promise((res) => { hangResolve = res })
+    // The SmartAnaSim netlist gate, mocked light (this repo's tests must pass
+    // with the sibling SmartAnaSim checkout absent — the real engine lives
+    // there): the staging contract (template.scs + sweep_config.json present
+    // in run_dir) is the smoke. The gen step itself runs the REAL gen script
+    // directly since 2026-11-25 (no spectre_assemble tool call anymore).
+    spectre_pre_check: async (args) => {
+      const dir = path.resolve(args.run_dir)
+      const have = fs.existsSync(path.join(dir, 'template.scs'))
+        && fs.existsSync(path.join(dir, 'sweep_config.json'))
+      return {
+        ok: have,
+        errors: have ? [] : ['input: template file not found: template.scs'],
+        warnings: [], template: 'template.scs', params_source: 'builtin', checks: [],
       }
-      const gen = path.join(REPO, 'src', 'selfcheck', 'script', 'analysis', 'gen_selfcheck_rc.py')
-      const { stdout } = await execFileAsync('python', [gen, '--out', path.resolve(args.out_dir)], { timeout: 60_000 })
-      return { ok: true, output: stdout.trim(), project_dir: args.project_dir, simulator: 'spectre' }
     },
   }
 
@@ -323,6 +329,14 @@ function makeHarness({ scenario = {} }) {
         }
       }
       if (name === 'batch_submit' && args.scheduler === 'local') {
+        // the re-entry hang point (the retired spectre_assemble hang moved
+        // here when the gen step became a direct spawn) — one-shot, like the
+        // poll hang: a second local submit later in the chain must not hang
+        if (scenario.hangTool === 'batch_submit' && !hangUsed) {
+          hangUsed = true
+          hangStarted = true
+          await new Promise((res) => { hangResolve = res })
+        }
         // local submissions never leave this host: lay down the worker's
         // output + job file exactly as the real tool's detached run would, so
         // the REAL batch_poll local branch reads them — the ssh mock stays idle
@@ -1166,18 +1180,21 @@ test('flow: simulator=spectre + local', async () => {
     const byCol = {}
     for (const s of run.steps) byCol[s.item] = s
     assert.equal(byCol['Tool registration check'].ok, true)
-    assert.equal(byCol['spectre_assemble (RC tb)'].ok, true)
+    assert.equal(byCol['gen_selfcheck_rc.py (RC tb)'].ok, true)
     assert.equal(byCol['batch_submit local LPF (9 pts)'].ok, true)
     assert.equal(byCol['batch_submit local HPF (9 pts)'].ok, true)
     assert.equal(byCol['spectre_psf_parse.py (LPF+HPF)'].ok, true)
     assert.equal(byCol['pointwise verify (python, LPF+HPF)'].ok, true)
     assert.match(byCol['pointwise verify (python, LPF+HPF)'].result, /9 pts/)
-    // the assemble step ran against the REAL project root (D-015: the staged
-    // gen script, never a throwaway run-dir copy) through the tool shell
-    const asm = f.ctx.__execLog.find((x) => x.name === 'spectre_assemble')
-    assert.ok(asm, 'spectre_assemble was not called through ctx.tools')
-    assert.equal(path.resolve(asm.arguments.project_dir), path.resolve(f.projectPath))
+    // the gen step is a direct spawn (2026-11-25): a green run cleans its
+    // artifacts (only selfcheck_run.json survives), so the netlist-contract
+    // check reads the STAGED gen script's template (persistent, D-015) —
+    // @@P@@ on the parameters statement only, the circuit by name
     assert.ok(fs.existsSync(path.join(f.projectPath, 'script', 'analysis', 'gen_selfcheck_rc.py')), 'project owns its gen script')
+    const genSrc = fs.readFileSync(path.join(f.projectPath, 'script', 'analysis', 'gen_selfcheck_rc.py'), 'utf8')
+    assert.match(genSrc, /parameters r_val=@@r_val@@ c_val=@@c_val@@/)
+    assert.match(genSrc, /resistor r=r_val/)
+    assert.ok(!genSrc.includes('r=@@r_val@@'), 'the circuit body carries no placeholders')
     // local chain: submit + poll both went through the tool shell, and not a
     // single ssh_* call happened
     assert.ok(f.ctx.__execLog.some((x) => x.name === 'batch_submit' && x.arguments.scheduler === 'local'))
@@ -1517,7 +1534,7 @@ test('start guards: unknown machine / missing remote root', async () => {
 })
 
 test('re-entry: a second start while running gets 409', async () => {
-  const f = await startFlow({ scenario: { hangTool: 'spectre_assemble' } })
+  const f = await startFlow({ scenario: { hangTool: 'batch_submit' } })
   try {
     assert.ok(f.start.runId)
     const second = await startSelfcheck(f.ctx, {

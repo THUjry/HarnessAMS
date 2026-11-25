@@ -71,7 +71,7 @@ After the user confirms the paths:
 
     harnessams_selfcheck { action: "run", settings: { remote_python: "<abs path>", remote_spectre_cmd: "<abs path>" } }
 
-The settings payload is a partial merge: only the keys named change, nothing else in the table moves (the pins have no row in that table: this call is their write face, and the AGENTS.md yaml is where they are kept). The write also updates the plugin-global node memory (the machine's current pin pair), so a fresh project on the same node prefills, and an explicit `null` STAYS null (the memory itself says unpinned; only a later green run re-measures). The self-check then runs the whole pipeline under exactly those two paths (assemble -> batch_submit -> batch_poll -> parse -> verify); when it passes, the pin is proven. Its finalize re-syncs AGENTS.md, whose yaml now carries `remote_python` and `remote_spectre_cmd` as the rows every later session reads.
+The settings payload is a partial merge: only the keys named change, nothing else in the table moves (the pins have no row in that table: this call is their write face, and the AGENTS.md yaml is where they are kept). The write also updates the plugin-global node memory (the machine's current pin pair), so a fresh project on the same node prefills, and an explicit `null` STAYS null (the memory itself says unpinned; only a later green run re-measures). The self-check then runs the whole pipeline under exactly those two paths (gen -> batch_submit -> batch_poll -> parse -> verify); when it passes, the pin is proven. Its finalize re-syncs AGENTS.md, whose yaml now carries `remote_python` and `remote_spectre_cmd` as the rows every later session reads.
 
 From then on:
 

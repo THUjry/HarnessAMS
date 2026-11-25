@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""HarnessAMS project self-check assembly (simulator=spectre path).
+"""HarnessAMS project self-check fixture generator (simulator=spectre path).
 
 Emits the RC low-pass / high-pass testbench as template.scs + sweep_config.json
 pairs under --out: <out>/lpf/ and <out>/hpf/. Ideal components only (resistor /
@@ -12,10 +12,13 @@ transfer function with a 1% tolerance (selfcheck_verify.py / .mjs), so this grid
 is part of the contract: the same values regenerate the bundled golden dataset
 (tests/golden_gen.py) and appear in the golden point_meta.json params.
 
-Invoked through the SmartAnaSim spectre_assemble tool, which runs this script
-with cwd=<project_dir> and forwards --out (HARNESSAMS_SIMULATOR=spectre rides in
-the environment). Self-contained on purpose: no imports from the plugin scripts
-tree.
+Run DIRECTLY by the HarnessAMS self-check orchestrator (2026-11-25): cwd = the
+project root, --out forwarded, HARNESSAMS_SIMULATOR=spectre riding in the
+environment. The template follows the netlist contract the SmartAnaSim
+spectre_pre_check tool enforces — @@P@@ placeholders on the parameters statement
+ONLY, the circuit referencing parameters by name (the worker substitutes the
+per-point values into the parameters line). Self-contained on purpose: no
+imports from the plugin scripts tree.
 """
 import argparse
 import json
@@ -33,10 +36,10 @@ AC_DECADES = 50
 TEMPLATE_LPF = """\
 // HarnessAMS project self-check - RC low-pass (ideal components, no PDK)
 simulator lang=spectre
-parameters r_val=1k c_val=1n
+parameters r_val=@@r_val@@ c_val=@@c_val@@
 V1 (vin 0) vsource dc=0 mag=1
-R1 (vin vout) resistor r=@@r_val@@
-C1 (vout 0) capacitor c=@@c_val@@
+R1 (vin vout) resistor r=r_val
+C1 (vout 0) capacitor c=c_val
 save vout
 ac ac start=%s stop=%s dec=%d
 """ % ("%.0e" % AC_START, "%.0e" % AC_STOP, AC_DECADES)
@@ -44,10 +47,10 @@ ac ac start=%s stop=%s dec=%d
 TEMPLATE_HPF = """\
 // HarnessAMS project self-check - RC high-pass (ideal components, no PDK)
 simulator lang=spectre
-parameters r_val=1k c_val=1n
+parameters r_val=@@r_val@@ c_val=@@c_val@@
 V1 (vin 0) vsource dc=0 mag=1
-C1 (vin vout) capacitor c=@@c_val@@
-R1 (vout 0) resistor r=@@r_val@@
+C1 (vin vout) capacitor c=c_val
+R1 (vout 0) resistor r=r_val
 save vout
 ac ac start=%s stop=%s dec=%d
 """ % ("%.0e" % AC_START, "%.0e" % AC_STOP, AC_DECADES)

@@ -1,16 +1,17 @@
-// template_ST.scs — SimpleT (shunt) ATT cell, sky130 switch + IDEAL R/C
+// template_ST.scs -- SimpleT (shunt) ATT cell, sky130 switch + IDEAL R/C
 // Default values = the 1 dB class from calc_simplet.py 1 (Rpoly 187.79 ohm,
 // Ron 17.10 ohm). Fill-in map from calc_simplet.py:
 //   Rp <- Rpoly (shunt resistor value)   M0 <- shunt switch (ron)
 //   cpf <- Cp first estimate, refined by the Cp scan
-// SimpleT has NO SWB (single-ended gate, no complementary drive) — the cascade
+// SimpleT has NO SWB (single-ended gate, no complementary drive) -- the cascade
 // assembler relies on this.
-// Switch geometry is baked into the flattened model card name — update
+// Switch geometry is baked into the flattened model card name -- update
 // l/w/nf/nrd/nrs together when the geometry changes (see template_Pi.scs note).
 // R/C are IDEAL elements by decision: analytic flatness predictions are
-// advisory — ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
+// advisory -- ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
+simulator lang=spectre
 simulatorOptions options temp=@@temperature@@ reltol=2e-4
-include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model — in a real project point at the transcribed-library copy
+include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model -- in a real project point at the transcribed-library copy
 
 parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
 

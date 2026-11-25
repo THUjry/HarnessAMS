@@ -66,14 +66,14 @@ window.__ModuleLoader__.load({
         'guide.back': '返回',
         'guide.done': '开始使用',
         'guide.s1t': '工作方式：本地还是远程',
-        'guide.s1': '本地 — spectre 本地闭环（SmartAnaSim 装配/检查＋batch_submit 本机后台扫批＋脚本解析＋报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置；本页「机器」卡展示各别名，远端根路径是各项目自己的设置（项目总览设置表「远端根路径」行）。',
+        'guide.s1': '本地 — spectre 本地闭环（SmartAnaSim 网表预检＋手搓 run 目录＋batch_submit 本机后台扫批＋脚本解析＋报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置；本页「机器」卡展示各别名，远端根路径是各项目自己的设置（项目总览设置表「远端根路径」行）。',
         'guide.s2t': '提交作业方式',
         'guide.s2': '统一走 batch_submit，调度语义随工作环境（总览页拨杆）：集群内 — local 本机后台运行、ssh 到其他节点运行、lsf 本机直接 bsub（共享文件系统，文件不经 ssh）；集群外 — local 不可用、ssh 在 ssh 节点运行（第二跳走 dsh-ssh 代理配置）、lsf 先经 dsh-ssh 到集群再 bsub。进度与取回用 batch_poll（完成时自动拉回 sweep_progress.json 与 errlog.txt）。',
         'guide.s2slurm': 'slurm —— 暂不支持。',
         'guide.s3t': '工作区位置',
         'guide.s3': '配置＝各工作区自己的 .harnessams/workspace_config.json 单文件（运行设置含远端根路径、脚本目录、plotly、回收站）。远程 — 路径即远端真实路径（dsh-ssh 按别名直达，无本地镜像）。',
         'guide.s4t': '仿真插件套件',
-        'guide.s4': '套件合计 9 个工具：SmartAnaSim 4（spectre_assemble 装配/检查＋sNp 读取/提取，sNp 两件经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析脚本）＋HarnessAMS 5（batch_submit 三模式提交、batch_poll 轮询/取回、gen_sweep_report 报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 外默认全注册；使用引导仅由 HarnessAMS 提供。',
+        'guide.s4': '套件合计 11 个工具：SmartAnaSim 6（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析脚本）＋HarnessAMS 5（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
         'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」HTML 报告查看器（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
@@ -138,8 +138,8 @@ window.__ModuleLoader__.load({
         'dash.add': '添加',
         'tasks.headerOpen': '打开 HarnessAMS 侧栏（项目总览与会话面板）',
         'tasks.guideDesc': '项目总览、会话面板、检查与使用引导',
-        'check.title': '装配层检查参数（本会话）',
-        'check.desc': '本会话的检查阈值与开关；确认后随会话保存（sessions.json），下次装配生效。',
+        'check.title': '网表预检参数（本会话）',
+        'check.desc': '本会话的检查阈值与开关；确认后随会话保存（sessions.json），spectre_pre_check 与 batch_submit 内置预检读取。',
         'check.sourceOwn': '已确认 — 本会话参数生效中',
         'check.sourceFallback': '未确认 — 按项目缺省（check_params.json）∪内置缺省生效',
         'check.colParam': '参数',
@@ -148,22 +148,23 @@ window.__ModuleLoader__.load({
         'check.rclR': '理想电阻范围 (R)',
         'check.rclC': '理想电容范围 (C)',
         'check.rclL': '理想电感范围 (L)',
-        'check.noteR': '数值支持科学计数法与普通小数；下限 < 上限',
+        'check.noteR': '数值支持科学计数法与普通小数；下限 < 上限；r=0 视为合法短路',
         'check.noteC': '数值支持科学计数法与普通小数；下限 < 上限',
         'check.noteL': '数值支持科学计数法与普通小数；下限 < 上限',
+        'check.multNf': 'nf 指数范围',
+        'check.multM': 'm 并联倍数范围',
+        'check.noteMult': '正整数；下限 < 上限',
         'check.unitCheck': '单位检查',
-        'check.noteUnit': '长度 u/n、频率/电流后缀与裸数拦截',
-        'check.biasCheck': '偏置 < Vdd 检查',
-        'check.noteBias': '关闭后 check_bias_lt_vdd 不再拦截',
-        'check.strictIncludes': 'include 严格模式',
-        'check.noteStrict': '开启后无法核对的绝对路径 include 也算错误',
+        'check.noteUnit': '几何长度 u/n 后缀与裸数拦截',
         'check.on': '开',
         'check.off': '关',
         'check.oldValue': '（旧值：{v}）',
         'check.confirm': '确认',
+        'check.unconfirmedHint': '本会话未确认参数表——预检按缺省表把关；确认后本会话即刻生效',
         'check.loadFailed': '读取检查参数失败：{msg}',
         'check.saveFailed': '保存失败：{msg}',
         'check.badPair': '“{p}”须为正数且下限 < 上限',
+        'check.badMultPair': '“{p}”须为正整数且下限 < 上限',
         'pset.title': '项目设置',
         'pset.rootLabel': '远程根路径',
         'pset.dirLocalHint': '本地模式：自检产物写入本地 .harnessams/selfcheck/ 目录',
@@ -280,14 +281,14 @@ window.__ModuleLoader__.load({
         'guide.back': 'Back',
         'guide.done': 'Get started',
         'guide.s1t': 'Working mode: local or remote',
-        'guide.s1': 'Local — the spectre loop runs on this machine (SmartAnaSim assembly/checks + batch_submit local background sweeps + script parsing + report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured in the dsh-ssh plugin; this page\'s “Machines” card lists the aliases, and each remote root is a per-project setting (the “Remote root” row of the project overview settings table).',
+        'guide.s1': 'Local — the spectre loop runs on this machine (SmartAnaSim netlist pre-check + a hand-written run directory + batch_submit local background sweeps + script parsing + report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured in the dsh-ssh plugin; this page\'s “Machines” card lists the aliases, and each remote root is a per-project setting (the “Remote root” row of the project overview settings table).',
         'guide.s2t': 'Job submission',
         'guide.s2': 'Everything goes through batch_submit, with scheduler semantics set by the working environment (the overview toggle): in-cluster — local runs in the background on this host, ssh runs on another node, lsf submits bsub locally (shared filesystem; files never cross ssh); out-of-cluster — local is unavailable, ssh runs on the ssh node (a second hop goes through the dsh-ssh proxy config), lsf submits through dsh-ssh. Monitor and retrieve with batch_poll (a finished batch pulls sweep_progress.json and errlog.txt back automatically).',
         'guide.s2slurm': 'slurm — not supported yet.',
         'guide.s3t': 'Workspace location',
         'guide.s3': 'Config = each workspace\'s own single file .harnessams/workspace_config.json (run settings incl. the remote root, script dir, plotly, trash). Remote — paths are the real remote paths (dsh-ssh goes by alias, no local mirror).',
         'guide.s4t': 'Simulation plugin suites',
-        'guide.s4': 'The suite registers 9 tools in total: SmartAnaSim 4 (spectre_assemble + sNp read/extract — the two sNp tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser scripts) and HarnessAMS 5 (batch_submit with its three schedulers, batch_poll monitoring/retrieval, gen_sweep_report, safe_trash and the harnessams_selfcheck self-check). All except sNp are registered by default — guidance is provided by HarnessAMS only.',
+        'guide.s4': 'The suite registers 11 tools in total: SmartAnaSim 6 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, and the gen_vsch_import/export pair — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser scripts) and HarnessAMS 5 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, safe_trash and the harnessams_selfcheck self-check). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
         'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, an HTML report viewer (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
@@ -352,8 +353,8 @@ window.__ModuleLoader__.load({
         'dash.add': 'Add',
         'tasks.headerOpen': 'Open the HarnessAMS sidebar (project overview and session panel)',
         'tasks.guideDesc': 'Project overview, session panel, checks and a guide',
-        'check.title': 'Assembly check parameters (this session)',
-        'check.desc': 'This session\'s check thresholds and switches; confirming saves them with the session (sessions.json) and they take effect on the next assembly.',
+        'check.title': 'Netlist pre-check parameters (this session)',
+        'check.desc': 'This session\'s check thresholds and switches; confirming saves them with the session (sessions.json), and spectre_pre_check / the batch_submit built-in pre-check read them.',
         'check.sourceOwn': 'Confirmed — this session\'s table is in effect',
         'check.sourceFallback': 'Not confirmed — project defaults (check_params.json) ∪ built-in defaults are in effect',
         'check.colParam': 'Parameter',
@@ -362,21 +363,22 @@ window.__ModuleLoader__.load({
         'check.rclR': 'Ideal resistor range (R)',
         'check.rclC': 'Ideal capacitor range (C)',
         'check.rclL': 'Ideal inductor range (L)',
-        'check.noteR': 'scientific notation and plain decimals both parse; min < max',
+        'check.noteR': 'scientific notation and plain decimals both parse; min < max; r=0 reads as the legal short',
         'check.noteC': 'scientific notation and plain decimals both parse; min < max',
         'check.noteL': 'scientific notation and plain decimals both parse; min < max',
+        'check.multNf': 'nf finger-count range',
+        'check.multM': 'm multiplier range',
+        'check.noteMult': 'positive integers; min < max',
         'check.unitCheck': 'Unit checks',
-        'check.noteUnit': 'length u/n suffixes, freq/current suffixes, bare-number rejection',
-        'check.biasCheck': 'Bias < Vdd check',
-        'check.noteBias': 'off disables the check_bias_lt_vdd gate',
-        'check.strictIncludes': 'Strict includes',
-        'check.noteStrict': 'on makes unverifiable absolute includes errors',
+        'check.noteUnit': 'geometry length u/n suffixes and bare-number rejection',
         'check.on': 'On',
         'check.off': 'Off',
         'check.oldValue': ' (old: {v})',
         'check.confirm': 'Confirm',
+        'check.unconfirmedHint': 'This session has not confirmed its table — the pre-check runs on the defaults; confirming takes effect for this session immediately',
         'check.loadFailed': 'Failed to load check parameters: {msg}',
         'check.saveFailed': 'Failed to save: {msg}',
+        'check.badMultPair': '"{p}" must be two positive integers, min < max',
         'check.badPair': '"{p}" must be positive numbers with min < max',
         'pset.title': 'Project settings',
         'pset.rootLabel': 'Remote root',
@@ -2591,9 +2593,11 @@ window.__ModuleLoader__.load({
           c: p.rcl.c.map((x) => toUnitDraft('c', x)),
           l: p.rcl.l.map((x) => toUnitDraft('l', x)),
         },
+        mult: {
+          nf: p.mult.nf.map((x) => String(x)),
+          m: p.mult.m.map((x) => String(x)),
+        },
         unit_check: p.unit_check,
-        bias_check: p.bias_check,
-        strict_includes: p.strict_includes,
       })
       const toNumeric = (d) => ({
         rcl: {
@@ -2601,9 +2605,11 @@ window.__ModuleLoader__.load({
           c: [unitValue('c', d.rcl.c[0]), unitValue('c', d.rcl.c[1])],
           l: [unitValue('l', d.rcl.l[0]), unitValue('l', d.rcl.l[1])],
         },
+        mult: {
+          nf: d.mult.nf.map((x) => Number(x)),
+          m: d.mult.m.map((x) => Number(x)),
+        },
         unit_check: d.unit_check,
-        bias_check: d.bias_check,
-        strict_includes: d.strict_includes,
       })
 
       useEffect(() => {
@@ -2634,6 +2640,14 @@ window.__ModuleLoader__.load({
           const hi = unitValue(k, draft.rcl[k][1])
           if (!Number.isFinite(lo) || !Number.isFinite(hi) || lo <= 0 || lo >= hi) {
             setSaveError(tr('check.badPair', { p: tr('check.rcl' + k.toUpperCase()) }))
+            return
+          }
+        }
+        for (const k of ['nf', 'm']) {
+          const lo = Number(draft.mult[k][0])
+          const hi = Number(draft.mult[k][1])
+          if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo <= 0 || lo >= hi) {
+            setSaveError(tr('check.badMultPair', { p: tr(k === 'nf' ? 'check.multNf' : 'check.multM') }))
             return
           }
         }
@@ -2677,6 +2691,27 @@ window.__ModuleLoader__.load({
           h('td', { className: 'hams-dim' }, tr(noteKey)))
       }
 
+      const multRow = (k, labelKey) => {
+        const saved = params?.mult?.[k]
+        const nums = draft.mult[k].map((x) => Number(x))
+        const changed = !!saved && (nums[0] !== saved[0] || nums[1] !== saved[1])
+        const patchEnd = (end) => (v) => setDraft({ ...draft, mult: {
+          ...draft.mult, [k]: draft.mult[k].map((d, i) => (i === end ? v : d)) } })
+        return h('tr', null,
+          h('td', null, tr(labelKey)),
+          h('td', null,
+            h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+              h('input', { className: 'hams-input', style: { width: '88px' }, value: draft.mult[k][0],
+                onChange: (e) => patchEnd(0)(e.target.value),
+                onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void confirm() } } }),
+              h('span', { className: 'hams-dim' }, '…'),
+              h('input', { className: 'hams-input', style: { width: '88px' }, value: draft.mult[k][1],
+                onChange: (e) => patchEnd(1)(e.target.value) })),
+            changed && h('span', { className: 'hams-dim' },
+              tr('check.oldValue', { v: String(saved[0]) + ' … ' + String(saved[1]) }))),
+          h('td', { className: 'hams-dim' }, tr('check.noteMult')))
+      }
+
       const switchRow = (key, labelKey, noteKey) => {
         const saved = params ? params[key] : null
         const changed = !!params && draft[key] !== saved
@@ -2697,7 +2732,11 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'hams-dash' },
         h('b', null, tr('check.title')),
         h('div', { className: 'hams-dim' }, tr('check.desc')),
-        params && h('div', { className: 'hams-dim' }, tr(hasOwn ? 'check.sourceOwn' : 'check.sourceFallback')),
+        // an unconfirmed session runs the pre-check on the defaults — that
+        // state is the red badge (the project-overview "● unsaved" pattern),
+        // not the quiet gray of a confirmed table
+        params && h('div', { className: hasOwn ? 'hams-dim' : 'hams-bad', title: hasOwn ? undefined : tr('check.unconfirmedHint') },
+          (hasOwn ? '' : '● ') + tr(hasOwn ? 'check.sourceOwn' : 'check.sourceFallback')),
         error && h('div', { className: 'hams-err' }, txt(error)),
         saveError && h('div', { className: 'hams-err' }, txt(saveError)),
         !params && !error && h('div', { className: 'hams-dim' }, tr('common.loading')),
@@ -2708,14 +2747,15 @@ window.__ModuleLoader__.load({
             rclRow('r', 'check.rclR', 'check.noteR'),
             rclRow('c', 'check.rclC', 'check.noteC'),
             rclRow('l', 'check.rclL', 'check.noteL'),
-            switchRow('unit_check', 'check.unitCheck', 'check.noteUnit'),
-            switchRow('bias_check', 'check.biasCheck', 'check.noteBias'),
-            switchRow('strict_includes', 'check.strictIncludes', 'check.noteStrict'))),
+            multRow('nf', 'check.multNf'),
+            multRow('m', 'check.multM'),
+            switchRow('unit_check', 'check.unitCheck', 'check.noteUnit'))),
         params && draft && h('div', { className: 'hams-row' },
           h('button', { className: 'hams-btn hams-btn-sm', disabled: !dirty || saving, onClick: () => { void confirm() } },
             saving ? tr('common.loading') : tr('check.confirm')),
           h('button', { className: 'hams-btn hams-btn-sm', disabled: !dirty || saving, onClick: () => setDraft(toDraft(params)) },
-            tr('common.cancel'))))
+            tr('common.cancel')),
+          !hasOwn && h('span', { className: 'hams-bad' }, '● ', tr('check.unconfirmedHint'))))
     }
 
     // Sidebar follows session switches when it was open. DSH keeps one right-

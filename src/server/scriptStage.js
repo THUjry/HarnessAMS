@@ -1,10 +1,9 @@
 // One-time project script staging (2026-11-24 wave): a project keeps its own
 // reusable copy of the simulation scripts, so everything the self-check
-// exercised stays usable after the run — spectre_assemble needs
-// <project>/script/analysis/gen_*.py (without it the tool is unusable no
-// matter that the self-check passed: it used to run a throwaway copy inside
-// the run dir) and the batch channel needs a worker scripts tree plus the
-// sibling assets/ bucket (snp_common resolves its pure-stdlib fallback at
+// exercised stays usable after the run — the self-check's gen step needs
+// <project>/script/analysis/gen_*.py (it runs the staged script directly
+// since 2026-11-25) and the batch channel needs a worker scripts tree plus
+// the sibling assets/ bucket (snp_common resolves its pure-stdlib fallback at
 // <scripts root>/../assets/numfallback.py — the SmartAnaSim package layout,
 // mirrored here as .harnessams/scripts + .harnessams/assets).
 //

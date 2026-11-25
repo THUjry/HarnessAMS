@@ -4,8 +4,9 @@
 // the simulation itself but verifying machine,
 // connection, environment, permissions, tools and compute end to end:
 //
-//   simulator=spectre  full simulation path: spectre_assemble -> batch_submit
-//                      (scheduler=local background workers) -> batch_poll ->
+//   simulator=spectre  full simulation path: gen_selfcheck_rc.py (run directly,
+//                      2026-11-25) -> batch_submit (which runs the SmartAnaSim
+//                      spectre_pre_check netlist gate internally) -> batch_poll ->
 //                      the standalone parser run directly -> pointwise verify
 //                      (local), or batch_submit/poll (remote LSF/ssh) ->
 //                      remote parse+verify -> psf CSV download + cross-check
@@ -36,7 +37,8 @@
 // parallel) and once more at the end for anything still uncovered.
 //
 // Tool calls go through the registered tool surface (ctx.tools.execute via
-// callTool) — SmartAnaSim's spectre_assemble, this plugin's batch_* tools and
+// callTool) — SmartAnaSim's spectre_pre_check (the netlist gate batch_submit
+// invokes) and this plugin's batch_* tools and
 // @linxin666/dsh-ssh's ssh_*; data processing is script-face (2026-11-23): the
 // parse step runs spectre_psf_parse.py from the project's sim_scripts_dir
 // directly. Verdicts are read from DISK ARTIFACTS (sweep_progress.json /
@@ -357,8 +359,8 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     // now, ahead of the new run — bounded disk: at most the live run's artifacts
     await cleanHistoricalArtifacts(project.path).catch(() => {})
     // one-time script staging: the project's own gen script + worker tree must
-    // exist BEFORE the chain runs, so spectre_assemble works on the project
-    // root exactly as it will after the self-check (2026-11-24)
+    // exist BEFORE the chain runs, so the gen step works on the project root
+    // exactly as it will after the self-check (2026-11-24)
     await ensureProjectScripts(project.path, resolveScriptsSource(project.path))
   } catch (e) {
     runningBySession.delete(sessionId)
@@ -529,12 +531,13 @@ async function orchestrate(run) {
   const mode = settings.run_mode
   const sim = settings.simulator
   try {
-    // C1 — tool face readiness: spectre needs spectre_assemble (SmartAnaSim)
-    // plus this plugin's batch channel; simulator=none runs no tools at all,
-    // so its gate is the standalone parser under the scripts root
+    // C1 — tool face readiness: spectre needs the SmartAnaSim pre-check tool
+    // (the netlist gate batch_submit invokes) plus this plugin's batch channel;
+    // simulator=none runs no tools at all, so its gate is the standalone parser
+    // under the scripts root
     let toolsOk = true
     if (sim === 'spectre') {
-      const required = ['spectre_assemble', 'batch_submit', 'batch_poll']
+      const required = ['spectre_pre_check', 'batch_submit', 'batch_poll']
       const missing = required.filter((n) => !ctx.tools?.get?.(n))
       const c1 = addStep(run, { item: 'Tool registration check', settingColumn: 'simulator' })
       c1.ms = 1
@@ -542,7 +545,7 @@ async function orchestrate(run) {
         toolsOk = false
         c1.ok = false
         c1.result = `missing: ${missing.join(', ')}`
-        c1.detail = 'spectre_assemble registers with the SmartAnaSim plugin; batch_submit/batch_poll '
+        c1.detail = 'spectre_pre_check registers with the SmartAnaSim plugin; batch_submit/batch_poll '
           + 'live in this one — install/enable the plugins (and check the SmartAnaSim Config family '
           + 'switches), then retry.'
       } else {
@@ -590,7 +593,7 @@ async function orchestrate(run) {
 
     if (!toolsOk) {
       if (sim === 'spectre') {
-        skipStep(run, { item: 'spectre_assemble (RC tb)', settingColumn: 'simulator' }, 'tools missing')
+        skipStep(run, { item: 'gen_selfcheck_rc.py (RC tb)', settingColumn: 'simulator' }, 'tools missing')
       } else {
         skipStep(run, { item: 'golden dataset load', settingColumn: 'simulator' }, 'tools missing')
       }
@@ -599,25 +602,40 @@ async function orchestrate(run) {
     }
     checkBudget(run)
 
-    // Common preparation: assemble (spectre) or golden load (none)
+    // Common preparation: generate (spectre) or golden load (none)
     let prepared = false
     if (sim === 'spectre') {
-      const step = await timedStep(run, { item: 'spectre_assemble (RC tb)', settingColumn: 'simulator' }, async () => {
+      const step = await timedStep(run, { item: 'gen_selfcheck_rc.py (RC tb)', settingColumn: 'simulator' }, async () => {
         // The REAL project root: startSelfcheck staged script/analysis/
-        // gen_selfcheck_rc.py into it, so this exercises the same contract a
-        // post-check spectre_assemble call will hit (2026-11-24 — the run-dir
-        // scratch copy is gone; a passing check must not outlive its scripts)
-        const r = await callTool(ctx, 'spectre_assemble', {
-          project_dir: run._priv.project.path,
-          gen_script: 'gen_selfcheck_rc.py',
-          out_dir: run.runDir,
-        }, { timeoutMs: 150_000, signal: run._priv.cancel.controller.signal })
+        // gen_selfcheck_rc.py into it (2026-11-24 — the run-dir scratch copy
+        // is gone; a passing check must not outlive its scripts). The retired
+        // spectre_assemble bridge only spawned this script — the self-check
+        // now runs it directly (2026-11-25): same cwd, same --out, same
+        // HARNESSAMS_SIMULATOR env; the netlist the batch_submit step stages
+        // still passes through the real spectre_pre_check gate. Host python
+        // (not the toolchain pin — the pins name the CLUSTER-side interpreter
+        // that runs the worker; this fixture generator is host-side stdlib).
+        const gen = path.join(run._priv.project.path, 'script', 'analysis', 'gen_selfcheck_rc.py')
+        const signal = run._priv.cancel.controller.signal
+        const child = execFileAsync('python', [gen, '--out', run.runDir], {
+          timeout: 150_000,
+          windowsHide: true,
+          encoding: 'utf8',
+          cwd: run._priv.project.path,
+          env: { ...process.env, HARNESSAMS_SIMULATOR: 'spectre', PYTHONUTF8: '1' },
+          signal,
+        })
+        let out = ''
+        try { out = (await child).stdout } catch (e) {
+          const detail = [e?.stdout, e?.stderr].filter(Boolean).join('\n').slice(-2000) || String(e?.message ?? e)
+          throw new Error(`gen failed: ${detail}`)
+        }
         const have = TOPOS.every((topo) => fs.existsSync(path.join(run.runDir, topo, 'template.scs'))
           && fs.existsSync(path.join(run.runDir, topo, 'sweep_config.json')))
         return {
-          ok: !r.isError && have,
+          ok: have,
           result: have ? 'RC LPF+HPF tb generated (3x3)' : 'assembly output incomplete',
-          detail: (r.text || '').split(/\r?\n/).slice(-4).join('\n').slice(0, 800),
+          detail: String(out || '').split(/\r?\n/).slice(-4).join('\n').slice(0, 800),
         }
       })
       prepared = step.ok === true

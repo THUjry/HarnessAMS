@@ -77,7 +77,7 @@ function pollValue({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN
 // src/tools.ts (ssh_exec failures are values, not throws). Commands arrive
 // already wrapped by execRemote (timeout -s KILL ... -- sh -c "..."); routing
 // matches substrings inside the wrapper, exactly like the assertions below.
-function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false, existing = 0, ls = '', post = '777 RUN\n__STARTED__\n' } = {}) {
+function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false, existing = 0, ls = '', post = '777 RUN\n__STARTED__\n', preCheck = {} } = {}) {
   const calls = []
   const ok = (value) => ({ isError: false, value })
   let seqIdx = 0 // pollSeq cursor: successive __BJOB__ polls shift through the
@@ -85,7 +85,10 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
   return {
     calls,
     tools: {
-      get: (name) => (['ssh_list', 'ssh_exec', 'ssh_upload', 'ssh_download'].includes(name)
+      // spectre_pre_check: registered by default (a passing check); the
+      // preCheck option drives the D-020 submit-gate tests
+      get: (name) => ((['ssh_list', 'ssh_exec', 'ssh_upload', 'ssh_download'].includes(name)
+        || (name === 'spectre_pre_check' && !preCheck.missing))
         ? { name } : undefined),
       execute: async (input) => {
         const call = input.calls[0]
@@ -93,6 +96,12 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
         calls.push(view)
         const reply = (result) => ({ results: [{ callId: call.id, result }] })
         const a = view.arguments || {}
+        if (view.name === 'spectre_pre_check') {
+          if (preCheck.fail) {
+            return reply(ok({ ok: false, errors: ['format: missing simulator lang=spectre declaration'], warnings: [] }))
+          }
+          return reply(ok({ ok: true, errors: [], warnings: preCheck.warnings ?? [] }))
+        }
         if (view.name === 'ssh_list') return reply(ok({ hosts: HOSTS }))
         if (view.name === 'ssh_upload') {
           if (failUpload) return reply(ok({ ok: false, error: 'upload denied' }))
@@ -491,6 +500,72 @@ test('batch_submit uploads the worker scripts tree and run files, then records t
   }
 })
 
+test('batch_submit runs the SmartAnaSim netlist pre-check before staging (D-020)', async () => {
+  try {
+    const run = makeRunDir()
+    const ctx = makeCtx()
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim',
+      worker: 'spectre/spectre_sweep_worker.py',
+    }, { agent: { id: 'session-aaaa1111-2222-3332-4444-555555555555' } })
+    assert.equal(res.ok, true, JSON.stringify(res))
+    // the check ran BEFORE any staging, and the session id rode along so the
+    // check-param chain resolves the calling session's confirmed table
+    const pre = ctx.calls.find((c) => c.name === 'spectre_pre_check')
+    assert.ok(pre, 'the pre-check ran')
+    assert.equal(pre.arguments.run_dir, run)
+    assert.equal(pre.arguments.session_id, 'session-aaaa1111-2222-3332-4444-555555555555')
+    assert.ok(ctx.calls.findIndex((c) => c.name === 'spectre_pre_check')
+      < ctx.calls.findIndex((c) => c.name === 'ssh_upload'), 'check precedes uploads')
+    // pre-check warnings ride into the submit result
+    const ctx2 = makeCtx({ preCheck: { warnings: ['params: swept parameter SW is never referenced by the circuit'] } })
+    const res2 = await tool(ctx2, 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch2', machine_id: 'node1', remote_root: '/home/op/sim',
+      worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.ok(res2.warnings.some((w) => String(w).includes('never referenced')),
+      JSON.stringify(res2.warnings))
+  } finally {
+    restoreEnv()
+  }
+})
+
+test('batch_submit fails closed on pre-check errors; no_pre_check waives, a missing tool warns', async () => {
+  try {
+    const run = makeRunDir()
+    const base = {
+      run_dir: run, machine_id: 'node1', remote_root: '/home/op/sim',
+      worker: 'spectre/spectre_sweep_worker.py',
+    }
+    // errors -> the submit throws with the findings and the waiver hint,
+    // before anything is staged
+    const ctx = makeCtx({ preCheck: { fail: true } })
+    await assert.rejects(() => tool(ctx, 'batch_submit').execute(
+      { ...base, remote_dir: 'batch1' }, {}), (e) => {
+      assert.match(String(e.message), /spectre pre-check failed/)
+      assert.match(String(e.message), /no_pre_check: true/)
+      assert.match(String(e.message), /simulator lang=spectre/)
+      return true
+    })
+    assert.ok(!ctx.calls.some((c) => c.name === 'ssh_upload'), 'nothing staged after a failed pre-check')
+    // no_pre_check: true skips the check entirely
+    const ctx2 = makeCtx({ preCheck: { fail: true } })
+    const res = await tool(ctx2, 'batch_submit').execute(
+      { ...base, remote_dir: 'batch3', no_pre_check: true }, {})
+    assert.equal(res.ok, true)
+    assert.ok(!ctx2.calls.some((c) => c.name === 'spectre_pre_check'), 'the check is skipped')
+    // a missing tool is fail-open: the submit proceeds with a warning
+    const ctx3 = makeCtx({ preCheck: { missing: true } })
+    const res3 = await tool(ctx3, 'batch_submit').execute(
+      { ...base, remote_dir: 'batch4' }, {})
+    assert.equal(res3.ok, true)
+    assert.ok(res3.warnings.some((w) => String(w).includes('spectre_pre_check is not registered')),
+      JSON.stringify(res3.warnings))
+  } finally {
+    restoreEnv()
+  }
+})
+
 test('batch_submit rejects a worker outside the scripts root with guidance', async () => {
   try {
     const ctx = makeCtx()
@@ -571,7 +646,9 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
     assert.equal(res.scheduler, 'local')
     assert.equal(res.state, 'running')
     assert.equal(typeof res.pid, 'number')
-    assert.equal(ctx.calls.length, 0, 'local submit touches no ssh tool')
+    // zero SSH hops — but the netlist pre-check (D-020) did run as a tool call
+    assert.equal(ctx.calls.filter((c) => c.name.startsWith('ssh_')).length, 0, 'local submit touches no ssh tool')
+    assert.ok(ctx.calls.some((c) => c.name === 'spectre_pre_check'), 'the pre-check ran before the local spawn')
 
     const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
     assert.equal(job.scheduler, 'local')
@@ -587,7 +664,9 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
     assert.equal(poll.completed, 2)
     assert.deepEqual(poll.fetched, []) // nothing to pull for a local run — and the payload says so
     assert.match(poll.fetched_note, /already live in run_dir/)
-    assert.equal(ctx.calls.length, 0, 'local poll reads files only')
+    // the only recorded tool call is the submit-time pre-check; the poll
+    // itself reads the run directory's own files — never an ssh hop
+    assert.equal(ctx.calls.filter((c) => c.name.startsWith('ssh_')).length, 0, 'local poll reads files only')
 
     // a worker that dies at startup is a FAILED frame carrying its stderr — not
     // "running" until wait_sec runs out (the blocking poll used to burn its
@@ -646,7 +725,7 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
     } finally {
       process.env.PATH = savedPath
     }
-    assert.equal(ctx.calls.length, 0, 'none of the local paths touches an ssh tool')
+    assert.equal(ctx.calls.filter((c) => c.name.startsWith('ssh_')).length, 0, 'none of the local paths touches an ssh tool')
   } finally {
     restoreEnv()
   }

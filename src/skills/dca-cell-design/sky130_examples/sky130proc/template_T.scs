@@ -1,15 +1,16 @@
-// template_T.scs — T-type ATT cell, sky130 switches + IDEAL R/C
+// template_T.scs -- T-type ATT cell, sky130 switches + IDEAL R/C
 // Default values = the 4 dB class from calc_t_type.py 4 (Rs 13.18 ohm/arm,
 // Rp 71.22 ohm, ron1 12 ohm, ron 17.07 ohm). Fill-in map from calc_t_type.py:
 //   Rs1/Rs2 <- Rs (per arm)        Rp <- shunt poly value
 //   M1      <- bypass switch (ron1)   M2 <- shunt switch (ron)
 //   cpf     <- Cp first estimate, refined by the Cp scan
-// Switch geometry is baked into the flattened model card name — update
+// Switch geometry is baked into the flattened model card name -- update
 // l/w/nf/nrd/nrs together when the geometry changes (see template_Pi.scs note).
 // R/C are IDEAL elements by decision: analytic flatness predictions are
-// advisory — ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
+// advisory -- ACTUAL SIMULATION RESULTS ARE AUTHORITATIVE.
+simulator lang=spectre
 simulatorOptions options temp=@@temperature@@ reltol=2e-4
-include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model — in a real project point at the transcribed-library copy
+include "sky130_fd_pr__nfet_01v8_lvt.scs" // bundled example model -- in a real project point at the transcribed-library copy
 
 parameters temperature=27 SW=@@SW@@ cpf=@@cpf@@
 

@@ -193,7 +193,7 @@ Canonical schema: `generated`, `targetSpec` (incl. freq range), `params`, `desig
 - **batch-sweep** — the submit/poll/report workflow (schedulers, Sim naming, remote-first analysis, the spec flow).
 - **smart-spectre** — spectre template/config rules, the parser CLIs, cascade assembly, PSS pitfalls.
 - **dca-cascade-analysis** — cascade analysis and the cascade design report.
-- Plugin tools: `spectre_assemble` / `snp_guide` -> `snp_read` / `snp_extract` (SmartAnaSim), `batch_submit` / `batch_poll` / `gen_sweep_report` (HarnessAMS).
+- Plugin tools: `spectre_pre_check` / `snp_guide` -> `snp_read` / `snp_extract` (SmartAnaSim), `batch_submit` (runs the same netlist pre-check internally) / `batch_poll` / `gen_sweep_report` (HarnessAMS).
 
 ## References & Copyright
 

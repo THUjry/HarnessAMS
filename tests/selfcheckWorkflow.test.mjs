@@ -1,9 +1,11 @@
 // workflowTable (server/selfcheckWorkflow.js) — the recommended-workflow table
 // rendered into the AGENTS.md project-config block on values builds. The
 // 2026-11-24 rework replaced the five prose self-check branches with ONE
-// table: five rows (Assemble/Submit/Monitor/Analyze/Report), columns Step |
-// Tool | Model fills, cluster_env forking only the scheduler and analyze
-// cells. ASCII-only by the block's language ruling; one line per table row.
+// table: five rows (Write/Submit/Monitor/Analyze/Report — the 2026-11-25
+// wave hand-writes the run directory and validates it with spectre_pre_check),
+// columns Step | Tool | Model fills, cluster_env forking only the scheduler
+// and analyze cells. ASCII-only by the block's language ruling; one line per
+// table row.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { workflowTable } from '../src/server/selfcheckWorkflow.js'
@@ -20,11 +22,11 @@ test('workflowTable: five rows, three columns, header shape', () => {
   assert.ok(t.includes('### Recommended workflow'), 'heading')
   assert.ok(t.includes('| Step | Tool | Model fills |'), 'header row')
   assert.ok(t.includes('| --- | --- | --- |'), 'separator row')
-  for (const step of ['Assemble', 'Submit', 'Monitor', 'Analyze', 'Report']) {
+  for (const step of ['Write', 'Submit', 'Monitor', 'Analyze', 'Report']) {
     assert.ok(t.includes(`| ${step} |`), `row ${step}`)
   }
   // tools named per row
-  assert.ok(t.includes('| spectre_assemble |'))
+  assert.ok(t.includes('| spectre_pre_check |'))
   assert.ok(t.includes('| batch_submit |'))
   assert.ok(t.includes('| batch_poll |'))
   assert.ok(t.includes('| gen_sweep_report |'))
@@ -34,6 +36,7 @@ test('workflowTable: params the yaml already states are deliberately absent, mac
   const t = workflowTable(S())
   const submit = t.split('\n').find((l) => l.startsWith('| Submit |'))
   assert.match(submit, /Omit machine_id \/ remote_root \/ remote_python: they resolve from this config/)
+  assert.match(submit, /no_pre_check: true only to waive an already-reviewed pre-check failure/)
   assert.ok(!submit.includes('machine_id ='), 'no machine_id fill guidance')
   // the batch output dir auto-names under remote_root — no remote_dir fill
   // guidance anymore (the settings key is selfcheck_-prefixed, the ARG is

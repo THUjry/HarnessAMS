@@ -27,7 +27,8 @@ async function makeWorkspace() {
       [SID_A]: { display: 'session', reports: [], dashboard_selected: null },
       [SID_B]: {
         display: 'overview', reports: [], dashboard_selected: null,
-        check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, unit_check: true, bias_check: true, strict_includes: false },
+        check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] },
+          mult: { nf: [1, 128], m: [1, 1000] }, unit_check: true },
       },
     },
   }, null, 2) + '\n', 'utf8')
@@ -385,7 +386,8 @@ test('gen_sweep_report: the PNG gate is the CALLING session\'s option — per se
     // the route-level writer round-trips it beside check_params
     const w = await writeSessionConfig(ws, SID_B, {
       display: 'overview', reports: [], dashboard_selected: null, report_figs: true,
-      check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] }, unit_check: false, bias_check: true, strict_includes: true },
+      check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] },
+        mult: { nf: [1, 128], m: [1, 1000] }, unit_check: false },
     })
     assert.ok(!w.error, w.error)
     const back = (await readSessionConfigs(ws)).sessions[SID_B]

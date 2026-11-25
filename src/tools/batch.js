@@ -21,7 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { readJsonIfExists, resolveDir } from '../py.js'
-import { downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
+import { callTool, downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
 import { execLocal, localCopy } from '../localchannel.js'
 import { readRunProgress, totalFromConfig } from '../progress_files.js'
 import { findProjectRoot, normalizePin, readSettingsFor } from '../server/settings.js'
@@ -284,6 +284,9 @@ export function batchTools(ctx) {
         overwrite: { type: 'boolean', description: 'Allow submitting into a remote directory that already has point_meta.json files. '
           + 'Stale replay markers (.hams_submitted / .hams_ssh_done) are cleared first, so a batch that already ran here actually re-runs '
           + '(without this, a completed ssh/LSF dir short-circuits to its old result)' },
+        no_pre_check: { type: 'boolean', description: 'Skip the built-in spectre netlist pre-check (the SmartAnaSim spectre_pre_check '
+          + 'tool that runs automatically before anything is staged). Pass true ONLY after reviewing a failed pre-check report — the '
+          + 'waiver exists for consciously accepted netlist quirks, not for unexamined errors' },
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
@@ -300,6 +303,31 @@ export function batchTools(ctx) {
               + " or raise the session's Max points per scan field")
           }
         }
+        // Netlist pre-check (D-020): the SmartAnaSim spectre_pre_check tool
+        // validates the hand-written run directory before anything is staged —
+        // the check families and the check-param chain live there (pure JS, so
+        // this path needs no local python). Fail-closed on errors (fix the
+        // netlist, or consciously re-submit with no_pre_check: true), fail-open
+        // when the tool is not registered, warnings ride along into the result.
+        const preCheckWarnings = []
+        if (args.no_pre_check !== true) {
+          if (!ctx.tools?.get?.('spectre_pre_check')) {
+            preCheckWarnings.push('spectre_pre_check is not registered — netlist content checks skipped '
+              + '(install/enable the SmartAnaSim plugin)')
+          } else {
+            const preArgs = { run_dir: args.run_dir }
+            const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+            if (sid) preArgs.session_id = sid
+            const pre = await callTool(ctx, 'spectre_pre_check', preArgs, { timeoutMs: 30_000 })
+            if (pre.isError || pre.value?.ok === false) {
+              const detail = (Array.isArray(pre.value?.errors) && pre.value.errors.length
+                ? pre.value.errors : [pre.text || 'no details']).map(String).join('\n')
+              throw new Error('spectre pre-check failed — fix the netlist, or re-submit with '
+                + 'no_pre_check: true to waive it after review:\n' + detail)
+            }
+            preCheckWarnings.push(...(Array.isArray(pre.value?.warnings) ? pre.value.warnings.map(String) : []))
+          }
+        }
         const scheduler = args.scheduler === 'ssh' ? 'ssh' : args.scheduler === 'local' ? 'local' : 'lsf'
         // Channel matrix (D-002): the project's cluster_env picks the semantics.
         // Out-of-cluster every remote operation crosses dsh-ssh; in-cluster
@@ -313,7 +341,9 @@ export function batchTools(ctx) {
             throw new Error('scheduler=local requires cluster_env=in-cluster (an out-of-cluster host cannot run '
               + 'the worker — use scheduler="ssh" or "lsf")')
           }
-          return submitLocal(args, runDir, settings)
+          const local = await submitLocal(args, runDir, settings)
+          local.warnings = [...preCheckWarnings, ...(local.warnings || [])]
+          return local
         }
         // Toolchain pins (D-016): resolved and validated BEFORE anything is
         // staged — a bare remote_python fails here, not after the uploads.
@@ -482,7 +512,7 @@ export function batchTools(ctx) {
             scheduler: 'ssh',
             remote_dir: remoteDir,
             scripts_dir: scriptsRoot,
-            warnings: [],
+            warnings: preCheckWarnings,
             job_file: path.join(runDir, '.batch_job.json'),
             output: (ran.stdout || '').trim().slice(0, 4000),
           }
@@ -559,7 +589,7 @@ export function batchTools(ctx) {
             : 'submitted',
           remote_dir: remoteDir,
           scripts_dir: scriptsRoot,
-          warnings,
+          warnings: [...preCheckWarnings, ...warnings],
           job_file: path.join(runDir, '.batch_job.json'),
           output: (submitted.stdout || '').trim().slice(0, 2000),
         }
