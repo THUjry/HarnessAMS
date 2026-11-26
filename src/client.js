@@ -2159,7 +2159,7 @@ window.__ModuleLoader__.load({
         const adoptWith = async (fork, sessionsMap) => {
           const first = !sessionConfigState.has(sessionId)
           const source = first ? forkCopySource(sessionsMap, sessionId) : null
-          const adopted = cloneSessionConfig(sessionConfigOf(sessionId, fork, source))
+          let adopted = cloneSessionConfig(sessionConfigOf(sessionId, fork, source))
           if (first) {
             // D-006 fork-404 fix: an adopted config that selects a report mounts
             // the dashboard iframe the moment setConfig lands — the PUT that
@@ -2167,7 +2167,19 @@ window.__ModuleLoader__.load({
             // that mount, or /dash/<sid>/<rid> answers the not-found error
             // until a manual refresh. A failed persist still adopts
             // (fail-open; that degraded state is exactly the old behavior).
-            await putSessionConfig(sessionId)
+            // Tombstone race (2026-11-26): the second writer (gen_sweep_report)
+            // may have created this entry between the hydrate GET and this PUT —
+            // re-check the server first; if the entry is already there, adopt IT
+            // (the entry-on-disk precondition of D-006 already holds) instead of
+            // tombstoning a fresh entry over the injected report.
+            const again = await fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId)).catch(() => null)
+            const serverEntry = again?.sessions?.[sessionId]
+            if (serverEntry && typeof serverEntry === 'object') {
+              adopted = cloneSessionConfig(serverEntry)
+              sessionConfigState.set(sessionId, adopted)
+            } else {
+              await putSessionConfig(sessionId)
+            }
           }
           if (!alive) return
           setConfig(adopted)
@@ -2189,14 +2201,20 @@ window.__ModuleLoader__.load({
           .catch(() => { if (alive) adoptWith(false) }) // offline: empty start (fail-open like the server)
         return () => { alive = false }
       }, [sessionId, projectPath])
-      // event-handler mutator: apply fn to a copy, keep the module map truthful
-      // and merge-PUT the session's entry to sessions.json
+      // event-handler mutator: optimistic local flip for instant UI; the PUT
+      // rides the REBASED persist channel below (persistConfig) — this channel
+      // used to PUT the closure snapshot unrebased, so a tab-pill click from a
+      // sidebar whose snapshot predated a gen_sweep_report registration wiped
+      // the injected report (write-channel unification, 2026-11-26). fn must
+      // stay idempotent: it is applied once to the optimistic snapshot and
+      // once to the fresh server base inside persistConfig (both current
+      // mutators are display flips).
       const mutateConfig = (fn) => {
         const next = cloneSessionConfig(config)
         fn(next)
         if (sessionId) sessionConfigState.set(sessionId, next)
         setConfig(next)
-        putSessionConfig(sessionId)
+        void persistConfig((base) => { fn(base); return base })
       }
 
       useEffect(() => {
