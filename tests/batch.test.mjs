@@ -467,6 +467,74 @@ test('batch_submit enforces the session max-points-per-scan gate (D-019)', async
   }
 })
 
+// 2026-11-26: the subagent anchoring policy (src/subagent.js). A delegated
+// subagent's own id is never workspace-accounted; its effective id is the
+// topmost user-visible ancestor, so the D-019 gate reads the USER session's
+// limit and the nested pre-check call carries the USER session's id. The
+// fixture drops makeCtx's explicit `project` injection and accounts only the
+// ancestor session in the registry — the lineage walk is the only way
+// through.
+test('batch_submit anchors a subagent call on the ancestor session (D-019 gate + nested pre-check id)', async () => {
+  const base = tmp('hams-sub-')
+  const scriptsRoot = path.join(base, 'scripts')
+  fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), '# worker\n')
+  process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
+  const root = tmp('hams-proj-')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
+      remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+      compute_script_local: 'python', compute_script_remote: 'python',
+    },
+  }, null, 2))
+  const sessionsFile = path.join(root, '.harnessams', 'sessions.json')
+  const writeSessions = (limit) => fs.writeFileSync(sessionsFile, JSON.stringify({
+    version: 2,
+    sessions: { 'sess-user': { display: 'session', reports: [], max_points_per_scan: limit } },
+  }, null, 2))
+  try {
+    const cpf = Array.from({ length: 111 }, (_, i) => String(i + 10)) // 111 x 2 = 222 points
+    const run = makeRunDir({ under: root, config: {
+      netlist_template: 'template.scs',
+      parameters: { cpf, SW: [0, 1] },
+      sweep_mode: 'cross_product',
+    } })
+    // only the ANCESTOR is accounted; the child resolves through the walk
+    const userAgent = { id: 'sess-user', session: { header: {} } }
+    const ctx = makeCtx({ project: root })
+    delete ctx.__fixtureProject // no explicit project injection
+    ctx.workspaceRegistry = { list: () => [{ id: 'ws-fixture', path: root, title: 'fixture', sessionIds: ['sess-user'] }] }
+    const agents = new Map([['sess-user', userAgent]])
+    ctx.agents = { get: (id) => agents.get(id) }
+    const exec = { agent: {
+      id: 'sess-child',
+      session: { header: { origin: 'subagent', parentSession: 'sess-user', isSeeded: true } },
+    } }
+    writeSessions(100)
+    await assert.rejects(tool(ctx, 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
+    }, exec), /max points per scan: 222 > 100/)
+    assert.equal(ctx.calls.length, 0, 'the reject happens before anything is staged')
+    // raise the user session's limit and submit through: the nested
+    // spectre_pre_check call must carry the ANCESTOR session id
+    writeSessions(250)
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
+    }, exec)
+    assert.equal(res.ok, true, JSON.stringify(res))
+    const preCheck = ctx.calls.find((c) => c.name === 'spectre_pre_check')
+    assert.ok(preCheck, 'the built-in gate ran')
+    assert.equal(preCheck.arguments.session_id, 'sess-user')
+  } finally {
+    restoreEnv()
+    fs.rmSync(base, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('path guards and poll parsing', () => {
   assert.throws(() => sanitizeRel('../x.py'), /unsafe relative path/)
   assert.throws(() => resolveRemoteDir('/home/op/sim', '../evil'), /escapes the remote workspace/)

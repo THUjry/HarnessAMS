@@ -65,10 +65,12 @@ export const name = 'dsh-harnessams'
 // undefined so degraded embeds fail soft, not loud. systemPrompt is declared
 // for the waiting-policy section, skills for the bundled-skill catalog and
 // shell for the in-cluster local execution seam (ctx.shell, the official host
-// shell — bsub/bjobs on this host when cluster_env=in-cluster).
+// shell — bsub/bjobs on this host when cluster_env=in-cluster). agents backs
+// the subagent identity policy (src/subagent.js — the session anchoring walk
+// over live agent headers).
 // (cordis blocks ctx access to undeclared services — optional chaining
 // cannot save that, live-caught 2026-11-21.)
-export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills', 'shell']
+export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills', 'shell', 'agents']
 
 // Execution safety rules injected into the system prompt while this plugin is
 // enabled. 2026-11-24 rework (the "prompts carry SAFETY only" ruling): the

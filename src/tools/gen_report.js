@@ -19,12 +19,15 @@ import { resolveDir } from '../py.js'
 import { readJsonBom, chartSpecs, curveMids, genReportFromSpec } from '../report_render.js'
 import { exportFigs } from '../figs_export.js'
 import { resolveProjectTool } from '../server/project.js'
+import { effectiveSessionId } from '../subagent.js'
 
 // --- report auto-registration target: the calling session's HarnessAMS ----
 // dashboard. Since the task retirement (2026-11-19, D-005) each DSH session
 // carries its own report list in <workspace>/.harnessams/sessions.json; the
 // calling session is identified EXACTLY through the tool execution context
-// (exec.agent.id IS the SessionId — probe-verified, see probe-taskmerge-20261119).
+// (exec.agent.id IS the SessionId — probe-verified, see probe-taskmerge-20261119;
+// a delegated subagent resolves to its topmost user-visible ancestor via
+// src/subagent.js, so the store never gains child-id entries).
 // server/project.js owns the store and its validation; this side only merges one
 // report into one session entry through writeSessionConfig (atomic, defensive).
 
@@ -218,12 +221,22 @@ export function genReportTools(ctx) {
         // OUTPUT root = the design folder (spec-anchored, local rule); CONFIG
         // root = the calling session's project (D-021: the sessions store, the
         // plotly source, and the registration all resolve there — no walk-up).
+        // A delegated subagent anchors on its topmost user-visible ancestor
+        // (src/subagent.js): its reports land in the user session's entry. A
+        // subagent whose lineage did not resolve degrades to NO session
+        // identity (the report still renders, registration is skipped with a
+        // reason) instead of throwing at the anchor — the store never gains a
+        // child-id entry.
         const project = deriveProjectRoot(specFile, spec)
         if (!project) {
           throw new Error('cannot determine the output root (the design folder) — set project_dir in the spec, or place the spec '
             + 'directly inside <design>/SimResults/')
         }
-        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        const rawAgentId = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        const effective = effectiveSessionId(ctx, exec?.agent)
+        const subagentUnresolved = effective !== null && effective === rawAgentId
+          && exec?.agent?.session?.header?.origin === 'subagent'
+        const sid = subagentUnresolved ? null : effective
         const p = sid || args.project
           ? resolveProjectTool(ctx.workspaceRegistry, sid, args.project)
           : null
@@ -252,11 +265,12 @@ export function genReportTools(ctx) {
         }
         const gen = genReportFromSpec(project, prepared, { configRoot })
 
-        // The calling session (identity = exec.agent.id, which IS the SessionId
-        // — D-005) and its store: the PNG gate and the registration both key
-        // off them. No session-resolved project → no store lookup (the report
-        // still renders; the plotly chain falls to the CDN after the route
-        // step and the never-seeded project copy).
+        // The calling session (identity = the topmost user-visible session —
+        // exec.agent.id itself, or a subagent's resolved ancestor) and its
+        // store: the PNG gate and the registration both key off them. No
+        // session-resolved project → no store lookup (the report still
+        // renders; the plotly chain falls to the CDN after the route step and
+        // the never-seeded project copy).
         const found = configRoot ? sessionsStoreAt(configRoot) : null
 
         // PNG export is OPT-IN per session: the "Report figures" option of the
@@ -288,9 +302,14 @@ export function genReportTools(ctx) {
         }
 
         // Auto-registration into the CALLING session's dashboard (identity =
-        // exec.agent.id, which IS the SessionId — D-005). The report is already
-        // on disk, so a failure here is reported, never thrown.
-        if (!sid) {
+        // the topmost user-visible session; D-005). The report is already on
+        // disk, so a failure here is reported, never thrown. The store stays
+        // keyed by USER-VISIBLE sessions only.
+        if (subagentUnresolved) {
+          result.registered = false
+          result.register_error = 'delegated subagent identity did not resolve to a user-visible session — report generated at '
+            + result.report_path + ' but not registered (the parent session re-runs gen_sweep_report, or add it in the sidebar dashboard)'
+        } else if (!sid) {
           result.registered = false
           result.register_error = 'no session identity in the tool execution context — report generated at '
             + result.report_path + ' but not registered (add it in the HarnessAMS sidebar dashboard)'

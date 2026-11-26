@@ -11,7 +11,7 @@ import { makeTool } from '../src/tool.js'
 
 test('plugin metadata', () => {
   assert.equal(name, 'dsh-harnessams')
-  assert.deepEqual(inject, ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills', 'shell'])
+  assert.deepEqual(inject, ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt', 'skills', 'shell', 'agents'])
   assert.equal(typeof apply, 'function')
 })
 

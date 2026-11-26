@@ -27,6 +27,7 @@ import { readRunProgress, totalFromConfig } from '../progress_files.js'
 import { normalizePin } from '../server/settings.js'
 import { overlaySettingsAt } from '../server/reconcile.js'
 import { resolveProjectTool } from '../server/project.js'
+import { effectiveSessionId } from '../subagent.js'
 import {
   DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildSshCommand, buildSubmitCommand,
   classifyBjobsState, collectRunFiles,
@@ -300,8 +301,9 @@ export function batchTools(ctx) {
         // config this submission resolves. The AGENTS.md yaml block overlays at
         // this READ (reconcile at read AND write, user ruling 2026-11-25): a
         // hand-edited row takes effect immediately; an invalid row keeps the
-        // json value and surfaces as a warning riding the result.
-        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        // json value and surfaces as a warning riding the result. A subagent
+        // caller anchors on its topmost user-visible ancestor (src/subagent.js).
+        const sid = effectiveSessionId(ctx, exec?.agent)
         const p = resolveProjectTool(ctx.workspaceRegistry, sid, args.project)
         if (p.error) throw new Error(p.error)
         const projectPath = p.project.path
@@ -645,10 +647,11 @@ export function batchTools(ctx) {
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
         // D-021 anchoring: the calling session's project (or an explicit
-        // `project` argument) — no walk-up from run_dir. The AGENTS.md yaml
-        // overlay applies to the cluster_env fallback below; invalid rows keep
-        // the json value and warn into the result.
-        const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+        // `project` argument) — no walk-up from run_dir; a subagent caller
+        // resolves to its topmost user-visible ancestor (src/subagent.js). The
+        // AGENTS.md yaml overlay applies to the cluster_env fallback below;
+        // invalid rows keep the json value and warn into the result.
+        const sid = effectiveSessionId(ctx, exec?.agent)
         const p = resolveProjectTool(ctx.workspaceRegistry, sid, args.project)
         if (p.error) throw new Error(p.error)
         const { settings, warnings: overlayWarnings } = overlaySettingsAt(p.project.path)

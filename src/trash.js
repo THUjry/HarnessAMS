@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { resolveWorkspacePathsAt } from './server/settings.js'
 import { resolveProjectTool } from './server/project.js'
+import { effectiveSessionId } from './subagent.js'
 
 // Trash root: the owning project's workspace_config.json workspace.trash_dir
 // (default .harnessams/trash under the project root). `projectRoot` is the
@@ -194,7 +195,9 @@ export function safeTrashTool(ctx) {
       project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
     },
     async execute(args, exec) {
-      const sid = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+      // A subagent caller anchors on its topmost user-visible ancestor
+      // (src/subagent.js) — the trash root follows the user session's project.
+      const sid = effectiveSessionId(ctx, exec?.agent)
       const p = resolveProjectTool(ctx?.workspaceRegistry, sid, args.project)
       if (p.error) return { ok: false, error: p.error }
       const opts = { trashDir: trashDir(p.project.path) }

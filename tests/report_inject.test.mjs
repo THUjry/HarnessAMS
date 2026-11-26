@@ -481,3 +481,51 @@ test('gen_sweep_report: two reports of one project keep separate data (the v1-sh
     await rm(ws, { recursive: true, force: true })
   }
 })
+
+// 2026-11-26 subagent policy (src/subagent.js): a delegated subagent's report
+// registers into its TOPMOST USER-VISIBLE ancestor's entry (sessions.json
+// stays keyed by user-visible sessions only); a subagent whose lineage does
+// not resolve gets no orphan entry — the report renders, registration says
+// why it was skipped.
+test('gen_sweep_report: a subagent registers into the ancestor session; a broken lineage writes no orphan entry', async () => {
+  const { ws, storeDir } = await makeWorkspace()
+  try {
+    const proj = path.join(ws, 'projS')
+    const simres = path.join(proj, 'SimResults')
+    await mkdir(simres, { recursive: true })
+    await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
+      project_dir: proj,
+      rounds: [{ id: 'Sim0_20261126_batch1', points: [{ index: 0, params: { a: 1 }, metrics: { m: 7 } }] }],
+    }), 'utf8')
+    const SID_CHILD = 'session-child1111-2222-3332-4444-555555555555'
+    const userAgent = { id: SID_A, session: { header: {} } }
+    const agents = new Map([[SID_A, userAgent]])
+    const ctx = { ...registryCtx(ws), agents: { get: (id) => agents.get(id) } }
+    const tool = makeTool(genReportTools(ctx).find((d) => d.name === 'gen_sweep_report'))
+
+    // seeded child of the accounted user session: the ancestor's entry takes
+    // the report, the child id never appears as a sessions.json key
+    const child = { id: SID_CHILD,
+      session: { header: { origin: 'subagent', parentSession: SID_A, isSeeded: true } } }
+    const ok = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: child })
+    assert.equal(ok.ok, true, JSON.stringify(ok))
+    assert.equal(ok.registered, true)
+    assert.equal(ok.session, SID_A)
+    const store1 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store1.sessions[SID_CHILD], undefined, 'no child-id entry')
+    assert.equal(store1.sessions[SID_A].reports.length, 1)
+
+    // broken lineage (ancestor not live): the report still renders, but no
+    // orphan entry is written — the result explains the skip
+    const orphan = { id: SID_CHILD,
+      session: { header: { origin: 'subagent', parentSession: 'session-gone1111-2222-3332-4444-555555555555', isSeeded: true } } }
+    const skip = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: orphan })
+    assert.equal(skip.ok, true, JSON.stringify(skip))
+    assert.equal(skip.registered, false)
+    assert.match(skip.register_error, /subagent identity did not resolve/)
+    const store2 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store2.sessions[SID_CHILD], undefined, 'still no child-id entry')
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})

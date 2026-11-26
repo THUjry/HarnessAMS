@@ -7,8 +7,10 @@
 // workspace_config.json settings section first, so the agent controls the run
 // configuration with the same single write face the UI uses. Session identity
 // follows the D-005 precedent (exec.agent.id ≡ sessionId, as in
-// gen_sweep_report) — no project guessing, and since D-021 no path walk-up
-// either: resolveProjectTool (server/project.js) is the one project anchor.
+// gen_sweep_report; a delegated subagent resolves to its topmost user-visible
+// ancestor via src/subagent.js) — no project guessing, and since D-021 no
+// path walk-up either: resolveProjectTool (server/project.js) is the one
+// project anchor.
 // 2026-11-25 D-021 write shape: every settings write (1) reconciles json ←
 // AGENTS.md first — the block is authoritative because the agent edits the
 // outside file first; an invalid row is refused (agent: warning, UI: the save
@@ -18,6 +20,7 @@
 // update, so an explicit null clear sticks), and (6) re-syncs the AGENTS.md
 // block so UI = json = AGENTS.md after every write.
 import { resolveProjectTool } from '../server/project.js'
+import { effectiveSessionId } from '../subagent.js'
 import { healFromGlobalMemory, validateSettings, writeSettings, PIN_KEYS } from '../server/settings.js'
 import { reconcileSettings } from '../server/reconcile.js'
 import { localEnvFacts, runLocalChecks } from '../server/checks.js'
@@ -159,7 +162,11 @@ export function selfcheckTools(ctx) {
       project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
     },
     async execute(args, exec) {
-      const sessionId = args.session_id || exec?.agent?.id || null
+      // D-021 anchoring with the subagent policy (src/subagent.js): a
+      // delegated subagent resolves to its topmost user-visible ancestor, so
+      // a delegation-run self-check lands on the user session's project and
+      // dedup (runningBySession) spans the whole delegation tree.
+      const sessionId = args.session_id || effectiveSessionId(ctx, exec?.agent)
       const p = resolveProjectTool(ctx.workspaceRegistry, sessionId, args.project)
       if (p.error) return { ok: false, error: p.error }
       return runSelfcheckAction(ctx, {
