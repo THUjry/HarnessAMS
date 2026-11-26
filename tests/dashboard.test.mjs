@@ -195,6 +195,15 @@ test('openlocal: openWithDefaultApp composes the platform arg vector and surface
   const bare = await openWithDefaultApp({}, path.join(tmpdir(), 'hams-open-missing-file.html'))
   assert.ok(bare && (bare.ok === true || typeof bare.error === 'string'), JSON.stringify(bare))
 
+  // the REAL cordis ctx is a proxy that THROWS on reads of undeclared
+  // properties ("cannot get property ... without inject") — the seam probe
+  // must survive it and fall back to the real spawn, value-shaped, never a throw
+  const throwingCtx = new Proxy({}, {
+    get: (t, k) => { throw new Error(`cannot get property "${String(k)}" without inject`) },
+  })
+  const proxied = await openWithDefaultApp(throwingCtx, path.join(tmpdir(), 'hams-open-missing-file.html'))
+  assert.ok(proxied && (proxied.ok === true || typeof proxied.error === 'string'), JSON.stringify(proxied))
+
   // an erroring / throwing launcher surfaces in the returned value
   const r2 = await openWithDefaultApp({ openLauncher: async () => ({ error: 'open failed on win32: spawn ENOENT xdg-open' }) }, '/tmp/x.html')
   assert.match(r2.error, /spawn ENOENT/)

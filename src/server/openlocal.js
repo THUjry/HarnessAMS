@@ -78,8 +78,12 @@ const defaultLauncher = (file, args) => new Promise((resolve) => {
 })
 
 // Launch with the OS default handler. Tests inject a launcher through
-// ctx.openLauncher (production never sets it and always runs the real
-// spawn). Returns { ok: true } or { error } — never throws.
+// ctx.openLauncher (a PLAIN ctx object — the test harness never builds a
+// cordis context); the REAL cordis ctx is a proxy that THROWS on reads of
+// properties not declared in the plugin's inject list ("cannot get property
+// … without inject"), so the seam probe itself is guarded and production
+// always lands on the real spawn. Returns { ok: true } or { error } — never
+// throws.
 export async function openWithDefaultApp(ctx, abs) {
   let file, args
   if (process.platform === 'win32') {
@@ -98,7 +102,10 @@ export async function openWithDefaultApp(ctx, abs) {
     file = 'xdg-open'
     args = [abs]
   }
-  const launcher = typeof ctx?.openLauncher === 'function' ? ctx.openLauncher : defaultLauncher
+  let launcher = defaultLauncher
+  try {
+    if (ctx && typeof ctx.openLauncher === 'function') launcher = ctx.openLauncher
+  } catch { /* undeclared on the host ctx proxy — no test seam, use the real spawn */ }
   try {
     const r = await launcher(file, args)
     if (r && r.error) return { error: r.error }
