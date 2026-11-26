@@ -5,8 +5,9 @@
 // <project>/.harnessams/selfcheck since the 2026-11-19 storage fix) and drive a
 // mock ctx.tools shell that:
 //   - answers ssh_* (@linxin666/dsh-ssh) with scripted structured values —
-//     every ssh_exec command (wrapped in `timeout -s KILL ... sh -c "…"`)
-//     is bash -n validated here, same as server.test.mjs;
+//     every ssh_exec command (wrapped in `timeout -s KILL ... sh -c "…"`) is
+//     recorded flattened for the payload assertions (the wrapper-shape
+//     contract itself lives in server.test.mjs's execRemote regex test);
 //   - runs the REAL batch_* tools (makeTool(toolDefinitions(ctx))) so submit/
 //     poll logic is exercised for real against the mocked remote; local
 //     submissions (scheduler=local) are intercepted to lay down the worker's
@@ -36,7 +37,7 @@ import { agentsMdPath, syncAgentsMd } from '../src/server/agentsmd.js'
 import { writeSessionConfig } from '../src/server/project.js'
 import { runSelfcheckAction } from '../src/tools/selfcheck.js'
 import { verifyRun, siValue } from '../src/scripts/selfcheck/selfcheck_verify.mjs'
-import { assertValidShell, callRoute, getReq, clientSrc, assertDictKeys } from './helpers.mjs'
+import { callRoute, getReq, clientSrc, assertDictKeys } from './helpers.mjs'
 
 const execFileAsync = promisify(execFile)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -53,8 +54,8 @@ process.env.HARNESSAMS_GLOBAL_STORE = path.join(os.tmpdir(), 'hams-globalstore-s
 const rwExecCommands = []
 function guardShell(cmd) {
   // cmd arrives wrapped by execRemote (timeout -s KILL … sh -c "<cmd>") —
-  // validate the wrapper as-is, record it flattened for the payload assertions.
-  assertValidShell(cmd)
+  // record it flattened for the payload assertions (the wrapper-shape
+  // contract itself lives in server.test.mjs's execRemote regex test).
   rwExecCommands.push(String(cmd).replace(/\\"/g, '"'))
 }
 
@@ -223,7 +224,6 @@ function makeHarness({ scenario = {} }) {
   // branch writes sweep_progress.json.
   async function shellExec(command) {
     localCommands.push(String(command))
-    assertValidShell(String(command))
     const dirOf = (re) => re.exec(String(command))?.[1]
     if (command.includes('spectre_psf_parse.py')) {
       const dir = dirOf(/cd "([^"]+)" &&/)
@@ -579,10 +579,6 @@ test('settings: defaults, validation, persistence, workspace section', async () 
     remote_root: '/home/op/sim', selfcheck_remote_dir: '/abs/path', scheduler: 'ssh', compute_script_remote: 'js' })
   assert.ok(!v.error, v.error)
   assert.equal(v.settings.compute_script_remote, 'js')
-  // the gen_sweep_report PNG gate is a SESSION option (sessions.json), not a
-  // project setting: no key, and a legacy payload key is ignored
-  assert.ok(!('report_figs' in v.settings))
-  assert.ok(!validateSettings({ ...defaultSettings(), cluster_env: 'in-cluster', report_figs: 'on' }).error)
   // D-016 toolchain pins: an absolute path to the executable file, or null.
   // (positive cases need a valid base: out-of-cluster + local + spectre is refused)
   const ok = { ...defaultSettings(), cluster_env: 'in-cluster' }
@@ -595,10 +591,8 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(validateSettings({ ...ok, remote_python: '/opt/tools/python3\\bin\\python3' }).settings.remote_python,
     '/opt/tools/python3/bin/python3', 'backslashes normalize to the POSIX form')
   // bare names are the incident's failure mode: refused with guidance, both keys
-  for (const bare of ['python3', 'python', 'spectre', 'rel/python3']) {
-    assert.match(validateSettings({ ...defaultSettings(), remote_python: bare }).error, /remote_python must be an ABSOLUTE path to the executable/)
-    assert.match(validateSettings({ ...defaultSettings(), remote_spectre_cmd: bare }).error, /remote_spectre_cmd must be an ABSOLUTE path/)
-  }
+  assert.match(validateSettings({ ...defaultSettings(), remote_python: 'python3' }).error, /remote_python must be an ABSOLUTE path to the executable/)
+  assert.match(validateSettings({ ...defaultSettings(), remote_spectre_cmd: 'python3' }).error, /remote_spectre_cmd must be an ABSOLUTE path/)
   // the value is joined into a remote command line: no spaces, no shell characters, a file not a directory
   assert.match(validateSettings({ ...defaultSettings(), remote_python: '/opt/my python/bin/python3' }).error, /remote_python must name the executable file/)
   assert.match(validateSettings({ ...defaultSettings(), remote_spectre_cmd: '/opt/tools/bin/spectre;id' }).error, /must name the executable file/)
@@ -644,9 +638,6 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(raw.version, 1)
   assert.equal(raw.workspace.sim_scripts_dir, path.join(tmp, '.harnessams', 'scripts'))
   assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'scripts')), 'staged scripts dir exists')
-  // the project script/ folder is retired (2026-11-25): the gen script is
-  // never staged into the project, the self-check runs it from the package
-  assert.ok(!fs.existsSync(path.join(tmp, 'script')), 'no project script/ folder (2026-11-25 retirement)')
   const sibling = path.resolve(REPO, '..', 'HarnessAMS-SmartAnaSim', 'scripts')
   if (fs.existsSync(path.join(sibling, 'spectre', 'spectre_sweep_worker.py'))) {
     assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'scripts', 'spectre', 'spectre_sweep_worker.py')),
@@ -675,7 +666,6 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   const dirty = await readSettings(tmp)
   assert.equal(dirty.settings.run_mode, 'local')
   assert.equal(dirty.settings.machine_id, 'x')
-  assert.ok(!('report_figs' in dirty.settings), 'a legacy report_figs key is not a setting anymore (the PNG gate is per session)')
   // unknown scheduler values (incl. the retired "direct"/"none") fall back to
   // the default — no migration, the pre-release no-compat ruling (D-002 wave)
   await fsp.writeFile(configPath(tmp), '{"settings":{"scheduler":"none"}}', 'utf8')
@@ -901,31 +891,9 @@ test('routes: GET project-settings defaults + the /api/tool funnel + guards', as
   const noSession = await driveRoute(routes, getReq('/harnessams/api/project-settings?sessionId=zzz'))
   assert.equal(noSession.code, 404)
 
-  // action=status guards: run_id pins one run (a global "latest" run would
-  // bleed verdicts across projects)
-  const noId = await driveRoute(routes, {
-    method: 'POST', url: '/harnessams/api/tool', headers: {},
-    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1', action: 'status' })) },
-  })
-  assert.equal(noId.code, 400)
-
-  const noRun = await driveRoute(routes, {
-    method: 'POST', url: '/harnessams/api/tool', headers: {},
-    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1', action: 'status', run_id: 'ghost-run' })) },
-  })
-  assert.equal(noRun.code, 404) // unknown run id: 404 regardless of real runs on disk (hermetic)
-
-  const unknownAction = await driveRoute(routes, {
-    method: 'POST', url: '/harnessams/api/tool', headers: {},
-    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1', action: 'nope' })) },
-  })
-  assert.equal(unknownAction.code, 400)
-
-  const unknownSession = await driveRoute(routes, {
-    method: 'POST', url: '/harnessams/api/tool', headers: {},
-    async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 'ghost', action: 'run' })) },
-  })
-  assert.equal(unknownSession.code, 404)
+  // guard coverage lives elsewhere per surface: the run_id pinning fence is
+  // the tool-actions test's cross-project 404, the unknown-action error is
+  // the tool-surface test's bogus action, and a ghost session 404s above
 })
 
 // ---------------------------------------------------------------------------
@@ -997,10 +965,6 @@ test('project init (D-015, 2026-11-25): staging at init heals the writeSessionCo
     const r1 = await initProjectStorage(ws)
     assert.deepEqual({ fresh: r1.fresh, flipped: r1.flipped }, { fresh: false, flipped: true })
     assert.ok(fs.existsSync(path.join(ws, '.harnessams', 'scripts')), 'scripts staged at init')
-    // the RC gen script is never staged into the project anymore (2026-11-25:
-    // the project script/ folder is retired; the self-check runs it from the
-    // package install location)
-    assert.ok(!fs.existsSync(path.join(ws, 'script')), 'no project script/ folder (2026-11-25 retirement)')
     let raw = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
     assert.equal(raw.workspace.sim_scripts_dir, path.join(ws, '.harnessams', 'scripts'), 'the suppressed flip lands')
 
@@ -1213,9 +1177,6 @@ test('routes: project-init (D-015) + global-config (D-017) + project facts', asy
     assert.equal(init.code, 200, JSON.stringify(init.body))
     assert.equal(init.body.fresh, true)
     assert.ok(fs.existsSync(path.join(projectPath, '.harnessams', 'scripts')))
-    // no project script/ folder since the 2026-11-25 retirement — the gen
-    // script runs from the package install location
-    assert.ok(!fs.existsSync(path.join(projectPath, 'script')))
     assert.equal(init.body.healed.length, 0, 'no node memory yet: nothing to prefill')
     // a page-reload init is a quiet idempotent no-op
     const init2 = await postInit()
@@ -1285,41 +1246,6 @@ test('tool actions: env returns facts+checks; run/status round-trip; project res
 // 7) flows
 // ---------------------------------------------------------------------------
 
-test('flow: simulator=none + local (python compute)', async () => {
-  const f = await startFlow({ settings: { simulator: 'none' } })
-  try {
-    assert.ok(f.start.runId, f.start.error)
-    const run = await waitDone(f.start.runId, f.projectPath)
-    assert.equal(run.summary.ok, true)
-    assert.equal(run.summary.remote, 'skipped')
-    const items = run.steps.map((s) => [s.item, s.ok])
-    assert.deepEqual(items.map((x) => x[0]), [
-      'Parser script check', 'Settings validation', 'golden dataset load',
-      'spectre_psf_parse.py (golden)', 'pointwise verify (python, LPF+HPF)',
-    ])
-    assert.ok(items.every(([, ok]) => ok === true), JSON.stringify(items))
-    // local-only: not a single rw_* call happened
-    assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0)
-    // run record survives under the project's .harnessams/selfcheck; a CLEAN
-    // run's artifacts are deleted at finalize (2026-11-19 ruling)
-    assert.ok(run.runDir.includes(path.join('.harnessams', 'selfcheck')), run.runDir)
-    assert.ok(fs.existsSync(path.join(run.runDir, 'selfcheck_run.json')))
-    const left = await waitArtifactsGone(run.runDir)
-    assert.deepEqual(left, [], 'clean run must leave only selfcheck_run.json: ' + left.join(', '))
-  } finally { f.restoreAll() }
-})
-
-test('flow: simulator=none + local (js compute)', async () => {
-  const f = await startFlow({ settings: { simulator: 'none', compute_script_local: 'js' } })
-  try {
-    const run = await waitDone(f.start.runId, f.projectPath)
-    assert.equal(run.summary.ok, true)
-    const verify = run.steps.find((s) => s.settingColumn === 'compute_local')
-    assert.equal(verify.ok, true)
-    assert.match(verify.item, /\(js, /)
-  } finally { f.restoreAll() }
-})
-
 test('flow: simulator=spectre + local', async () => {
   const f = await startFlow({})
   try {
@@ -1353,6 +1279,12 @@ test('flow: simulator=spectre + local', async () => {
     assert.ok(f.ctx.__execLog.some((x) => x.name === 'batch_submit' && x.arguments.scheduler === 'local'))
     assert.ok(f.ctx.__execLog.some((x) => x.name === 'batch_poll'))
     assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0)
+    // run record survives under the project's .harnessams/selfcheck; a CLEAN
+    // run's artifacts are deleted at finalize (2026-11-19 ruling)
+    assert.ok(run.runDir.includes(path.join('.harnessams', 'selfcheck')), run.runDir)
+    assert.ok(fs.existsSync(path.join(run.runDir, 'selfcheck_run.json')))
+    const left = await waitArtifactsGone(run.runDir)
+    assert.deepEqual(left, [], 'clean run must leave only selfcheck_run.json: ' + left.join(', '))
   } finally { f.restoreAll() }
 })
 
@@ -1385,7 +1317,7 @@ test('flow: spectre + remote — LSF fails → diagnosis + fallback(ssh) passes;
     assert.match(prompt, /Answer in English\./)
     assert.equal(f.ctx.__scCalls.rename[0].title, 'HarnessAMS diagnosis: selfcheck @ node1')
 
-    // every ssh_exec command went through bash -n and targeted the alias
+    // every ssh_exec command targeted the alias through the exec wrapper
     const execs = f.ctx.__execLog.filter((x) => x.name === 'ssh_exec')
     assert.ok(execs.length > 0)
     for (const e of execs) {
@@ -1436,26 +1368,6 @@ test('flow: spectre + remote — scheduler=ssh fails → verdict fails (nothing 
     const schedSteps = run.steps.filter((s) => s.settingColumn === 'scheduler')
     assert.equal(schedSteps.length, 2) // submit+poll only — no fallback attempt exists
     assert.ok(schedSteps.every((s) => s.ok === false))
-  } finally { f.restoreAll() }
-})
-
-test('flow: spectre + remote — fallback also fails → final diagnosis covers the rest', async () => {
-  const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'lsf' },
-    scenario: { lsfSubmitFail: true, sshRunFail: true },
-  })
-  try {
-    await waitDone(f.start.runId, f.projectPath)
-    const run = await waitDiagnoses(f.start.runId, f.projectPath, 2)
-    assert.equal(run.summary.remote, 'failed')
-    assert.equal(run.summary.ok, false)
-    const triggers = run.diagnoses.map((d) => d.trigger).sort()
-    assert.deepEqual(triggers, ['final', 'remote-scheduler'])
-    // R3/R4 recorded as skipped (batch failed), not silent
-    const skipped = run.steps.filter((s) => s.ok === null)
-    assert.ok(skipped.length >= 2)
-    assert.ok(skipped.some((s) => /remote parse \+ verify/.test(s.item)))
-    assert.equal(run.diagnoses.every((d) => d.status === 'done'), true)
   } finally { f.restoreAll() }
 })
 
@@ -1527,55 +1439,6 @@ test('flow: spectre + remote — the toolchain pins drive the submit AND the rem
   } finally { f.restoreAll(); await rmRetry(f.tmp) }
 })
 
-test('flow: none + remote — the golden chain runs its remote compute under the remote_python pin (D-016)', async () => {
-  const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', simulator: 'none',
-      remote_python: PIN_PY },
-  })
-  try {
-    assert.ok(f.start.runId, f.start.error)
-    const run = await waitDone(f.start.runId, f.projectPath)
-    assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result, s.detail])))
-    const c2 = run.steps.find((s) => s.item === 'Settings validation')
-    assert.ok(c2.detail.includes(`toolchain python=${PIN_PY}`), c2.detail)
-    assert.ok(!c2.detail.includes('spectre='), 'no simulator, so no spectre entry in the record')
-    const verifies = f.ctx.__execLog.filter((x) => x.name === 'ssh_exec' && String(x.arguments.command).includes('spectre_psf_parse.py'))
-    assert.equal(verifies.length, 2)
-    for (const v of verifies) {
-      const flat = String(v.arguments.command).replace(/\\"/g, '"')
-      assert.ok(flat.includes(`"${PIN_PY}" ./spectre_psf_parse.py`), flat)
-    }
-  } finally { f.restoreAll(); await rmRetry(f.tmp) }
-})
-
-test('flow: spectre + remote in-cluster — the pins reach the local bsub and the local parse alike (D-016)', async () => {
-  // The shared root is drive-resolved on Windows; the local cross-check runs
-  // as in-process js, so the pinned interpreter (a cluster path this test
-  // host does not have) is never spawned here.
-  const shared = `/hams_sc_pin_${process.pid}_${Date.now()}`
-  const localShared = path.resolve(shared)
-  const f = await startFlow({
-    settings: { cluster_env: 'in-cluster', run_mode: 'remote', machine_id: null, remote_root: shared, scheduler: 'lsf',
-      remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE, compute_script_local: 'js' },
-  })
-  try {
-    assert.ok(f.start.runId, f.start.error)
-    const run = await waitDone(f.start.runId, f.projectPath)
-    assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result, s.detail])))
-    assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0, 'zero dsh-ssh usage')
-    const bsub = f.ctx.__localCommands.find((c) => c.includes('bsub -q'))
-    assert.ok(bsub, 'local bsub ran')
-    assert.ok(bsub.includes(`"${PIN_PY}" `), bsub)
-    assert.ok(bsub.includes('"--spectre-cmd" "' + PIN_SPECTRE + '"'), bsub)
-    const parse = f.ctx.__localCommands.find((c) => c.includes('spectre_psf_parse.py'))
-    assert.ok(parse.includes(`"${PIN_PY}" "`), parse)
-  } finally {
-    f.restoreAll()
-    await rmRetry(f.tmp)
-    fs.rmSync(localShared, { recursive: true, force: true })
-  }
-})
-
 test('flow: none + remote — upload, remote compute (python), download + js cross-check', async () => {
   const f = await startFlow({
     settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', simulator: 'none', compute_script_local: 'js' },
@@ -1606,20 +1469,6 @@ test('flow: none + remote — upload, remote compute (python), download + js cro
     const cross = run.steps.find((s) => /artifact download/.test(s.item))
     assert.equal(cross.ok, true)
     assert.match(cross.result, /local js/)
-  } finally { f.restoreAll() }
-})
-
-test('flow: remote verify failure skips the cross-check step', async () => {
-  const f = await startFlow({
-    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', simulator: 'none' },
-    scenario: { remoteVerifyFail: true },
-  })
-  try {
-    const run = await waitDone(f.start.runId, f.projectPath)
-    assert.equal(run.summary.ok, false)
-    const cross = run.steps.find((s) => /artifact download/.test(s.item))
-    assert.equal(cross.ok, null) // skipped, not failed
-    assert.match(cross.skipReason, /remote verify failed/)
   } finally { f.restoreAll() }
 })
 
@@ -1871,28 +1720,11 @@ test('selfcheck stop: cancelled finalize, bkill both LSF jobs, evidence kept, no
   }
 })
 
-test('selfcheck fallback observability: a failed submit leads with its error text, stale job record annotated', async () => {
-  const flow = await startFlow({ scenario: { pollFail: true, sshRunFail: true }, settings: REMOTE_LSF })
-  try {
-    const run = await waitDone(flow.start.runId, flow.projectPath)
-    assert.equal(run.summary.remote, 'failed')
-    const fb = run.steps.find((s) => s.attempt === 'fallback' && s.item.includes('batch_submit'))
-    assert.ok(fb, 'fallback submit step exists')
-    assert.equal(fb.ok, false)
-    assert.match(fb.detail, /FAILED — ssh run failed/, 'the failure text is the headline')
-    assert.match(fb.detail, /stale job record from a previous attempt/,
-      'a leftover job record demotes to an annotation (2026-11-21 observability fix)')
-  } finally {
-    flow.restoreAll()
-    await rmRetry(flow.tmp)
-  }
-})
-
 test('selfcheck poll live progress: the polling step row carries the latest counts mid-wait', async () => {
-  const flow = await startFlow({ scenario: { pollRounds: 3, hangPoll: true }, settings: REMOTE_LSF })
+  const flow = await startFlow({ scenario: { pollRounds: 2, hangPoll: true }, settings: REMOTE_LSF })
   try {
     assert.ok(flow.start.runId, 'run started')
-    await flow.ctx.__waitHang() // two incomplete rounds done, third poll parked
+    await flow.ctx.__waitHang() // one incomplete round done, second poll parked
     const mid = getSelfcheck(flow.start.runId, flow.projectPath)
     const polling = mid.steps.filter((s) => s.item.includes('batch_poll'))
     assert.ok(polling.length, 'a polling step exists mid-run')

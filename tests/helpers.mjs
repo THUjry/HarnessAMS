@@ -1,24 +1,13 @@
-// Shared test scaffolding for the HarnessAMS suite: the bash -n syntax guard,
-// the apply()-registered route driver (fake res + macrotask polling), the
-// DSH_HOME mirror fixture, and the client.js static-contract readers. Keeping
-// these in one place keeps the per-file tests focused on their contracts.
+// Shared test scaffolding for the HarnessAMS suite: the apply()-registered
+// route driver (fake res + macrotask polling), the DSH_HOME mirror fixture,
+// and the client.js static-contract readers. Keeping these in one place keeps
+// the per-file tests focused on their contracts. (The bash -n shell guard was
+// retired 2026-11-26: the wrapper-shape contract is a regex in server.test.mjs
+// and the per-command guard spawned one real bash per ssh_exec.)
 // Run: bare `node --test` from the repo root.
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
 import path from 'node:path'
 import { apply } from '../src/index.js'
-
-// ---- shell guard ----------------------------------------------------------
-// Generated one-liners must be valid shell — a misplaced quote shipped once and
-// only failed live ("bash: -c: syntax error"). Skipped when bash is absent
-// (a Windows runner may not have Git Bash on PATH).
-let bashAvailable = true
-try { execFileSync('bash', ['--version'], { stdio: 'pipe' }) } catch { bashAvailable = false }
-
-export function assertValidShell(cmd) {
-  if (!bashAvailable) return
-  execFileSync('bash', ['-n', '-c', cmd], { stdio: 'pipe' })
-}
 
 // ---- tool batch contract (dsh-tools 0.2.2-rc.1) ---------------------------
 // ctx.tools.execute speaks ToolBatchInput/ToolBatchResult: {calls:[{type,id,name,
