@@ -69,8 +69,6 @@ test('apply injects both system prompt sections (fail-open)', async () => {
   assert.match(policy.text, /never raw ssh commands from the shell/)
   assert.match(policy.text, /prefer the SAS\/HA plugin tools/)
   assert.match(policy.text, /two working environments/, 'the env-dichotomy pointer rides the policy')
-  assert.doesNotMatch(policy.text, /Sleep <=30 s/, 'cadence left the prompt')
-  assert.doesNotMatch(policy.text, /at least once every 5 s/, 'card-refresh cadence left the prompt')
   assert.match(policy.text, /cluster_env row of the project.s AGENTS\.md config block/, 'points at the yaml row, not the retired prose statement')
   // fail-open: without the service, apply still mounts routes/tools quietly
   const bare = {

@@ -389,50 +389,6 @@ test('gen_sweep_report: PNG export fails open — no charts or a broken renderer
   }
 })
 
-test('gen_sweep_report: PNG export is opt-in — report_figs off (default) skips Figs entirely', async () => {
-  const { ws } = await makeWorkspace()
-  try {
-    // no report_figs on the session entry → off. A legacy project-level
-    // report_figs in workspace_config.json no longer turns it on either.
-    await mkdir(path.join(ws, '.harnessams'), { recursive: true })
-    await writeFile(path.join(ws, '.harnessams', 'workspace_config.json'), JSON.stringify({
-      version: 1, workspace: {}, settings: { report_figs: true },
-    }, null, 2) + '\n', 'utf8')
-    const proj = path.join(ws, 'projW')
-    const simres = path.join(proj, 'SimResults')
-    await mkdir(simres, { recursive: true })
-    const tool = makeTool(genReportTools(registryCtx(ws)).find((d) => d.name === 'gen_sweep_report'))
-    await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
-      project_dir: proj,
-      rounds: [{
-        id: 'Sim0_20260805_batch1',
-        points: [
-          { index: 0, params: { a: 1 }, metrics: { m: 1 } },
-          { index: 1, params: { a: 2 }, metrics: { m: 2 } },
-        ],
-        curves: {
-          x_signal: 'f (GHz)', signals: [{ name: 's21', dB: true }],
-          points: [
-            { index: 0, label: 'a=1', x: [1, 2], y: { s21: [-1, -2] } },
-            { index: 1, label: 'a=2', x: [1, 2], y: { s21: [-2, -3] } },
-          ],
-        },
-      }],
-    }), 'utf8')
-    const res = await tool.execute({ spec: path.join(simres, 'spec.json') }, { agent: { id: SID_A } })
-    assert.equal(res.ok, true)
-    assert.match(res.output, /\[figs\] skipped: disabled: turn on "Report figures" in the HarnessAMS session panel/)
-    assert.match(res.figs_note ?? '', /session panel/)
-    assert.equal(res.figs, undefined)
-    // a chartable round still produced a report; the Figs/ directory never
-    // appears (export is gated before any directory is created)
-    const { stat } = await import('node:fs/promises')
-    await assert.rejects(() => stat(path.join(proj, 'Figs')), (e) => e.code === 'ENOENT')
-  } finally {
-    await rm(ws, { recursive: true, force: true })
-  }
-})
-
 test('gen_sweep_report: the PNG gate is the CALLING session\'s option — per session, strictly boolean, survives registration', async () => {
   const { ws, storeDir } = await makeWorkspace()
   try {

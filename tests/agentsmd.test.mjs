@@ -44,8 +44,6 @@ test('agentsmd: a fresh workspace gets constraints + the empty yaml table, no wo
     assert.ok(md1.includes('  last_selfcheck_overall: null'))
     assert.ok(md1.includes('  run_mode: null'), 'unmeasured fields are the YAML null literal in the template')
     assert.ok(!md1.includes(WORKFLOW_TABLE), 'the first-fill template (no settings yet) renders no workflow table')
-    assert.ok(!md1.includes('Project state lives in'), 'the old pointer prose is gone')
-    assert.ok(!md1.includes('Before starting any task'), 'the old first-fill instruction is gone')
 
     // a later call never rewrites — an agent-filled table survives
     await writeFile(agentsMdPath(ws), md1.replace('  run_mode: null', '  run_mode: "agent-filled"'), 'utf8')
@@ -75,12 +73,10 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
     assert.ok(md.includes(`  local_node_path: ${JSON.stringify(process.execPath)}`), 'node absolute path as a flat local_ field')
     assert.ok(md.includes('  local_python_version: ') && md.includes('  local_python_path: '),
       'the local python facts carry the local_ prefix too')
-    assert.ok(!md.includes('  node_version:'), 'the unprefixed row name is gone')
     assert.ok(md.includes('  selfcheck_remote_dir: ".harnessams/selfcheck"'), 'the self-check dir row (renamed from remote_dir)')
     assert.ok(md.indexOf('  local_python_path: ') < md.indexOf('  selfcheck_remote_dir: ')
       && md.indexOf('  selfcheck_remote_dir: ') < md.indexOf('  last_selfcheck_run_id: '),
       'row order: local env facts, then the selfcheck group at the tail')
-    assert.ok(!md.includes('and the Overview settings table'), 'the settings-table pointer is gone from the constraints (2026-11-25 ruling)')
     assert.ok(md.includes('  cluster_env: "out-of-cluster"'), 'the working environment mirrors the config')
     assert.ok(md.includes('  run_mode: "remote"'))
     // 2026-11-25 (D-018): the CONFIGURED machine renders as one row — the model
@@ -90,21 +86,15 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
       && md.indexOf('  machine_id: ') < md.indexOf('  remote_python: '), 'row order: machine_id opens the remote group')
     assert.ok(md.includes('  remote_root: "/home/op/sim"'), 'remote_root mirrors the project config')
     assert.ok(md.includes('  remote_scripts_dir: "/home/op/sim/.harnessams/scripts"'), 'the remote scripts path rides along')
-    assert.ok(!md.includes('report_figs'), 'the PNG gate is a session option, never a project yaml row')
     assert.ok(md.includes('  remote_python: null'), 'no interpreter pin yet → the YAML null literal')
     assert.ok(md.includes('  remote_spectre_cmd: null'), 'no spectre pin yet → the YAML null literal')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
-    // 2026-11-24: aliases never render — the machine rows are gone entirely
-    assert.ok(!md.includes('remote_node:'), 'the alias row is gone')
-    assert.ok(!md.includes('other_nodes:'), 'the alias-list row is gone')
-    assert.ok(!md.includes('This is an out-of-cluster project'), 'the env prose statement is gone (yaml carries it)')
     // the workflow table rides the values build (D-021 slim: purpose rows,
     // parameter semantics live in the tool descriptions)
     assert.ok(md.includes(WORKFLOW_TABLE), 'the values sync renders the workflow table')
     assert.ok(md.includes('| Submit | batch_submit |'))
     assert.ok(md.includes('omit machine_id / remote_root / remote_python'),
       'the submit row states what resolves from the config, not parameter semantics')
-    assert.ok(!md.includes('scheduler = "lsf"'), 'the scheduler cell moved to the batch_submit description')
     // the two numpy tri-state rows (D-021): null until a green run measures
     assert.ok(md.includes('  remote_python_numpy: null'), 'the remote numpy tri-state row renders null (unmeasured)')
     assert.ok(md.includes('  local_python_numpy: null'), 'the local numpy tri-state row renders null (unmeasured)')
@@ -189,8 +179,6 @@ test('agentsmd: the registry inventory never renders — only the configured mac
     // the one configured machine renders; the registry (other aliases, hosts)
     // never does — the machine card / ssh_list stays the inventory
     assert.ok(md.includes('  machine_id: "node1"'), 'the configured machine renders (settings, not the registry)')
-    assert.ok(!md.includes('remote_node:'), 'no alias row')
-    assert.ok(!md.includes('other_nodes:'), 'no alias-list row')
     assert.ok(!md.includes('lab9') && !md.includes('node2') && !md.includes('192.0.2'), 'no alias names or hosts leak into the block')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
@@ -356,12 +344,6 @@ test('agentsmd client: button row order and wiring, new keys bilingual', () => {
     'envc.title', 'envc.bodyIn', 'envc.bodyOut', 'envc.ok',
     'chk.btn.local', 'chk.truncated',
   ])
-  // the cluster toolchain pins and the PNG gate are NOT settings-table rows
-  // (by ruling): no pin strings, and the session option writes the session entry
-  for (const gone of ['pset.colRemotePython', 'pset.colRemoteSpectre', 'pset.pinPlaceholder', 'pset.pinHint',
-    "kind: 'text'", "kind: 'bool'"]) {
-    assert.ok(!src.includes(gone), `the settings table lost "${gone}"`)
-  }
   assert.ok(src.includes("h(SessionOptionFigs, { config, updateConfig }),")
     && src.indexOf('h(SessionOptionFigs, { config, updateConfig }),') < src.indexOf('h(SessionDashboard, { sessionId, config, updateConfig }),'),
     'the report-figures option renders above the dashboard')

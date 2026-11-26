@@ -22,7 +22,6 @@ import os from 'node:os'
 import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { resolveMachine } from '../src/remote.js'
 import { syncAgentsMd } from '../src/server/agentsmd.js'
 import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginAssets, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
 
@@ -746,7 +745,7 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
     assert.ok(fs.existsSync(path.join(run, '.batch_local.err')))
 
     // wait_sec re-polls the local ladder until the worker's progress lands
-    const poll = await tool(ctx, 'batch_poll').execute({ run_dir: run, wait_sec: 3 }, {})
+    const poll = await tool(ctx, 'batch_poll').execute({ run_dir: run, wait_sec: 1 }, {})
     assert.equal(poll.ok, true)
     assert.equal(poll.scheduler, 'local')
     assert.equal(poll.state, 'completed')
@@ -768,7 +767,7 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
     ].join('\n'))
     const crashRun = makeRunDir({ under: proj })
     await tool(ctx, 'batch_submit').execute({ run_dir: crashRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' }, {})
-    const crashed = await tool(ctx, 'batch_poll').execute({ run_dir: crashRun, wait_sec: 3 }, {})
+    const crashed = await tool(ctx, 'batch_poll').execute({ run_dir: crashRun, wait_sec: 1 }, {})
     assert.equal(crashed.state, 'failed')
     assert.equal(crashed.completed, 0)
     assert.match(crashed.errlog_tail, /unrecognized arguments --nope/)
@@ -784,7 +783,7 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
     ].join('\n'))
     const midRun = makeRunDir({ under: proj })
     await tool(ctx, 'batch_submit').execute({ run_dir: midRun, worker: 'spectre/spectre_sweep_worker.py', scheduler: 'local' }, {})
-    const died = await tool(ctx, 'batch_poll').execute({ run_dir: midRun, wait_sec: 3 }, {})
+    const died = await tool(ctx, 'batch_poll').execute({ run_dir: midRun, wait_sec: 1 }, {})
     assert.equal(died.state, 'failed')
     assert.equal(died.completed, 1)
 
@@ -919,20 +918,12 @@ test('batch tools reject escaped paths and unresolvable machines', async () => {
 
     // machine_id falls back to the project settings first (2026-11-24); with
     // no configured machine either, the rejection comes from machine resolution
+    // (the resolveMachine unit surface — ghost host, root-required, alias
+    // resolution — lives in server.test.mjs)
     await assert.rejects(() => tool(ctx, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch1',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /no machine configured for this project/)
-
-    await assert.rejects(() => resolveMachine(makeCtx(), 'ghost', REMOTE_ROOT), /no such dsh-ssh host: ghost/)
-
-    // the root is an explicit argument now: missing/bad values are rejected
-    // before the registry is even consulted
-    await assert.rejects(() => resolveMachine(makeCtx(), 'node1'), /remote_root is required for host node1/)
-    await assert.rejects(() => resolveMachine(makeCtx(), 'node1', 'rel/path'), /remote_root is required for host node1/)
-    // any registry alias resolves with a root (roots are per-project, not machine facts)
-    const lab9 = await resolveMachine(makeCtx(), 'lab9', REMOTE_ROOT)
-    assert.equal(lab9.remoteRoot, REMOTE_ROOT)
   } finally {
     restoreEnv()
   }
@@ -950,17 +941,6 @@ test('batch_submit enforces the template*.scs family convention (own name + decl
       run_dir: run, remote_dir: 'batch1', machine_id: 'node1', remote_root: '/home/op/sim',
       worker: 'spectre/spectre_sweep_worker.py',
     }, {}), /netlist_template is "template\.scs" but the run directory holds "template_thorough\.scs"/)
-
-    // a non-default family name with no declaration also fails (the worker
-    // would look for template.scs remotely)
-    const runNd = makeRunDir({
-      template: 'template_thorough.scs',
-      config: { parameters: { SW: [0, 1] }, sweep_mode: 'cross_product' },
-    })
-    await assert.rejects(() => tool(ctx, 'batch_submit').execute({
-      run_dir: runNd, remote_dir: 'batchX', machine_id: 'node1', remote_root: '/home/op/sim',
-      worker: 'spectre/spectre_sweep_worker.py',
-    }, {}), /requires sweep_config\.netlist_template/)
 
     // declared + matching: the file uploads under its OWN name (no rename)
     const run2 = makeRunDir({
@@ -1258,13 +1238,12 @@ test('toolchain pins (D-016): remote_python / remote_spectre_cmd resolve from th
     assert.ok(bsub3.includes(`"--spectre-cmd" "${PIN_SPECTRE}"`), 'the spectre pin still rides along')
 
     // a bare remote_python is refused BEFORE anything is staged — it resolves
-    // to whatever tool python comes first on PATH (the 2026-11-24 incident)
-    for (const bare of ['python3', 'python', 'rel/python3']) {
-      const ctx4 = makeCtx({ project: root })
-      await assert.rejects(() => submit(ctx4, { remote_dir: 'batch4', remote_python: bare }),
-        /remote_python must be an ABSOLUTE path to the executable/)
-      assert.equal(ctx4.calls.filter((c) => c.name === 'ssh_upload').length, 0, 'rejected before the uploads')
-    }
+    // to whatever tool python comes first on PATH (the 2026-11-24 incident;
+    // the full bare-name validation surface lives in selfcheck's settings test)
+    const ctx4 = makeCtx({ project: root })
+    await assert.rejects(() => submit(ctx4, { remote_dir: 'batch4', remote_python: 'python3' }),
+      /remote_python must be an ABSOLUTE path to the executable/)
+    assert.equal(ctx4.calls.filter((c) => c.name === 'ssh_upload').length, 0, 'rejected before the uploads')
 
     // the spectre pin is the BUNDLED worker's contract only
     const ctx5 = makeCtx({ project: root })

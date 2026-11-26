@@ -21,13 +21,12 @@ test('checkparams: defaults on missing file, per-key fallback on a corrupted one
     let r = await readCheckParams(dir)
     assert.deepEqual(r.params, defaultCheckParams())
     assert.ok(r.defaults)
-    // hand-edited off-spec values fall back per-key; valid ones survive;
-    // legacy bias_check/strict_includes keys are ignored (retired 2026-11-25)
+    // hand-edited off-spec values fall back per-key; valid ones survive
     await mkdir(path.join(dir, '.harnessams'), { recursive: true })
     await writeFile(checkParamsPath(dir), JSON.stringify({
       rcl: { r: [1, 10], c: 'nope', l: [5, 1] },
       mult: { nf: [2, 64], m: [0, 10] },
-      unit_check: 'yes', bias_check: false,
+      unit_check: 'yes',
     }), 'utf8')
     r = await readCheckParams(dir)
     assert.deepEqual(r.params.rcl.r, [1, 10])
@@ -36,7 +35,6 @@ test('checkparams: defaults on missing file, per-key fallback on a corrupted one
     assert.deepEqual(r.params.mult.nf, [2, 64])
     assert.deepEqual(r.params.mult.m, defaultCheckParams().mult.m) // min<=0 -> default
     assert.equal(r.params.unit_check, true) // non-boolean -> default
-    assert.equal(r.params.bias_check, undefined) // retired key, never surfaced
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 

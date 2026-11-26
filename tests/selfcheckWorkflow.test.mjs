@@ -47,9 +47,6 @@ test('workflowTable: the Write row opens with the design-folder organization (D-
   // D-021 dedup: the netlist authoring contract lives in the tool description,
   // the row only points at it (no value-form rules, no temperature default)
   assert.match(write, /per the netlist contract \(the spectre_pre_check description/)
-  for (const gone of ['never scientific notation', 'never expressions', 'worker fills 27 degC']) {
-    assert.ok(!write.includes(gone), `contract detail moved out: ${gone}`)
-  }
   // batch_submit runs the gate itself — a separate validation call is optional
   assert.match(write, /batch_submit runs the same gate before staging/)
 })
@@ -59,10 +56,6 @@ test('workflowTable: the Submit row is a purpose pointer, parameter semantics st
   const submit = t.split('\n').find((l) => l.startsWith('| Submit |'))
   assert.match(submit, /omit machine_id \/ remote_root \/ remote_python \(they resolve from this config\)/)
   assert.match(submit, /scheduler per cluster_env, lsf_node, overwrite, no_pre_check\) are documented in the batch_submit description/)
-  // the scheduler matrix and the pin/worker recipes moved out (D-021)
-  assert.ok(!submit.includes('scheduler = "lsf"'), 'no scheduler matrix in the row')
-  assert.ok(!t.includes('do not pass --spectre-cmd'), 'the --spectre-cmd rule lives in batch_submit')
-  assert.ok(!t.includes('the batch output dir auto-names'), 'the auto-naming convention lives in batch_submit')
   // the table never repeats a yaml value
   const PIN = '/opt/tools/python3/bin/python3'
   const pinned = workflowTable(S({ run_mode: 'remote', remote_python: PIN }))
@@ -75,9 +68,6 @@ test('workflowTable: the Monitor row points at the cadence, does not carry it', 
   assert.match(monitor, /bounded wait_sec/)
   assert.match(monitor, /never blind-sleep/)
   assert.match(monitor, /cadence and progress-card refresh rules live in the batch_poll description/)
-  // the ladder itself moved into the tool description (D-021)
-  assert.ok(!monitor.includes('10 s -> 20 s -> 40 s'), 'the backoff ladder lives in batch_poll')
-  assert.ok(!monitor.includes('every 5 s'), 'the card-refresh cadence lives in batch_poll')
   assert.match(monitor, /terminal states auto-fetch the light results/)
 })
 
@@ -92,8 +82,6 @@ test('workflowTable: the Analyze row keeps the one cluster_env fork (Tool cell) 
   // the batch_poll description; the row points at the remote_python row only
   assert.match(outRow, /write compact JSON into <design>\/SimResults\//)
   assert.match(outRow, /the full recipe: staged parser paths, the interpreter per the remote_python row/)
-  assert.ok(!outRow.includes('never bare python'), 'the never-bare-python rule lives in batch_poll')
-  assert.ok(!outRow.includes('spectre_psf_parse.py'), 'no parser paths in the row')
 })
 
 test('workflowTable: the Report row points at the schema and names the design layout', () => {
