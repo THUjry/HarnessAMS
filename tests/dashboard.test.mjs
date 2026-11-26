@@ -4,8 +4,8 @@
 // /api/report-stat auto-refresh endpoint, the system-browser open action
 // (openlocal.js + POST /api/open-local; route-level, through the
 // apply()-registered handler), and the system directory picker
-// (pickdir.js + GET/POST /api/pick-directory — the add-report dialog's
-// system-first folder access, self-made listing as fallback).
+// (pickdir.js + POST /api/pick-directory — the add button's system-first
+// folder chooser, ANY failure silently falling back to the listing).
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -16,8 +16,8 @@ import path from 'node:path'
 import { writeSessionConfig, readSessionConfigs } from '../src/server/project.js'
 import { mimeFor, resolveReportFile, browseDir } from '../src/server/dashboard.js'
 import { resolveOpenableFile, openWithDefaultApp } from '../src/server/openlocal.js'
-import { pickerCapability, pickDirectory } from '../src/server/pickdir.js'
-import { registerRoutes, callGet, fakeRes } from './helpers.mjs'
+import { pickDirectory } from '../src/server/pickdir.js'
+import { registerRoutes, callGet, fakeRes, clientSrc } from './helpers.mjs'
 
 const SID = 'session-dash1111-2222-3332-4444-555555555555'
 
@@ -304,39 +304,42 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
   }
 })
 
-// ---- system directory picker (pickdir.js + GET/POST /api/pick-directory,
-// 2026-11-26: system-first local directory access, self-made listing fallback) -
+// ---- system directory picker (pickdir.js + POST /api/pick-directory,
+// 2026-11-26: system-first add flow, silent fallback to the listing) --------
 
-test('pickdir: pickerCapability/pickDirectory consume the host service without inject, value-shaped', async () => {
+test('pickdir: pickDirectory drives the capability object without inject, value-shaped', async () => {
   const seen = { signal: null }
-  const native = {
-    capability: () => ({ kind: 'native' }),
-    pick: async (signal) => { seen.signal = signal; return 'D:\picked dir' },
-  }
-  // the service seam is ctx.get('directoryPicker') — read WITHOUT an inject
-  // declaration (a static one would leave the plugin PENDING in headless)
+  // the seam is ctx.get('directoryPicker') — read WITHOUT an inject
+  // declaration (a static one would leave the plugin PENDING in headless);
+  // the pick itself lives on the CAPABILITY object (service.pick is undefined —
+  // the live first-build 503 while the kind probe said 'native')
   const ctxOf = (picker) => ({ get: (name) => (name === 'directoryPicker' ? picker : undefined) })
+  const nativeCap = () => ({
+    kind: 'native',
+    pick: async (signal) => { seen.signal = signal; return 'D:\\picked dir' },
+  })
 
-  assert.equal(pickerCapability(ctxOf(native)), 'native')
-  const r = await pickDirectory(ctxOf(native))
-  assert.equal(r.path, 'D:\picked dir')
+  const r = await pickDirectory(ctxOf({ capability: nativeCap }))
+  assert.equal(r.path, 'D:\\picked dir')
   assert.ok(seen.signal instanceof AbortSignal, 'pick must receive an abort signal (the timeout fence)')
   assert.ok(!seen.signal.aborted)
 
   // user cancel resolves null -> { canceled }, never an error
-  assert.deepEqual(await pickDirectory(ctxOf({ capability: () => ({ kind: 'native' }), pick: async () => null })), { canceled: true })
+  assert.deepEqual(
+    await pickDirectory(ctxOf({ capability: () => ({ kind: 'native', pick: async () => null }) })),
+    { canceled: true })
 
-  // browse backend / missing service / malformed service -> 503, no throw
-  assert.equal((await pickDirectory(ctxOf({ capability: () => ({ kind: 'browse' }), pick: async () => 'x' }))).code, 503)
+  // browse backend / capability without pick / throwing capability / malformed
+  // service -> 503, no throw (the client turns ANY failure into the fallback)
+  assert.equal((await pickDirectory(ctxOf({ capability: () => ({ kind: 'browse', list: async () => ({}) }) }))).code, 503)
+  assert.equal((await pickDirectory(ctxOf({ capability: () => ({ kind: 'native' }) }))).code, 503)
+  assert.equal((await pickDirectory(ctxOf({ capability: () => { throw new Error('kaput') } }))).code, 503)
   assert.equal((await pickDirectory({})).code, 503)
   assert.equal((await pickDirectory(null)).code, 503)
-  assert.equal(pickerCapability({}), 'none')
-  assert.equal(pickerCapability(ctxOf({ capability: () => ({ kind: 'weird' }) })), 'none')
-  assert.equal(pickerCapability(ctxOf({ capability: () => { throw new Error('kaput') } })), 'none')
 
   // a failing / lying pick surfaces as a 500 value error
-  assert.equal((await pickDirectory(ctxOf({ capability: () => ({ kind: 'native' }), pick: async () => { throw new Error('dialog crashed') } }))).code, 500)
-  assert.match((await pickDirectory(ctxOf({ capability: () => ({ kind: 'native' }), pick: async () => 42 }))).error, /invalid path/)
+  assert.equal((await pickDirectory(ctxOf({ capability: () => ({ kind: 'native', pick: async () => { throw new Error('dialog crashed') } }) }))).code, 500)
+  assert.match((await pickDirectory(ctxOf({ capability: () => ({ kind: 'native', pick: async () => 42 }) }))).error, /invalid path/)
 
   // the REAL cordis ctx is a proxy that THROWS on reads of undeclared
   // properties — the ctx.get probe itself must survive it (the openLauncher
@@ -344,24 +347,14 @@ test('pickdir: pickerCapability/pickDirectory consume the host service without i
   const throwingCtx = new Proxy({}, {
     get: (t, k) => { throw new Error(`cannot get property "${String(k)}" without inject`) },
   })
-  assert.equal(pickerCapability(throwingCtx), 'none')
   assert.equal((await pickDirectory(throwingCtx)).code, 503)
 })
 
-test('pickdir: GET/POST /api/pick-directory probe, pick, and origin guard through the route harness', async () => {
+test('pickdir: POST /api/pick-directory picks, cancels, guards origin, falls back value-shaped', async () => {
   // mutable pick outcome: path -> canceled across calls
-  let outcome = 'D:\Reports\Pi11dB'
-  const picker = {
-    capability: () => ({ kind: 'native' }),
-    pick: async () => outcome,
-  }
+  let outcome = 'D:\\Reports\\Pi11dB'
+  const picker = { capability: () => ({ kind: 'native', pick: async () => outcome }) }
   const handler = await registerRoutes({ get: (name) => (name === 'directoryPicker' ? picker : undefined) })
-
-  // capability probe (read-only GET, no origin fence — mirrors /api/browse)
-  const probe = await callGet(handler, 'http://127.0.0.1/harnessams/api/pick-directory')
-  assert.equal(probe.code, 200)
-  assert.equal(probe.body.ok, true)
-  assert.equal(probe.body.kind, 'native')
 
   const postCall = async (hdl, url, headers = {}) => {
     const res = fakeRes()
@@ -378,7 +371,7 @@ test('pickdir: GET/POST /api/pick-directory probe, pick, and origin guard throug
   const ok = await postCall(handler, url, sameOrigin)
   assert.equal(ok.code, 200)
   assert.equal(ok.body.ok, true)
-  assert.equal(ok.body.path, 'D:\Reports\Pi11dB')
+  assert.equal(ok.body.path, 'D:\\Reports\\Pi11dB')
 
   // user cancel is a 200 no-op payload
   outcome = null
@@ -390,20 +383,28 @@ test('pickdir: GET/POST /api/pick-directory probe, pick, and origin guard throug
   assert.equal((await postCall(handler, url, { 'sec-fetch-site': 'cross-site' })).code, 403)
   assert.equal((await postCall(handler, url, { origin: 'http://evil.example', host: '127.0.0.1:1' })).code, 403)
 
-  // no browser headers (curl/tests) pass; non-native service -> 503 + 'browse'
-  const browse = await registerRoutes({ get: () => ({ capability: () => ({ kind: 'browse' }), pick: async () => 'x' }) })
-  assert.equal((await callGet(browse, url)).body.kind, 'browse')
+  // no browser headers (curl/tests) pass; the browse backend has no pick -> 503
+  const browse = await registerRoutes({ get: () => ({ capability: () => ({ kind: 'browse', list: async () => ({}) }) }) })
   const declined = await postCall(browse, url)
   assert.equal(declined.code, 503)
   assert.match(declined.body.error, /not native/)
 
-  // default fake ctx (no ctx.get at all — headless/hand-rolled embeds): 'none'
+  // default fake ctx (no ctx.get at all — headless/hand-rolled embeds) -> 503
   const bare = await registerRoutes({})
-  assert.equal((await callGet(bare, url)).body.kind, 'none')
   assert.equal((await postCall(bare, url)).code, 503)
 
-  // the 405 hint lists the new POST route
+  // the 405 hint lists the POST route
   const wrong = await postCall(handler, 'http://127.0.0.1/harnessams/api/browse')
   assert.equal(wrong.code, 405)
   assert.match(wrong.body.error, /pick-directory/)
+})
+
+test('dashboard: the add button tries the system picker first, then silently falls back (static contract)', async () => {
+  const src = await clientSrc()
+  // add flow: POST /api/pick-directory first, then the listing; ANY failure
+  // opens the dialog without surfacing an error, a cancel keeps it shut
+  assert.match(src, /fetchJson\(API \+ '\/pick-directory', \{/)
+  assert.match(src, /setDialogCwd\(null\); setDialogOpen\(true\) \/\/ silent fallback/)
+  // no in-dialog system affordance remains (the wave's first shape)
+  assert.ok(!src.includes('dash.sysBrowse'), 'no system-browse button inside the listing dialog')
 })

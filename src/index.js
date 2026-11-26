@@ -19,8 +19,8 @@
 // reports read-only (bounded by each report's own directory) and a one-level
 // listing for the add-report picker (/api/browse — the dialog's FALLBACK path;
 // its primary local-directory access is the host's native OS folder chooser
-// through GET/POST /api/pick-directory, 2026-11-26 ruling: system first) —
-// no file writes.
+// through POST /api/pick-directory, 2026-11-26 ruling: system first, any
+// failure silently falls back to the listing) — no file writes.
 // The system-browser open action (POST /api/open-local, 2026-11-26) stays the
 // only route that spawns an OS process from THIS plugin's code: a view action
 // fenced to viewable file types (whitelist + existing regular file +
@@ -56,7 +56,7 @@ import { remoteBrowse, remoteMkdir } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { resolveOpenableFile, openWithDefaultApp } from './server/openlocal.js'
-import { pickerCapability, pickDirectory } from './server/pickdir.js'
+import { pickDirectory } from './server/pickdir.js'
 import { seedProjectPlotly } from './report_render.js'
 import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
 import { progressRemotePayload } from './server/progressRemote.js'
@@ -349,13 +349,14 @@ async function handle(req, res, ctx) {
     }
     if (req.method === 'POST' && route === '/api/pick-directory') {
       // Pop the host's native OS folder chooser (2026-11-26 ruling: system
-      // open first for local directory access; the self-made listing is the
-      // fallback). No body, no sessionId — a folder pick has no project
-      // dependency. Delegates to the host 'directoryPicker' service through
-      // server/pickdir.js (ctx.get, no inject declaration — headless embeds
-      // where the service never exists just get 503). Same-origin guard as
-      // open-local: an untokened route that disturbs the host desktop with a
-      // modal dialog accepts same-origin fetches only.
+      // open first for local directory access; ANY failure here silently
+      // falls back to the self-made listing in the client). No body, no
+      // sessionId — a folder pick has no project dependency. Delegates to the
+      // host 'directoryPicker' service through server/pickdir.js (ctx.get, no
+      // inject declaration — headless embeds where the service never exists
+      // just get 503). Same-origin guard as open-local: an untokened route
+      // that disturbs the host desktop with a modal dialog accepts
+      // same-origin fetches only.
       const guard = sameOriginError(req)
       if (guard) { json(403, { error: guard }); return }
       const r = await pickDirectory(ctx)
@@ -448,14 +449,6 @@ async function handle(req, res, ctx) {
     const r = await browseDir(url.searchParams.get('path'), os.homedir())
     if (r.error) { json(400, { error: r.error }); return }
     json(200, { ok: true, ...r })
-    return
-  }
-  if (route === '/api/pick-directory') {
-    // Capability probe backing the add-report dialog's system browse button:
-    // 'native' renders the button, 'browse'/'none' hide it (the host's
-    // documented default for unknown capability kinds) — the self-made
-    // listing above stays the fallback either way. Read-only, no side effect.
-    json(200, { ok: true, kind: pickerCapability(ctx) })
     return
   }
   if (route === '/api/remote-browse') {
