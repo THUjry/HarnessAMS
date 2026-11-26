@@ -1,20 +1,24 @@
-// One-time project script staging (2026-11-24 wave; 2026-11-25 amendment): a
-// project keeps its own reusable copy of the simulation scripts, so everything
-// the self-check exercised stays usable after the run — the batch channel
-// needs a worker scripts tree plus the sibling assets/ bucket (snp_common
-// resolves its pure-stdlib fallback at <scripts root>/../assets/numfallback.py
-// — the SmartAnaSim package layout, mirrored here as .harnessams/scripts +
-// .harnessams/assets). The self-check's gen script is NOT staged anymore
-// (2026-11-25 ruling): the project script folder is retired, the orchestrator
-// runs gen_selfcheck_rc.py straight from the package install location
-// (genSelfcheckRcPath() below — the import.meta.dirname resolution works
-// identically in the dev checkout and an npm-installed package).
+// Lazy project script staging — the copy-if-missing half of the 2026-11-26
+// package-path-first policy (the plotly shape): a fresh project resolves its
+// worker scripts tree straight from the PACKAGE install location (the
+// SmartAnaSim sibling in either layout — see defaultSimScriptsDir /
+// resolveScriptsSource in settings.js) and never seeds .harnessams/scripts
+// at init. A local copy exists only where a config EXPLICITLY points at one
+// — the legacy flipped layout (pre-2026-11-26 inits wrote
+// <project>/.harnessams/scripts into sim_scripts_dir) or a hand-set root —
+// and those are healed lazily at self-check start (the
+// isProjectLocalScriptsRoot gate). The batch channel needs the sibling
+// assets/ bucket either way (snp_common resolves its pure-stdlib fallback
+// at <scripts root>/../assets/numfallback.py — the SmartAnaSim package
+// layout, mirrored by the legacy project-local .harnessams pair).
+// The self-check gen script is NOT staged (2026-11-25 ruling): the
+// orchestrator runs gen_selfcheck_rc.py straight from the package install
+// location (genSelfcheckRcPath() below — the import.meta.dirname resolution
+// works identically in the dev checkout and an npm-installed package).
 //
 // Copy-if-missing per file: a copy the user edited is never clobbered, a
 // partial tree gets completed, an up-to-date project is a no-op. The source
-// root is resolved by the caller (env override -> the project's configured
-// sim_scripts_dir pre-flip -> the dev-sibling default, see
-// resolveScriptsSource in settings.js) and passed in, keeping this module
+// root is resolved by the caller and passed in, keeping this module
 // dependency-free.
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -68,6 +72,16 @@ async function copyIfMissing(local, dest) {
   await fsp.mkdir(path.dirname(dest), { recursive: true })
   await fsp.copyFile(local, dest)
   return true
+}
+
+// True when the resolved scripts root is the project's OWN .harnessams tree
+// (the legacy flipped layout or an explicit config) — the only root shape a
+// local copy-if-missing heal still makes sense for under the
+// package-path-first policy.
+export function isProjectLocalScriptsRoot(projectPath, scriptsRoot) {
+  if (typeof projectPath !== 'string' || !projectPath) return false
+  const local = path.join(path.resolve(projectPath), '.harnessams', 'scripts')
+  return path.resolve(String(scriptsRoot)) === local
 }
 
 // Stage the project's reusable simulation scripts. Returns what it laid down

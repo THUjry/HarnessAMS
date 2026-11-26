@@ -56,11 +56,11 @@ import { runPython } from '../py.js'
 import { callTool, execRemote, uploadFile, downloadFile, shq } from '../remote.js'
 import { execLocal, localCopy } from '../localchannel.js'
 import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, remoteJoin, resolveRemoteDir, simScriptsDir } from '../batch.js'
-import { healFromGlobalMemory, readSettings, resolveScriptsSource, validateSettings, writeSettings, PIN_KEYS, normalizePin, NUMPY_STATES } from './settings.js'
+import { healFromGlobalMemory, readSettings, resolveScriptsSource, defaultSimScriptsDir, validateSettings, writeSettings, PIN_KEYS, normalizePin, NUMPY_STATES } from './settings.js'
 import { reconcileSettings } from './reconcile.js'
 import { updateNodePins, updateLocalFacts } from './globalstore.js'
 import { localEnvFacts } from './checks.js'
-import { ensureProjectScripts, genSelfcheckRcPath } from './scriptStage.js'
+import { ensureProjectScripts, genSelfcheckRcPath, isProjectLocalScriptsRoot } from './scriptStage.js'
 import { syncAgentsMd } from './agentsmd.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
 import { fetchMachines } from './machines.js'
@@ -92,6 +92,13 @@ export const TOLERANCE = 0.01
 const TOTAL_BUDGET_MS = 30 * 60_000
 const POLL_INTERVAL_MS = 5_000
 const POLL_BUDGET_MS = 10 * 60_000
+// The 2 s worker-start gate (2026-11-26 ruling): after a detached ssh submit
+// (D-028) the worker only writes sweep_progress.json once it is actually
+// sweeping, and full batch_poll rounds through that window are heavyweight
+// and progress-blind — the gate probes the file's existence directly every
+// 2 s instead, then hands over to the poll loop.
+const GATE_INTERVAL_MS = 2_000
+const GATE_CHANNEL_FAILURES = 3
 
 // In-memory run registry (id -> run). Bounded; the authoritative record is the
 // per-run selfcheck_run.json under <project>/.harnessams/selfcheck/<id>/, so a
@@ -371,11 +378,12 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     // historical evidence (a failed/diagnosed run kept its artifacts) is cleaned
     // now, ahead of the new run — bounded disk: at most the live run's artifacts
     await cleanHistoricalArtifacts(project.path).catch(() => {})
-    // one-time script staging: the worker tree + assets bucket must exist
-    // BEFORE the chain runs so the batch step can upload them (2026-11-24;
-    // 2026-11-25 the gen script left this list — it runs from the package
-    // install location, no project script/ folder anymore)
-    await ensureProjectScripts(project.path, resolveScriptsSource(project.path))
+    // Conditional script staging (see healProjectScriptsAt): the default
+    // root now IS the package install location and needs no project copy —
+    // only a root inside the project's own .harnessams gets the heal, so
+    // everything the self-check exercises stays usable afterwards (the
+    // 2026-11-24 rationale, kept for the roots that still point local)
+    await healProjectScriptsAt(project.path)
   } catch (e) {
     runningBySession.delete(sessionId)
     return { error: `cannot prepare the self-check run dir: ${e?.message ?? e}`, code: 500 }
@@ -871,6 +879,23 @@ async function runVerifyStep(run, prerequisiteOk) {
   })
 }
 
+// Conditional script heal at run start (the lazy copy-if-missing half of the
+// 2026-11-26 package-path-first policy, exported for the test face): only a
+// scripts root INSIDE the project's .harnessams — the legacy flipped layout
+// or an explicit config — gets a local copy at all, completed from the
+// PACKAGE tree (the configured root IS the destination, so it cannot also be
+// the source: ensureProjectScripts' self-copy guard would no-op). The
+// packaged default root needs no copy; a custom external root is the user's
+// own. Returns what it did for observability.
+export async function healProjectScriptsAt(projectPath) {
+  const scriptsRoot = resolveScriptsSource(projectPath)
+  if (!isProjectLocalScriptsRoot(projectPath, scriptsRoot)) {
+    return { healed: false, scriptsRoot }
+  }
+  const staged = await ensureProjectScripts(projectPath, defaultSimScriptsDir())
+  return { healed: true, scriptsRoot, staged }
+}
+
 // ---------------------------------------------------------------------------
 // Remote chains
 // ---------------------------------------------------------------------------
@@ -879,6 +904,57 @@ function remoteDirFor(run, topo, scheduler) {
   // Per-attempt subdirectories keep the LSF retry from colliding with the
   // failed batch (batch_submit refuses clobbering existing point_meta files).
   return remoteJoin(run._priv.remoteBase, run.id, `${topo}_${scheduler}`)
+}
+
+// Wait for the worker's first progress artifact (sweep_progress.json, or the
+// .hams_ssh_done replay marker) with a cheap direct probe every 2 s — the
+// ssh-exec bypass is user-approved for exactly this gate (2026-11-26); the
+// monitoring channel itself stays batch_poll. Out-of-cluster the probe
+// crosses dsh-ssh (execRemote through runChannel — the cancel signal rides
+// it, D-029); in-cluster scheduler=ssh shares the cluster filesystem, so a
+// local stat is the same fact with zero traffic. Fails the topology after
+// GATE_CHANNEL_FAILURES consecutive channel-level errors (no exit code /
+// timed out / tool error — exit 1 is "not present yet", not a failure), or
+// when the gate budget expires with no marker (the worker never started —
+// the detail points at the run dir's own logs for the diagnosis).
+async function waitForWorkerProgress(run, step, topo, staging) {
+  const { alias, inCluster } = run._priv
+  const job = readJob(staging)
+  const remoteDir = job?.remote_dir
+  if (!remoteDir) {
+    return { ok: false, detail: `${topo}: no job record under ${staging} — the submit never landed a remote dir to gate on` }
+  }
+  const dir = String(remoteDir).replace(/\/+$/, '')
+  const progressFile = `${dir}/sweep_progress.json`
+  const doneFile = `${dir}/.hams_ssh_done`
+  const ch = alias && !inCluster ? runChannel(run) : null
+  const deadline = Date.now() + POLL_BUDGET_MS
+  let channelFailures = 0
+  for (;;) {
+    checkCancelled(run) // user stop lands within one gate interval (2 s)
+    checkBudget(run)
+    if (Date.now() >= deadline) break
+    if (ch) {
+      const r = await ch.exec(`test -f ${shq(progressFile)} -o -f ${shq(doneFile)}`, { timeoutMs: 10_000 })
+      if (r.isError || r.timedOut || r.exitCode == null) {
+        channelFailures += 1
+        if (channelFailures >= GATE_CHANNEL_FAILURES) {
+          return { ok: false, detail: `${topo}: ssh channel unusable while waiting for the worker start: ${String(r.text || r.stderr || 'no detail').slice(0, 200)}` }
+        }
+      } else {
+        channelFailures = 0
+        if (Number(r.exitCode) === 0) return { ok: true }
+      }
+    } else if (fs.existsSync(progressFile) || fs.existsSync(doneFile)) {
+      return { ok: true }
+    }
+    if (step) {
+      step.result = `waiting for worker start: ${topo} (${Math.ceil((deadline - Date.now()) / 1000)}s budget left)`
+      void persistRun(run)
+    }
+    await new Promise((res) => setTimeout(res, GATE_INTERVAL_MS))
+  }
+  return { ok: false, detail: `${topo}: the worker never wrote a progress marker under ${dir} within ${Math.round(POLL_BUDGET_MS / 60_000)} min — inspect the run dir directly (tail ssh_worker.log / errlog.txt; the gate watches sweep_progress.json and .hams_ssh_done)` }
 }
 
 // The remote chains' exec/transfer channel. Exec follows the alias: over
@@ -972,6 +1048,21 @@ async function remoteSpectreChain(run) {
     let ok = true
     for (const topo of TOPOS) {
       const staging = path.join(run.runDir, 'remote', topo)
+      if (scheduler === 'ssh') {
+        // the worker-start gate: a detached ssh submit (D-028) returns before
+        // the worker sweeps, so wait for the first progress marker with 2 s
+        // direct probes, THEN poll — and the poll loop below runs ssh chains
+        // to a terminal state exactly like lsf (the old one-round ssh break
+        // was the pre-detach contract and left the green run undecided).
+        // LSF chains skip the gate: bjobs' PEND state is exactly the
+        // information a file gate would hide.
+        const gated = await waitForWorkerProgress(run, step, topo, staging)
+        if (!gated.ok) {
+          ok = false
+          details.push(gated.detail)
+          continue
+        }
+      }
       const budget = Date.now() + POLL_BUDGET_MS
       let state = null
       let last = null
@@ -990,7 +1081,6 @@ async function remoteSpectreChain(run) {
           void persistRun(run)
         }
         if (state === 'completed' || state === 'failed' || r.isError) break
-        if (scheduler === 'ssh') break // ssh runs finish inside submit
         await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
       }
       const prog = await fsp.readFile(path.join(staging, 'sweep_progress.json'), 'utf8')

@@ -444,6 +444,16 @@ export function batchTools(ctx) {
             ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath, { signal: turnSignal })
             : localCopy,
         }
+        if (sshExec && Array.isArray(target.machine?.proxyJump) && target.machine.proxyJump.length === 0) {
+          // 2026-11-26 ruling: a dsh-ssh entry without ProxyJump (the second
+          // hop) still runs — DIRECT, never blocked — but the submit result
+          // says so, because a compute node that is only reachable through a
+          // login host will burn the connect budget instead of working. An
+          // alias entirely absent from the registry still fails up front in
+          // resolveMachine (that half stays an error).
+          preCheckWarnings.push(`machine_id ${target.machine.id} has no ProxyJump (second hop) configured in dsh-ssh — `
+            + 'running a direct connection; add the jump chain in the dsh-ssh panel if this host is not directly reachable')
+        }
         let remoteDir
         if (args.remote_dir) {
           remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)

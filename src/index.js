@@ -54,9 +54,9 @@ import { getFreshMin, setFreshMin } from './server/globalstore.js'
 import { readCheckParams } from './server/checkparams.js'
 import { remoteBrowse, remoteMkdir } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
-import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
+import { mimeFor, resolveReportFile } from './server/dashboard.js'
 import { resolveOpenableFile, openWithDefaultApp } from './server/openlocal.js'
-import { pickDirectory } from './server/pickdir.js'
+import { pickDirectory, pickFile, browseDir } from './picker.js'
 import { seedProjectPlotly } from './report_render.js'
 import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
 import { progressRemotePayload } from './server/progressRemote.js'
@@ -352,16 +352,46 @@ async function handle(req, res, ctx) {
       // open first for local directory access; ANY failure here silently
       // falls back to the self-made listing in the client). No body, no
       // sessionId — a folder pick has no project dependency. Delegates to the
-      // host 'directoryPicker' service through server/pickdir.js (ctx.get, no
-      // inject declaration — headless embeds where the service never exists
-      // just get 503). Same-origin guard as open-local: an untokened route
-      // that disturbs the host desktop with a modal dialog accepts
-      // same-origin fetches only.
+      // host 'directoryPicker' service through picker.js (ctx.get, no inject
+      // declaration — headless embeds where the service never exists just
+      // get 503). Same-origin guard as open-local: an untokened route that
+      // disturbs the host desktop with a modal dialog accepts same-origin
+      // fetches only. Not chained into the add-report flow anymore (the file
+      // picker below replaced its folder detour); kept as a public route.
       const guard = sameOriginError(req)
       if (guard) { json(403, { error: guard }); return }
       const r = await pickDirectory(ctx)
       if (r.error) { json(r.code ?? 500, { error: r.error }); return }
       json(200, { ok: true, ...(r.canceled ? { canceled: true } : { path: r.path }) })
+      return
+    }
+    if (req.method === 'POST' && route === '/api/pick-file') {
+      // Pop OUR OWN native OS FILE chooser (2026-11-26: the host ships no
+      // file-picker service, so picker.ps1 + picker.js implement it). The
+      // dialog's filter is pinned to *.html;*.htm and the result is
+      // re-checked here — the picked thing IS a single html file with its
+      // absolute path, which is what makes the "html single file" contract
+      // direct (no one-html-per-folder judgment). ANY failure (no desktop on
+      // web-SSH remote sessions, spawn failure, the 10-minute timeout, a
+      // non-html pick) is an error the client silently trades for the
+      // self-made listing; a cancel is a 200 no-op. Same-origin guard as
+      // pick-directory: same desktop-disturbing modal, same rule. No body,
+      // no sessionId.
+      const guard = sameOriginError(req)
+      if (guard) { json(403, { error: guard }); return }
+      // optional ctx seam (the openLauncher pattern): a plain-object test
+      // harness injects spawnImpl; the real host ctx is a proxy that THROWS
+      // on undeclared reads, so the probe is guarded and production always
+      // lands on the real dialog spawn
+      let internals
+      try {
+        if (ctx && typeof ctx.harnessPickFileInternals === 'object' && ctx.harnessPickFileInternals) internals = ctx.harnessPickFileInternals
+      } catch { /* no seam — the real spawn */ }
+      const r = await pickFile({ title: 'Pick an HTML report (HarnessAMS)' }, internals)
+      if (r.error) { json(r.code ?? 500, { error: r.error }); return }
+      if (r.canceled) { json(200, { ok: true, canceled: true }); return }
+      if (!/\.html?$/i.test(r.path)) { json(400, { error: `the picked file must end in .html (or .htm): ${r.path}` }); return }
+      json(200, { ok: true, path: r.path })
       return
     }
     if (req.method === 'PUT' && route === '/api/global-config') {
@@ -375,7 +405,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, selfcheck_fresh_min: r.value })
       return
     }
-    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir, POST /api/pick-directory)' })
+    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir, POST /api/pick-directory, POST /api/pick-file)' })
     return
   }
 
@@ -443,8 +473,8 @@ async function handle(req, res, ctx) {
   }
   if (route === '/api/browse') {
     // One-level directory listing for the add-report dialog (its fallback
-    // path since the 2026-11-26 system-first ruling — the primary folder
-    // access is the native chooser at /api/pick-directory); no path param =
+    // path since the 2026-11-26 system-first ruling — the primary file
+    // access is the native file chooser at /api/pick-file); no path param =
     // start at the home dir (report paths are absolute local paths anyway).
     const r = await browseDir(url.searchParams.get('path'), os.homedir())
     if (r.error) { json(400, { error: r.error }); return }

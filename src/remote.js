@@ -160,6 +160,11 @@ export async function listMachines(ctx, timeoutMs = 10_000) {
       username: String(h?.user ?? ''),
       auth: String(h?.auth ?? ''),
       keyReady: !!h?.keyReady,
+      // the jump chain (ProxyJump = the second hop; ssh_list carries it per
+      // host). Empty array = a direct connection. Consumers may warn on empty
+      // (batch_submit's ssh path does — 2026-11-26: warn, run direct, never
+      // block); an alias absent from the list entirely is the hard error.
+      proxyJump: Array.isArray(h?.proxyJump) ? h.proxyJump.map(String) : [],
     }
   })
   return { ok: true, machines }

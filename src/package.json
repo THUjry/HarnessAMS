@@ -21,6 +21,8 @@
     "py.js",
     "batch.js",
     "remote.js",
+    "picker.js",
+    "picker.ps1",
     "trash.js",
     "skills.js",
     "skills/",

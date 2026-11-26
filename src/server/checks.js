@@ -8,6 +8,7 @@ import path from 'node:path'
 import os from 'node:os'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
+import { resolveScriptsSource } from './settings.js'
 
 const execFileAsync = promisify(execFile)
 
@@ -55,13 +56,16 @@ async function probePython(assetsDir) {
 // Node + python facts for the AGENTS.md config table, the local-env rows, and
 // the finalize-side measurement (persistLocalFacts). Never throws: a missing
 // python degrades to empty strings plus .error so one absent interpreter
-// cannot fail a config sync. `projectPath` anchors the numfallback probe (the
-// project's staged .harnessams/assets bucket); without one the fallback leg
-// is skipped and the numpy answer degrades to yes/no.
+// cannot fail a config sync. `projectPath` anchors the numfallback probe at
+// the assets bucket BESIDE THE RESOLVED SCRIPTS ROOT (2026-11-26
+// package-path-first policy: the package layout's own assets/ is the source
+// of truth now — a project-local root still carries its own sibling bucket);
+// without one the fallback leg is skipped and the numpy answer degrades to
+// yes/no.
 export async function localEnvFacts(projectPath) {
   const node = { version: process.version, path: process.execPath }
   const assetsDir = typeof projectPath === 'string' && projectPath
-    ? path.join(projectPath, '.harnessams', 'assets')
+    ? path.join(resolveScriptsSource(projectPath), '..', 'assets')
     : null
   const p = await probePython(assetsDir).catch((e) => ({ error: String(e?.message ?? e) }))
   const python = { version: p?.version ?? '', path: p?.path ?? '', numpy: p?.numpy ?? null, error: p?.error ?? '' }

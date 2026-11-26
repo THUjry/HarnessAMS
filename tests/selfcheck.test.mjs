@@ -29,8 +29,8 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { apply, toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { defaultSettings, readSettings, readConfig, validateSettings, writeSettings, configPath, healFromGlobalMemory, initProjectStorage, declarePlotlyUrl } from '../src/server/settings.js'
-import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR, autoPinToolchain } from '../src/server/selfcheck.js'
+import { defaultSettings, readSettings, readConfig, validateSettings, writeSettings, configPath, healFromGlobalMemory, initProjectStorage, declarePlotlyUrl, defaultSimScriptsDir } from '../src/server/settings.js'
+import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR, autoPinToolchain, healProjectScriptsAt } from '../src/server/selfcheck.js'
 import { getNodePins, getLocalFacts, readGlobalStore, setFreshMin, updateNodePins, updateLocalFacts } from '../src/server/globalstore.js'
 import { reconcileSettings, overlaySettingsAt } from '../src/server/reconcile.js'
 import { agentsMdPath, syncAgentsMd } from '../src/server/agentsmd.js'
@@ -138,6 +138,7 @@ function makeHarness({ scenario = {} }) {
   let hangResolve = null
   let pollCalls = 0
   let hangUsed = false
+  let gateProbes = 0
 
   const ctx = {} // filled below (toolDefinitions(ctx) needs ctx first for closures)
   const batchTools = new Map()
@@ -199,6 +200,19 @@ function makeHarness({ scenario = {} }) {
     }
     if (command.includes('test -f errlog.txt')) {
       return { success: true, exitCode: 0, timedOut: false, stdout: '__STARTED__\n', stderr: '', durationMs: 3 }
+    }
+    if (command.includes('test -f') && command.includes('.hams_ssh_done')) {
+      // the self-check's 2 s worker-start gate (scheduler=ssh chains): script
+      // the not-yet rounds (exit 1 — "file absent", not a failure), the
+      // dead-channel shape (no exit code at all), or the pass-through
+      if (scenario.gateChannelFail) {
+        return { success: false, exitCode: null, timedOut: false, stdout: '', stderr: 'channel gone', durationMs: 1 }
+      }
+      gateProbes += 1
+      if (scenario.gateProbes && gateProbes <= scenario.gateProbes) {
+        return { success: true, exitCode: 1, timedOut: false, stdout: '', stderr: '', durationMs: 1 }
+      }
+      return { success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 1 }
     }
     if (command.includes('spectre_psf_parse.py')) {
       if (scenario.remoteVerifyFail) return { success: false, exitCode: 1, timedOut: false, stdout: '', stderr: 'remote python exploded\n', durationMs: 3 }
@@ -638,17 +652,12 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(missing.settings.run_mode, 'local') // missing file = defaults
   await writeSettings(tmp, v.settings)
   const raw = JSON.parse(await fsp.readFile(configPath(tmp), 'utf8'))
-  // fresh file: single config carries the workspace section; D-015 — the
-  // scripts root is the project's OWN staged copy, laid down at creation
+  // fresh file: single config carries the workspace section; the
+  // package-path-first policy (2026-11-26) — the scripts root stays the
+  // PACKAGED SmartAnaSim sibling, no project-local copy is staged at creation
   assert.equal(raw.version, 1)
-  assert.equal(raw.workspace.sim_scripts_dir, path.join(tmp, '.harnessams', 'scripts'))
-  assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'scripts')), 'staged scripts dir exists')
-  const sibling = path.resolve(REPO, '..', 'HarnessAMS-SmartAnaSim', 'scripts')
-  if (fs.existsSync(path.join(sibling, 'spectre', 'spectre_sweep_worker.py'))) {
-    assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'scripts', 'spectre', 'spectre_sweep_worker.py')),
-      'worker tree copied from the source root')
-    assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'assets', 'numfallback.py')), 'assets bucket staged')
-  }
+  assert.equal(raw.workspace.sim_scripts_dir, defaultSimScriptsDir())
+  assert.ok(!fs.existsSync(path.join(tmp, '.harnessams', 'scripts')), 'no project-local scripts copy is staged')
   assert.equal(raw.workspace.trash_dir, '.harnessams/trash')
   assert.equal(raw.workspace.plotly_url, undefined, 'fresh file carries no plotly_url declaration')
   assert.equal(raw.workspace.plotly_asset, undefined, 'fresh file carries no plotly_asset override')
@@ -1006,32 +1015,36 @@ test('globalstore + heal (D-017): node memory, remembered clears stick, heal pre
   }
 })
 
-test('project init (D-015, 2026-11-25): staging at init heals the writeSessionConfig asymmetry; legacy values kept', async () => {
+test('project init (package-path-first, 2026-11-26): init stages nothing and flips nothing; the config gap still heals; explicit values kept', async () => {
   const tmp = await tmpDir()
   const ws = path.join(tmp, 'proj-init')
   await fsp.mkdir(ws, { recursive: true })
   try {
     // a session-config write creates .harnessams + the AGENTS.md template
-    // WITHOUT staging — the asymmetry this init hook exists to heal
+    // WITHOUT a workspace_config.json — the asymmetry this init hook exists
+    // to heal (the config still lands; the scripts staging that used to ride
+    // along is gone with the package-path-first policy)
     await writeSessionConfig(ws, 's1', {})
     assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')))
     assert.ok(!fs.existsSync(path.join(ws, '.harnessams', 'scripts')), 'not staged by the session write')
 
     const r1 = await initProjectStorage(ws)
-    assert.deepEqual({ fresh: r1.fresh, flipped: r1.flipped }, { fresh: false, flipped: true })
-    assert.ok(fs.existsSync(path.join(ws, '.harnessams', 'scripts')), 'scripts staged at init')
+    assert.deepEqual(r1, { fresh: false })
+    assert.ok(!fs.existsSync(path.join(ws, '.harnessams', 'scripts')), 'init stages no scripts either')
     let raw = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
-    assert.equal(raw.workspace.sim_scripts_dir, path.join(ws, '.harnessams', 'scripts'), 'the suppressed flip lands')
+    assert.equal(raw.workspace.sim_scripts_dir, defaultSimScriptsDir(), 'the packaged default is the root')
 
-    // idempotent: a page-reload init neither re-stages nor rewrites
+    // idempotent: a page-reload init neither stages nor rewrites
     const r2 = await initProjectStorage(ws)
-    assert.deepEqual({ fresh: r2.fresh, flipped: r2.flipped }, { fresh: false, flipped: false })
+    assert.deepEqual(r2, { fresh: false })
+    raw = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
+    assert.equal(raw.workspace.sim_scripts_dir, defaultSimScriptsDir())
 
-    // a hand-edited explicit sim_scripts_dir is NEVER flipped (legacy contract)
+    // a hand-edited explicit sim_scripts_dir is kept verbatim (legacy contract)
     raw.workspace.sim_scripts_dir = 'C:/custom/scripts'
     await fsp.writeFile(configPath(ws), JSON.stringify(raw, null, 2), 'utf8')
     const r3 = await initProjectStorage(ws)
-    assert.equal(r3.flipped, false)
+    assert.deepEqual(r3, { fresh: false })
     raw = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
     assert.equal(raw.workspace.sim_scripts_dir, 'C:/custom/scripts')
   } finally { await fsp.rm(tmp, { recursive: true, force: true }) }
@@ -1227,11 +1240,15 @@ test('routes: project-init (D-015) + global-config (D-017) + project facts', asy
       method: 'POST', url: '/harnessams/api/project-init', headers: {},
       async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1' })) },
     })
-    // sidebar-open init: fresh store + template + scripts + the flip, in one call
+    // sidebar-open init: fresh store + template + config in one call — and
+    // NO script staging anymore (package-path-first, 2026-11-26: the
+    // packaged SmartAnaSim sibling is the scripts root)
     const init = await postInit()
     assert.equal(init.code, 200, JSON.stringify(init.body))
     assert.equal(init.body.fresh, true)
-    assert.ok(fs.existsSync(path.join(projectPath, '.harnessams', 'scripts')))
+    assert.ok(fs.existsSync(path.join(projectPath, '.harnessams')), 'the store dir lands')
+    assert.ok(fs.existsSync(path.join(projectPath, 'AGENTS.md')), 'the template lands')
+    assert.ok(!fs.existsSync(path.join(projectPath, '.harnessams', 'scripts')), 'no project-local scripts copy is staged')
     assert.equal(init.body.healed.length, 0, 'no node memory yet: nothing to prefill')
     // a page-reload init is a quiet idempotent no-op
     const init2 = await postInit()
@@ -1797,6 +1814,96 @@ test('selfcheck poll live progress: the polling step row carries the latest coun
     flow.restoreAll()
     await rmRetry(flow.tmp)
   }
+})
+
+// ---- the 2 s worker-start gate + the conditional script heal (2026-11-26) --
+
+test('flow: spectre + remote scheduler=ssh — the 2 s worker-start gate waits, then polls to a terminal state', async () => {
+  // D-028 made ssh submits detached: the gate probes sweep_progress.json
+  // directly every 2 s (the user-approved ssh_exec bypass) before handing
+  // over to batch_poll — and the ssh chain now polls to a TERMINAL state
+  // instead of the pre-detach one-round break that left the run undecided
+  const f = await startFlow({
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'ssh' },
+    scenario: { gateProbes: 2 },
+  })
+  try {
+    assert.ok(f.start.runId, f.start.error)
+    let sawWaiting = false
+    for (let i = 0; i < 40 && !sawWaiting; i++) {
+      await new Promise((r) => setTimeout(r, 250))
+      const mid = getSelfcheck(f.start.runId, f.projectPath)
+      sawWaiting = mid.steps.some((s) => /waiting for worker start/.test(String(s.result)))
+    }
+    assert.ok(sawWaiting, 'the gate step row shows the wait (live status, not a silent hole)')
+    const run = await waitDone(f.start.runId, f.projectPath)
+    assert.equal(run.summary.ok, true, JSON.stringify(run.steps.map((s) => [s.item, s.ok, s.result, s.detail])))
+    const poll = run.steps.find((s) => s.item.includes('batch_poll') && s.attempt !== 'fallback')
+    assert.equal(poll.ok, true)
+    assert.match(poll.result, /completed 9\/9/)
+  } finally {
+    f.restoreAll()
+    await rmRetry(f.tmp)
+  }
+})
+
+test('flow: spectre + remote scheduler=ssh — a dead channel in the gate fails fast instead of burning the budget', async () => {
+  // three consecutive channel-level errors (no exit code at all — exit 1 is
+  // "not present yet", never a failure) abort the gate with an actionable
+  // message; the remote chain is marked failed without waiting the budget
+  const f = await startFlow({
+    settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'ssh' },
+    scenario: { gateChannelFail: true },
+  })
+  try {
+    assert.ok(f.start.runId, f.start.error)
+    const run = await waitDone(f.start.runId, f.projectPath)
+    assert.equal(run.summary.remote, 'failed')
+    assert.equal(run.summary.ok, false)
+    const poll = run.steps.find((s) => s.item.includes('batch_poll'))
+    assert.equal(poll.ok, false)
+    assert.match(String(poll.detail), /ssh channel unusable/)
+  } finally {
+    f.restoreAll()
+    await rmRetry(f.tmp)
+  }
+})
+
+test('script heal (package-path-first): a project-local root completes from the package tree; the packaged root never copies', async () => {
+  const tmp = await tmpDir()
+  const projectPath = path.join(tmp, 'project')
+  await fsp.mkdir(projectPath, { recursive: true })
+  // the legacy flipped shape: the config points INSIDE .harnessams, the tree
+  // is partial, one file is the user's own copy
+  const scriptsDir = path.join(projectPath, '.harnessams', 'scripts')
+  fs.mkdirSync(path.join(scriptsDir, 'spectre'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsDir, 'spectre', 'spectre_sweep_worker.py'), '# legacy local copy (copy-if-missing must keep it)\n')
+  await fsp.writeFile(path.join(projectPath, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    workspace: { sim_scripts_dir: scriptsDir, trash_dir: '.harnessams/trash' },
+    settings: defaultSettings(),
+  }, null, 2), 'utf8')
+  try {
+    const r = await healProjectScriptsAt(projectPath)
+    assert.equal(r.healed, true)
+    const sibling = defaultSimScriptsDir()
+    if (fs.existsSync(path.join(sibling, 'spectre', 'spectre_psf_parse.py'))) {
+      assert.ok(fs.existsSync(path.join(scriptsDir, 'spectre', 'spectre_psf_parse.py')),
+        'the partial tree completed from the package')
+      assert.ok(fs.readFileSync(path.join(scriptsDir, 'spectre', 'spectre_sweep_worker.py'), 'utf8').includes('legacy local copy'),
+        'copy-if-missing: the user-edited local file is never clobbered')
+      assert.ok(fs.existsSync(path.join(projectPath, '.harnessams', 'assets', 'numfallback.py')),
+        'the sibling assets bucket heals too')
+    }
+
+    // the packaged default root (a fresh project's shape) never stages a copy
+    const fresh = path.join(tmp, 'fresh')
+    await fsp.mkdir(fresh, { recursive: true })
+    await writeSettings(fresh, defaultSettings())
+    const r2 = await healProjectScriptsAt(fresh)
+    assert.equal(r2.healed, false)
+    assert.ok(!fs.existsSync(path.join(fresh, '.harnessams', 'scripts')), 'no project copy for the packaged root')
+  } finally { await fsp.rm(tmp, { recursive: true, force: true }) }
 })
 
 test('selfcheck tool surface: action enum carries stop and the runner dispatches it', async () => {

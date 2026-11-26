@@ -58,10 +58,13 @@ function restoreEnv() {
 }
 
 const HOSTS = [
-  { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true },
+  // proxyJump mirrors the real ssh_list shape (the field is schema-required
+  // there): node1 carries a jump chain (the second hop), lab9 is a direct
+  // jump-less entry — the second-hop policy tests lean on exactly that
+  { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true, proxyJump: ['login4'] },
   // a second registry alias — the registry is pure facts now (roots are
   // per-project settings, not machine columns), it resolves like any other
-  { alias: 'lab9', host: '192.0.2.99', port: 22, user: 'op', auth: 'key', keyReady: true },
+  { alias: 'lab9', host: '192.0.2.99', port: 22, user: 'op', auth: 'key', keyReady: true, proxyJump: [] },
 ]
 
 function pollValue({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN' } = {}) {
@@ -145,7 +148,7 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
           if (archive) fs.copyFileSync(archive, a.localPath)
           return reply(ok({ ok: true, bytes: 512 }))
         }
-        assert.equal(a.alias, 'node1', `${view.name}: ssh_* calls target the alias`)
+        assert.ok(HOSTS.some((h) => h.alias === a.alias), `${view.name}: ssh_* calls target a registry alias (got ${a.alias})`)
         const cmd = String(a.command || '')
         if (cmd.includes('__BJOB__')) {
           if (pollSeq) return reply(ok(pollValue(pollSeq[Math.min(seqIdx++, pollSeq.length - 1)])))
@@ -417,6 +420,52 @@ test('batch_submit classifies a queued (PEND) job as expected — state queued, 
     assert.equal(res.state, 'queued')
     assert.deepEqual(res.warnings, [])
     assert.equal(res.job_id, '777')
+  } finally {
+    restoreEnv()
+    fs.rmSync(base, { recursive: true, force: true })
+    fs.rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// 2026-11-26: the second-hop (ProxyJump) policy — a dsh-ssh entry without a
+// jump chain still runs DIRECT (never blocked), but the submit result warns;
+// an entry carrying a jump chain stays silent. An alias entirely absent from
+// the registry remains the hard up-front error (resolveMachine, unchanged).
+test('batch_submit second-hop policy: no ProxyJump warns and still runs direct; a jump chain stays silent', async () => {
+  const base = tmp('hams-jump-')
+  const scriptsRoot = path.join(base, 'scripts')
+  fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
+  fs.writeFileSync(path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py'), '# worker\n')
+  process.env.HARNESSAMS_SIM_SCRIPTS_DIR = scriptsRoot
+  const root = tmp('hams-proj-')
+  fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
+  fs.writeFileSync(path.join(root, '.harnessams', 'workspace_config.json'), JSON.stringify({
+    version: 1,
+    settings: {
+      cluster_env: 'out-of-cluster', run_mode: 'remote', machine_id: 'lab9', remote_root: '/home/op/sim',
+      remote_dir: '.harnessams/selfcheck', scheduler: 'lsf', simulator: 'spectre',
+      compute_script_local: 'python', compute_script_remote: 'python',
+    },
+  }, null, 2))
+  try {
+    const run = makeRunDir({ under: root })
+    const ctx = makeCtx({ project: root, post: '777 PEND\n' })
+    const res = await tool(ctx, 'batch_submit').execute({
+      run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    // the direct connection runs: the submit succeeds and the warning rides
+    // the result (2026-11-26 ruling: warn, never block)
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.state, 'queued')
+    assert.ok(res.warnings.some((w) => /no ProxyJump \(second hop\)/.test(String(w))), JSON.stringify(res.warnings))
+
+    // a machine with a jump chain carries no second-hop warning
+    const run2 = makeRunDir({ under: root })
+    const res2 = await tool(ctx, 'batch_submit').execute({
+      run_dir: run2, remote_dir: 'batch2', machine_id: 'node1', worker: 'spectre/spectre_sweep_worker.py',
+    }, {})
+    assert.equal(res2.ok, true, JSON.stringify(res2))
+    assert.ok(!res2.warnings.some((w) => /ProxyJump/.test(String(w))), JSON.stringify(res2.warnings))
   } finally {
     restoreEnv()
     fs.rmSync(base, { recursive: true, force: true })

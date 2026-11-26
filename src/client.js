@@ -137,6 +137,7 @@ window.__ModuleLoader__.load({
         'dash.emptyDir': '（此目录没有子目录或 HTML 文件）',
         'dash.manualLabel': '或输入报告的绝对路径',
         'dash.manualPlaceholder': '/path/to/report.html',
+        'dash.addBadExt': '报告路径必须以 .html 或 .htm 结尾',
         'dash.add': '添加',
         'tasks.headerOpen': '打开 HarnessAMS 侧栏（项目总览与会话面板）',
         'tasks.guideDesc': '项目总览、会话面板、检查与使用引导',
@@ -361,6 +362,7 @@ window.__ModuleLoader__.load({
         'dash.emptyDir': '(no subdirectories or HTML files here)',
         'dash.manualLabel': 'Or type the report’s absolute path',
         'dash.manualPlaceholder': '/path/to/report.html',
+        'dash.addBadExt': 'the report path must end in .html or .htm',
         'dash.add': 'Add',
         'tasks.headerOpen': 'Open the HarnessAMS sidebar (project overview and session panel)',
         'tasks.guideDesc': 'Project overview, session panel, checks and a guide',
@@ -625,6 +627,10 @@ window.__ModuleLoader__.load({
    columns inside the container and cells wrap via overflow-wrap */
 .hams-table { border-collapse: collapse; width: 100%; table-layout: fixed; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); margin: 8px 0; }
 .hams-table .hams-select { max-width: 100%; }
+/* fixed-width value inputs (check table) must stay inside their cell too:
+   a wrapping flex row still overflows when one item alone is wider than the
+   column (narrow panes) — the select rule's twin, same rationale */
+.hams-table .hams-input { max-width: 100%; }
 /* settings table (1:1:2 columns via <colgroup>; the verdict column is the
    double one): dropdowns fill their cell so every select matches the machine
    row's width instead of shrinking to its own content */
@@ -2626,33 +2632,32 @@ window.__ModuleLoader__.load({
           dashboard_selected: id,
         }))
       }
-      // Add flow (2026-11-26 ruling: system first, silent fallback): the add
-      // button first tries the host's native OS folder chooser through
-      // POST /api/pick-directory — the same chooser the host's add-workspace
-      // flow uses. A picked folder with exactly ONE html registers it
-      // directly (one dialog total, like add-workspace); a folder with a
-      // choice of htmls lands the listing there; ANY failure (no native
-      // picker on web-SSH/headless hosts, auth, timeout) silently opens the
-      // self-made listing. A user cancel does nothing.
+      // Add flow (2026-11-26 ruling, file-first): the add button pops OUR OWN
+      // native OS FILE chooser through POST /api/pick-file — the host ships no
+      // file-picker service, so the plugin carries one (picker.ps1 +
+      // picker.js). The picked path is a single html file with its absolute
+      // path, so registering it directly satisfies the "html single file"
+      // contract with no indirect one-html-per-folder judgment. ANY failure
+      // (no desktop on web-SSH remote sessions, spawn failure, the 10-minute
+      // timeout, a non-html pick) silently opens the self-made listing; a
+      // user cancel does nothing. The folder chooser (POST
+      // /api/pick-directory) stays a public route but no longer chains here —
+      // the file picker replaced its folder-then-one-html detour.
       const addBusy = useRef(false)
       const openAdd = () => {
         if (addBusy.current) return
         addBusy.current = true
-        fetchJson(API + '/pick-directory', {
+        fetchJson(API + '/pick-file', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: '{}',
         }).then((r) => {
-          if (!r.path) return // the user dismissed the system chooser
-          return fetchJson(API + '/browse?path=' + encodeURIComponent(r.path))
-            .then((listing) => {
-              if (listing.htmls.length === 1) {
-                addReport(listing.path + '/' + listing.htmls[0].name, listing.htmls[0].name)
-                return
-              }
-              setDialogCwd(r.path); setDialogOpen(true)
-            })
-            .catch(() => { setDialogCwd(r.path); setDialogOpen(true) })
+          if (r.canceled || !r.path) return // the user dismissed the system chooser
+          // belt-and-braces: the route already rejects non-html picks; this
+          // keeps the client honest if that contract ever drifts
+          if (!/\.html?$/i.test(String(r.path))) { setDialogCwd(null); setDialogOpen(true); return }
+          const base = String(r.path).split(/[\\/]/).pop() || String(r.path)
+          addReport(String(r.path), base)
         }).catch(() => {
           setDialogCwd(null); setDialogOpen(true) // silent fallback
         }).finally(() => { addBusy.current = false })
@@ -2715,15 +2720,19 @@ window.__ModuleLoader__.load({
     // subdirectories + *.html files, dot-directories hidden) starting at the
     // folder the system flow landed on (initialCwd) or the home dir; clicking
     // an HTML file registers it. The manual path field covers paths outside
-    // the browsable tree. This dialog is the FALLBACK half of the 2026-11-26
-    // system-first ruling: the add button tries the host's native OS folder
-    // chooser first (POST /api/pick-directory) and ANY failure opens this
+    // the browsable tree and now carries its own .html/.htm format gate — the
+    // store write would reject a wrong extension anyway (D-022 strict), but
+    // that round-trip leaves the optimistic row in place; catching it here
+    // keeps the dialog open and explains. This dialog is the FALLBACK half of
+    // the 2026-11-26 system-first ruling: the add button pops the native OS
+    // FILE chooser first (POST /api/pick-file) and ANY failure opens this
     // listing silently — no system affordance lives inside the dialog.
     function AddReportDialog({ initialCwd, onCancel, onAdd }) {
       const [cwd, setCwd] = useState(initialCwd ?? null) // null = server default (home dir)
       const [listing, setListing] = useState(null)
       const [error, setError] = useState(null)
       const [manual, setManual] = useState('')
+      const [manualErr, setManualErr] = useState(null)
       useEffect(() => {
         let alive = true
         setError(null); setListing(null)
@@ -2732,7 +2741,13 @@ window.__ModuleLoader__.load({
           .catch((e) => { if (alive) setError(String(e.message ?? e)) })
         return () => { alive = false }
       }, [cwd])
-      const addManual = () => { const p = manual.trim(); if (p) onAdd(p, '') }
+      const addManual = () => {
+        const p = manual.trim()
+        if (!p) return
+        if (!/\.html?$/i.test(p)) { setManualErr(tr('dash.addBadExt')); return }
+        setManualErr(null)
+        onAdd(p, '')
+      }
       return h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) onCancel() } },
         h('div', { className: 'hams-dialog hams-browse-dialog' },
           h('h3', null, tr('dash.addTitle')),
@@ -2762,9 +2777,10 @@ window.__ModuleLoader__.load({
             h('label', null, tr('dash.manualLabel')),
             h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
               h('input', { className: 'hams-input', placeholder: tr('dash.manualPlaceholder'), value: manual,
-                onChange: (e) => setManual(e.target.value),
+                onChange: (e) => { setManual(e.target.value); if (manualErr) setManualErr(null) },
                 onKeyDown: (e) => { if (e.key === 'Enter') addManual() } }),
-              h('button', { className: 'hams-btn', disabled: !manual.trim(), onClick: addManual }, tr('dash.add')))),
+              h('button', { className: 'hams-btn', disabled: !manual.trim(), onClick: addManual }, tr('dash.add'))),
+            manualErr && h('div', { className: 'hams-err' }, txt(manualErr))),
           h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
             h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')))))
     }
@@ -2900,7 +2916,10 @@ window.__ModuleLoader__.load({
         return h('tr', null,
           h('td', null, tr(labelKey)),
           h('td', null,
-            h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+            // wrap (not nowrap): a fixed-layout cell cannot host the whole
+            // bound pair row at pane widths, and a nowrap flex cluster pokes
+            // past its column (2026-11-26) — the pairs stack instead
+            h('div', { className: 'hams-row', style: { flexWrap: 'wrap', margin: 0 } },
               rclField(k, 0, patchEnd(0)),
               h('span', { className: 'hams-dim' }, '…'),
               rclField(k, 1, patchEnd(1))),
@@ -2918,7 +2937,7 @@ window.__ModuleLoader__.load({
         return h('tr', null,
           h('td', null, tr(labelKey)),
           h('td', null,
-            h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+            h('div', { className: 'hams-row', style: { flexWrap: 'wrap', margin: 0 } },
               h('input', { className: 'hams-input', style: { width: '88px' }, value: draft.mult[k][0],
                 onChange: (e) => patchEnd(0)(e.target.value),
                 onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void confirm() } } }),
@@ -2959,6 +2978,13 @@ window.__ModuleLoader__.load({
         saveError && h('div', { className: 'hams-err' }, txt(saveError)),
         !params && !error && h('div', { className: 'hams-dim' }, tr('common.loading')),
         params && draft && h('table', { className: 'hams-table' },
+          // 26/48/26 (the value column is the wide one): fixed layout would
+          // otherwise split the three columns evenly and starve the value
+          // column, whose control pairs are the widest content by far
+          h('colgroup', null,
+            h('col', { key: 'param', style: { width: '26%' } }),
+            h('col', { key: 'value', style: { width: '48%' } }),
+            h('col', { key: 'note', style: { width: '26%' } })),
           h('thead', null, h('tr', null, [tr('check.colParam'), tr('check.colValue'), tr('check.colNote')]
             .map((c) => h('th', { key: c }, c)))),
           h('tbody', null,

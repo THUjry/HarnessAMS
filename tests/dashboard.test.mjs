@@ -1,11 +1,12 @@
 // Unit tests for the Dashboard viewer surface: session-attached report store
 // (project.js reports[]/dashboard_selected inside sessions.json v2), report
-// file resolution + MIME (dashboard.js), the add-report directory browser, the
-// /api/report-stat auto-refresh endpoint, the system-browser open action
+// file resolution + MIME (dashboard.js), the add-report directory browser,
+// the /api/report-stat auto-refresh endpoint, the system-browser open action
 // (openlocal.js + POST /api/open-local; route-level, through the
-// apply()-registered handler), and the system directory picker
-// (pickdir.js + POST /api/pick-directory — the add button's system-first
-// folder chooser, ANY failure silently falling back to the listing).
+// apply()-registered handler), and the picking surface (picker.js since
+// 2026-11-26: the host-borrowed folder chooser POST /api/pick-directory, our
+// own native FILE dialog POST /api/pick-file — the add button's file-first
+// flow, ANY failure silently falling back to the listing).
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -13,10 +14,12 @@ import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { EventEmitter } from 'node:events'
+import { PassThrough } from 'node:stream'
 import { writeSessionConfig, readSessionConfigs } from '../src/server/project.js'
-import { mimeFor, resolveReportFile, browseDir } from '../src/server/dashboard.js'
+import { mimeFor, resolveReportFile } from '../src/server/dashboard.js'
 import { resolveOpenableFile, openWithDefaultApp } from '../src/server/openlocal.js'
-import { pickDirectory } from '../src/server/pickdir.js'
+import { pickDirectory, pickFile, browseDir } from '../src/picker.js'
 import { registerRoutes, callGet, fakeRes, clientSrc } from './helpers.mjs'
 
 const SID = 'session-dash1111-2222-3332-4444-555555555555'
@@ -304,8 +307,9 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
   }
 })
 
-// ---- system directory picker (pickdir.js + POST /api/pick-directory,
-// 2026-11-26: system-first add flow, silent fallback to the listing) --------
+// ---- system pickers (picker.js: POST /api/pick-directory — the host's
+// folder chooser; POST /api/pick-file — OUR native file dialog, the add
+// button's file-first flow with silent fallback to the listing) ------------
 
 test('pickdir: pickDirectory drives the capability object without inject, value-shaped', async () => {
   const seen = { signal: null }
@@ -399,12 +403,177 @@ test('pickdir: POST /api/pick-directory picks, cancels, guards origin, falls bac
   assert.match(wrong.body.error, /pick-directory/)
 })
 
-test('dashboard: the add button tries the system picker first, then silently falls back (static contract)', async () => {
+test('dashboard: the add button pops the system FILE picker first, then silently falls back (static contract)', async () => {
   const src = await clientSrc()
-  // add flow: POST /api/pick-directory first, then the listing; ANY failure
-  // opens the dialog without surfacing an error, a cancel keeps it shut
-  assert.match(src, /fetchJson\(API \+ '\/pick-directory', \{/)
+  // add flow (2026-11-26, file-first): POST /api/pick-file — the picked path
+  // IS a single html file (the dialog filter + the route's extension gate),
+  // so it registers directly; ANY failure opens the listing without
+  // surfacing an error, a cancel keeps it shut
+  assert.match(src, /fetchJson\(API \+ '\/pick-file', \{/)
+  assert.ok(!src.includes("fetchJson(API + '/pick-directory'"), 'the folder chooser is no longer chained into the add flow')
   assert.match(src, /setDialogCwd\(null\); setDialogOpen\(true\) \/\/ silent fallback/)
+  // the manual path field carries its own .html gate (the client-side half
+  // of the forced single-html contract)
+  assert.match(src, /'dash\.addBadExt'/)
   // no in-dialog system affordance remains (the wave's first shape)
   assert.ok(!src.includes('dash.sysBrowse'), 'no system-browse button inside the listing dialog')
+})
+
+// ---- our own native FILE dialog (picker.js pickFile + POST /api/pick-file,
+// 2026-11-26: the file-first add flow — the spike contract is exit 0 = the
+// chosen absolute path on stdout, exit 2 = cancel, exit 1 = script error) ---
+
+// A fake child for the pickFile internals seam: PassThrough pipes plus an
+// event emitter; `drive` scripts the dialog outcome asynchronously (the
+// listeners attach synchronously right after spawnImpl returns).
+function fakeChild(drive) {
+  const child = new EventEmitter()
+  child.pid = 4242
+  child.stdout = new PassThrough()
+  child.stderr = new PassThrough()
+  if (drive) queueMicrotask(() => drive(child))
+  return child
+}
+
+test('picker: pickFile maps the spike contract — picked / canceled / error, value-shaped', async () => {
+  const spawns = []
+  const implOf = (drive) => (cmd, args, opts) => {
+    spawns.push({ cmd, args, opts })
+    return fakeChild(cmd === 'taskkill' ? null : drive)
+  }
+
+  const picked = await pickFile({}, { platform: 'win32', spawnImpl: implOf((c) => { c.stdout.end('D:\\Reports\\Pi14dB_report.html'); c.emit('exit', 0) }) })
+  assert.equal(picked.path, 'D:\\Reports\\Pi14dB_report.html')
+  // powershell 5.1 STA + the shipped dialog script beside picker.js
+  const s = spawns[0]
+  assert.equal(s.cmd, 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe')
+  assert.equal(s.args[0], '-NoProfile')
+  assert.ok(s.args.includes('-STA'), 'the forms dialog requires -STA on powershell.exe')
+  assert.ok(String(s.args[5]).endsWith('picker.ps1'), 'the dialog script ships with the package')
+  assert.equal(s.opts.windowsHide, true)
+
+  // canceled: exit 2, empty stdout
+  assert.deepEqual(
+    await pickFile({}, { platform: 'win32', spawnImpl: implOf((c) => c.emit('exit', 2)) }),
+    { canceled: true })
+
+  // script error: exit 1 + stderr — a 500 value error, never a throw
+  const errored = await pickFile({}, { platform: 'win32', spawnImpl: implOf((c) => { c.stderr.end('boom'); c.emit('exit', 1) }) })
+  assert.equal(errored.code, 500)
+  assert.match(errored.error, /boom/)
+
+  // exit 0 with no stdout violates the contract -> 500
+  const empty = await pickFile({}, { platform: 'win32', spawnImpl: implOf((c) => c.emit('exit', 0)) })
+  assert.equal(empty.code, 500)
+  assert.match(empty.error, /no path/)
+
+  // an unsupported platform reports 503 — the client's silent fallback
+  const mac = await pickFile({}, { platform: 'darwin' })
+  assert.equal(mac.code, 503)
+  assert.match(mac.error, /unsupported on darwin/)
+})
+
+test('picker: a hung dialog is killed tree-wide at the deadline (the run-spike shape)', async () => {
+  const kills = []
+  let dialog
+  const spawnImpl = (cmd, args) => {
+    if (cmd === 'taskkill') {
+      kills.push(args)
+      // the real taskkill dies asynchronously; so must the fake (the exit
+      // listener registers synchronously after kill() returns)
+      queueMicrotask(() => dialog?.emit('exit', null))
+      return fakeChild(null)
+    }
+    dialog = fakeChild(null) // never exits on its own: a stuck modal
+    return dialog
+  }
+  const r = await pickFile({ timeoutMs: 80 }, { platform: 'win32', spawnImpl })
+  assert.equal(r.code, 500)
+  assert.match(r.error, /timed out/)
+  assert.deepEqual(kills, [['/PID', '4242', '/T', '/F']])
+})
+
+test('picker: the linux arm tries zenity then kdialog; a missing binary falls through', async () => {
+  const cmds = []
+  const spawnImpl = (cmd) => {
+    cmds.push(cmd)
+    if (cmd === 'zenity') {
+      // ENOENT: the child 'error' event, no exit code at all
+      const child = fakeChild(null)
+      queueMicrotask(() => child.emit('error', Object.assign(new Error('spawn zenity ENOENT'), { code: 'ENOENT' })))
+      return child
+    }
+    return fakeChild((c) => { c.stdout.end('/home/op/report.html'); c.emit('exit', 0) })
+  }
+  const r = await pickFile({}, { platform: 'linux', spawnImpl })
+  assert.equal(r.path, '/home/op/report.html')
+  assert.deepEqual(cmds, ['zenity', 'kdialog'])
+
+  // zenity present, user cancels (exit 1, empty stdout)
+  assert.deepEqual(
+    await pickFile({}, { platform: 'linux', spawnImpl: () => fakeChild((c) => c.emit('exit', 1)) }),
+    { canceled: true })
+
+  // neither binary exists -> 503 with install guidance (still value-shaped)
+  const missing = await pickFile({}, {
+    platform: 'linux',
+    spawnImpl: (cmd) => {
+      const child = fakeChild(null)
+      queueMicrotask(() => child.emit('error', Object.assign(new Error(`spawn ${cmd} ENOENT`), { code: 'ENOENT' })))
+      return child
+    },
+  })
+  assert.equal(missing.code, 503)
+  assert.match(missing.error, /zenity or kdialog/)
+})
+
+test('picker: POST /api/pick-file picks, cancels, guards origin, enforces the html single-file contract', async () => {
+  // the ctx seam (the openLauncher pattern): a plain-object harness injects
+  // the dialog spawn; the real host ctx is a proxy that throws on undeclared
+  // reads, so production always lands on the real dialog
+  let drive = (c) => { c.stdout.end('D:\\Reports\\Pi14dB_report.html'); c.emit('exit', 0) }
+  const spawnImpl = (cmd) => {
+    if (cmd === 'taskkill') return fakeChild(null)
+    return fakeChild(drive)
+  }
+  const handler = await registerRoutes({ harnessPickFileInternals: { platform: 'win32', spawnImpl } })
+
+  const postCall = async (hdl, url, headers = {}) => {
+    const res = fakeRes()
+    hdl({ method: 'POST', url, headers,
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{}') } }, res)
+    for (let i = 0; 200 > i && res.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
+    assert.ok(res.code, `route never responded: ${url}`)
+    return { code: res.code, body: res.body ? JSON.parse(res.body) : null }
+  }
+  const url = 'http://127.0.0.1/harnessams/api/pick-file'
+  const sameOrigin = { 'sec-fetch-site': 'same-origin', origin: 'http://127.0.0.1:1', host: '127.0.0.1:1' }
+
+  // happy path: the picked path registers directly — no one-html-per-folder
+  // judgment anywhere
+  const ok = await postCall(handler, url, sameOrigin)
+  assert.equal(ok.code, 200)
+  assert.equal(ok.body.ok, true)
+  assert.equal(ok.body.path, 'D:\\Reports\\Pi14dB_report.html')
+
+  // a non-html pick is a 400 (the server-side half of the forced contract)
+  drive = (c) => { c.stdout.end('D:\\Notes\\plain.txt'); c.emit('exit', 0) }
+  const txt = await postCall(handler, url, sameOrigin)
+  assert.equal(txt.code, 400)
+  assert.match(txt.body.error, /must end in \.html/)
+
+  // user cancel is a 200 no-op payload
+  drive = (c) => c.emit('exit', 2)
+  const canceled = await postCall(handler, url, sameOrigin)
+  assert.equal(canceled.code, 200)
+  assert.equal(canceled.body.canceled, true)
+
+  // cross-site metadata / mismatched origin rejected before any dialog pops
+  assert.equal((await postCall(handler, url, { 'sec-fetch-site': 'cross-site' })).code, 403)
+  assert.equal((await postCall(handler, url, { origin: 'http://evil.example', host: '127.0.0.1:1' })).code, 403)
+
+  // the 405 hint lists the POST route
+  const wrong = await postCall(handler, 'http://127.0.0.1/harnessams/api/browse')
+  assert.equal(wrong.code, 405)
+  assert.match(wrong.body.error, /pick-file/)
 })

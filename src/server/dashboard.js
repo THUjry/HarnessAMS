@@ -1,11 +1,12 @@
 // Sidebar Dashboard: serving the local HTML reports attached to a session (see
-// project.js — reports[] in the per-session config store) and the one-level
-// directory listing behind the add-report browser dialog. A report may sit
+// project.js — reports[] in the per-session config store). A report may sit
 // anywhere on the local disk; it is served read-only together with its sibling
 // files (data/*.js, images) so relative references inside the document keep
 // working — the report's own directory is the serving boundary, resolved per
 // request through the workspace registry's session stores (the route carries
-// no secrets: just opaque session/report ids).
+// no secrets: just opaque session/report ids). The add-report picking surface
+// (host folder chooser, native file dialog, one-level listing) lives in
+// src/picker.js since 2026-11-26.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { readSessionConfigs } from './project.js'
@@ -61,34 +62,4 @@ export async function resolveReportFile(registry, sessionId, reportId, rel) {
     return { abs }
   }
   return { error: 'report not found (session or report id unknown, or the report was removed)', code: 404 }
-}
-
-// One-level listing for the add-report dialog: subdirectories plus *.html
-// files with sizes. Any readable local path is acceptable — this dialog is how
-// a user points the dashboard at a report anywhere on disk. Dot-directories
-// (.git, .harnessams, …) are hidden as picker noise.
-export async function browseDir(target, fallback) {
-  const raw = typeof target === 'string' && target.trim() ? target.trim() : (fallback ?? '.')
-  const p = path.resolve(raw)
-  let entries
-  try {
-    entries = await fsp.readdir(p, { withFileTypes: true })
-  } catch (e) {
-    return { error: `cannot list ${p}: ${e.code ?? e.message}` }
-  }
-  const dirs = []
-  const htmls = []
-  for (const e of entries) {
-    if (e.name.startsWith('.')) continue
-    if (e.isDirectory()) {
-      dirs.push(e.name)
-    } else if (e.isFile() && /\.html?$/i.test(e.name)) {
-      const st = await fsp.stat(path.join(p, e.name)).catch(() => null)
-      htmls.push({ name: e.name, bytes: st?.size ?? 0 })
-    }
-  }
-  dirs.sort((a, b) => a.localeCompare(b))
-  htmls.sort((a, b) => a.name.localeCompare(b.name))
-  const parent = path.dirname(p)
-  return { path: p, parent: parent !== p ? parent : null, dirs, htmls }
 }

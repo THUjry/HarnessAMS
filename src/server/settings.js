@@ -27,7 +27,6 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
-import { ensureProjectScripts } from './scriptStage.js'
 import { getNodePins, getLocalFacts } from './globalstore.js'
 
 const PKG_ROOT = path.resolve(import.meta.dirname ?? '.', '..') // src/
@@ -110,7 +109,7 @@ export function defaultSettings() {
 // npm name — an earlier "dsh-harnessams-sim" probe never matched) — probe both,
 // keep the dev-shaped default when neither exists (hand-editable). Note
 // path.join folds '..' away, hence the explicit double parent.
-function defaultSimScriptsDir() {
+export function defaultSimScriptsDir() {
   const candidates = [
     path.join(PKG_ROOT, '..', '..', 'HarnessAMS-SmartAnaSim', 'scripts'),
     path.join(PKG_ROOT, '..', '..', 'dsh-harnessams-smart-ana-sim', 'scripts'),
@@ -121,11 +120,13 @@ function defaultSimScriptsDir() {
   return path.resolve(candidates[0])
 }
 
-// Source root for the one-time project script staging (scriptStage.js):
-// HARNESSAMS_SIM_SCRIPTS_DIR -> the configured sim_scripts_dir (pre-flip —
-// the dev sibling for a fresh project) -> the dev-sibling default. Resolution
-// only; existence is the stager's problem (it fails open). `workspacePath` IS
-// the project root (no walk-up since D-021).
+// Source root for the scripts tree consumers (the batch channel's uploads,
+// the lazy healer, the numfallback probe): HARNESSAMS_SIM_SCRIPTS_DIR -> the
+// configured sim_scripts_dir. A fresh project carries the packaged default
+// (the SmartAnaSim sibling — dev checkout or npm layout); a legacy flipped
+// project or a hand-set root resolves itself. Resolution only; existence is
+// the consumer's problem (the batch worker check fails loud, the stager
+// fails open). `workspacePath` IS the project root (no walk-up since D-021).
 export function resolveScriptsSource(workspacePath) {
   const env = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
   if (env) return path.resolve(env)
@@ -385,19 +386,25 @@ export function validateSettings(input) {
   return { settings: out }
 }
 
-// Project storage initialization (2026-11-25: the sidebar-open moment is now
-// the PRIMARY staging timing — POST /api/project-init — with the fresh config
-// write and the self-check start as backstops). Idempotent: AGENTS.md template
-// only while missing, scripts copy-if-missing (a user-edited copy is never
-// clobbered), and sim_scripts_dir flips to the project-local copy ONLY while
-// the configured value is still the packaged default — a hand-edited explicit
-// value stays (legacy projects, README "worker scripts" contract). Fixes the
-// asymmetry where a session-config write creating .harnessams first used to
-// suppress the fresh-init staging forever.
+// Project storage initialization (POST /api/project-init at sidebar-open is
+// the primary timing, the fresh writeSettings path and the self-check start
+// are backstops). Idempotent: the AGENTS.md template lands only while
+// missing. Since 2026-11-26 there is NO script staging and NO sim_scripts_dir
+// flip here anymore (the package-path-first policy, D-024's plotly shape): a
+// fresh config keeps the packaged default root (the SmartAnaSim sibling in
+// either layout), .harnessams/scripts copies exist only where a config
+// explicitly points at one (the legacy flipped projects, a hand-set root —
+// healed lazily by the self-check's conditional stager), and the fresh-init
+// asymmetry the 2026-11-25 wave fixed is gone with the staging itself.
 export async function initProjectStorage(workspacePath, { settings } = {}) {
   const dir = path.join(workspacePath, STORE_DIR)
   const finalPath = configPath(workspacePath)
   const fresh = !fs.existsSync(dir)
+  // the config FILE is the write trigger, not the .harnessams dir: a
+  // session-config write creates the dir (and the AGENTS.md template) without
+  // a config — init still lays the defaults down for that shape (the
+  // 2026-11-25 asymmetry fix, minus the staging/flip it used to ride)
+  const configMissing = !fs.existsSync(finalPath)
   const cur = await readConfig(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
   if (fresh) {
@@ -421,31 +428,22 @@ export async function initProjectStorage(workspacePath, { settings } = {}) {
     // reconcile (D-021).
     await ensureAgentsMdTemplate(workspacePath, { settings: settings ?? cur.config.settings })
   }
-  await ensureProjectScripts(workspacePath, resolveScriptsSource(workspacePath))
-  const ws = cur.config.workspace
-  const configured = path.isAbsolute(ws.sim_scripts_dir) ? ws.sim_scripts_dir : path.resolve(workspacePath, ws.sim_scripts_dir)
-  let flipped = false
-  if (path.resolve(configured) === defaultSimScriptsDir()) {
-    ws.sim_scripts_dir = path.join(dir, 'scripts')
-    flipped = true
-  }
-  if (fresh || flipped) {
+  if (configMissing) {
     const tmp = finalPath + '.tmp'
-    await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: ws, settings: cur.config.settings }, null, 2) + '\n', 'utf8')
+    await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings: cur.config.settings }, null, 2) + '\n', 'utf8')
     await fsp.rename(tmp, finalPath)
   }
-  return { fresh, flipped }
+  return { fresh }
 }
 
 // Read-modify-write of the settings section only — the workspace section
 // survives untouched. Fresh file: workspace defaults are laid down (script
 // dir and trash dir; the plotly fields stay out until a seed declares them,
 // see declarePlotlyUrl) and the AGENTS.md config-table template rides the
-// .harnessams creation moment —
-// which also stages the project's reusable simulation scripts and points
-// sim_scripts_dir at the project-local copy (2026-11-24: what the self-check
-// exercises must stay usable afterwards; existing projects keep their
-// explicit value, no migration).
+// .harnessams creation moment. Since 2026-11-26 nothing else is staged: the
+// workspace default for sim_scripts_dir stays the packaged root (the
+// SmartAnaSim scripts tree), and only an explicit project-local value keeps
+// a project copy meaningful (the self-check's lazy healer owns that case).
 export async function writeSettings(workspacePath, settings) {
   const dir = path.join(workspacePath, STORE_DIR)
   const finalPath = configPath(workspacePath)
