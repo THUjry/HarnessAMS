@@ -31,7 +31,7 @@ test('apply registers the /harnessams prefix route and the model tools', async (
   assert.deepEqual(registered.sort(), [
     'batch_poll', 'batch_submit',
     'gen_sweep_report', 'harnessams_selfcheck',
-    'safe_trash',
+    'register_report', 'safe_trash',
   ])
 })
 
@@ -81,7 +81,7 @@ test('apply injects both system prompt sections (fail-open)', async () => {
 
 test('every tool compiles to an object-rooted JSON Schema with typed properties', () => {
   const defs = toolDefinitions()
-  assert.equal(defs.length, 5)
+  assert.equal(defs.length, 6)
   for (const def of defs) {
     const tool = makeTool(def)
     assert.equal(tool.parameters.type, 'object', `${def.name} parameters root`)
@@ -208,7 +208,7 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   // per-session CONFIG with fork-split first-seen (D-005): a forked session
   // deep-copies the previously active session's CURRENT config (deliberately
   // branch-point-independent); a brand-new session starts empty; every change
-  // merge-PUTs through sessions.json (v2)
+  // merge-PUTs through sessions.json (versionless, D-026)
   assert.ok(src.includes('const sessionConfigState = new Map()'), 'per-session config map')
   assert.ok(src.includes('function sessionConfigOf(sessionId, fork, fallbackSource)'), 'first-seen fork split via sessionConfigOf')
   assert.ok(src.includes('function forkCopySource('), 'copy source: last-active, else the store recency tail')
@@ -217,6 +217,14 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   assert.ok(src.includes('const lastActiveSessionId = { id: null }'), 'last-active session memory')
   assert.ok(src.includes('function putSessionConfig(sessionId, { retries = 4 } = {})'), 'merge-PUT persistence (bounded-retry form, D-006)')
   assert.ok(src.includes("API + '/session-config?sessionId='"), 'session-config API wired')
+  // D-026 store read warnings: every session-config GET captures the read-side
+  // skip notices and the session branch renders one warn line (tr summary +
+  // ClampText detail); the zh/en key pair is enforced by the dict-key test
+  assert.ok(src.includes('const storeWarningsOf = (d)'), 'store warning capture helper')
+  assert.ok(src.includes('setStoreWarnings((prev) => (sameWarnings(prev, ws) ? prev : ws))'), 'warnings captured from the GETs without re-render churn')
+  assert.ok(src.includes("'tasks.storeSkipped'"), 'summary line tr key')
+  assert.ok(src.includes("h(ClampText, { text: storeWarnings.join('\\n') })"), 'detail folds via ClampText')
+  assert.ok(src.includes('.hams-storewarn {'), 'the warn line carries its own box rule')
   // default-open: initialized project + untouched host layout tabs
   assert.ok(src.includes('sessionSidebarUntouched(sessionId)'), 'untouched-layout gate')
   assert.ok(src.includes('r.project?.initialized'), 'default-open keys off initialized')

@@ -3,7 +3,7 @@
 // environment checks). Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, writeFile, rm, statfs } from 'node:fs/promises'
+import { mkdtemp, mkdir, writeFile, readFile, rm, statfs } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { batchOf, firstCall } from './helpers.mjs'
@@ -80,10 +80,79 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     w = await writeSessionConfig(dir, sid, { display: 'task-xxxx', reports: [], dashboard_selected: null })
     assert.equal(w.sessions[sid].display, 'overview')
 
-    // v1 file (the task-era shape) parses as EMPTY — clean break, D-005
-    await writeFile(path.join(dir, '.harnessams', 'sessions.json'),
-      JSON.stringify({ version: 1, sessions: { [sid]: { active: ['task-ab12cd34'], display: 'task-ab12cd34' } } }), 'utf8')
-    assert.deepEqual((await readSessionConfigs(dir)).sessions, {})
+    // versionless store (D-026): a legacy `version` key is ignored either way —
+    // a versioned v2 file loads unchanged, and a task-era tasks.json shape has
+    // no sessions map, reading as empty WITH a warning (nothing silently empty)
+    const store = path.join(dir, '.harnessams', 'sessions.json')
+    await writeFile(store, JSON.stringify({ version: 2, sessions: { [sid]: { display: 'overview', reports: [], dashboard_selected: null } } }), 'utf8')
+    const r2 = await readSessionConfigs(dir)
+    assert.deepEqual(r2.sessions[sid], { display: 'overview', reports: [], dashboard_selected: null })
+    assert.deepEqual(r2.warnings, [])
+    await writeFile(store, JSON.stringify({ version: 1, tasks: [{ id: 'task-ab12cd34' }] }), 'utf8')
+    const r3 = await readSessionConfigs(dir)
+    assert.deepEqual(r3.sessions, {})
+    assert.equal(r3.warnings.length, 1)
+    assert.match(r3.warnings[0], /no sessions map/)
+  } finally { await rm(dir, { recursive: true, force: true }) }
+})
+
+test('session-config: D-026 loud skip — bad leaves warn and load partially, unknown fields ride, self-heal on write', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'hams-sessd26-'))
+  const sid = 'session-bbbb1111-2222-3332-4444-555555555555'
+  const C = 'session-cccc1111-2222-3332-4444-555555555555'
+  const p = path.join(dir, '.harnessams', 'sessions.json')
+  const good = { id: 'r-good0001', name: 'g', path: path.join(dir, 'g.html'), added_at: '2026-11-26T00:00:00.000Z' }
+  try {
+    await mkdir(path.join(dir, '.harnessams'), { recursive: true })
+    // a hand-corrupted store: one session mixing good data with a bad report
+    // entry and bad leaves plus an unknown future field; one bad-key session;
+    // one non-object session
+    await writeFile(p, JSON.stringify({ sessions: {
+      [sid]: {
+        display: 'session', dashboard_selected: 'r-good0001',
+        reports: [good, { path: 'rel.html' }],
+        report_figs: 'yes', max_points_per_scan: -3,
+        future_field: { nested: true },
+      },
+      'bad key!': { display: 'overview', reports: [] },
+      [C]: null,
+    } }), 'utf8')
+    const r = await readSessionConfigs(dir)
+    // the good part loads: one bad report entry is skipped ALONE (its good
+    // sibling survives), bad leaves drop, dashboard_selected still resolves
+    assert.equal(r.sessions[sid].reports.length, 1)
+    assert.equal(r.sessions[sid].reports[0].id, 'r-good0001')
+    assert.equal(r.sessions[sid].dashboard_selected, 'r-good0001')
+    assert.equal(r.sessions[sid].report_figs, undefined)
+    assert.equal(r.sessions[sid].max_points_per_scan, undefined)
+    // unknown fields ride through the read untouched (cross-version, D-026)
+    assert.deepEqual(r.sessions[sid].future_field, { nested: true })
+    // the junk sessions are skipped — LOUDLY (warnings, never silent)
+    assert.ok(!r.sessions['bad key!'])
+    assert.ok(!r.sessions[C])
+    assert.equal(r.warnings.length, 5)
+    assert.match(r.warnings[0], /reports\[1\]: report path must be absolute/)
+    assert.match(r.warnings[1], /report_figs must be a boolean/)
+    assert.match(r.warnings[2], /max_points_per_scan must be a positive integer/)
+    assert.match(r.warnings[3], /bad key!.*does not match the session id shape/)
+    assert.match(r.warnings[4], /entry is not an object/)
+    assert.ok(r.warnings[4].includes(C), 'the skipped key names the non-object session')
+    // self-heal (D-026): the next write rewrites from the lenient read view —
+    // the junk sessions and bad leaves heal off disk, unknown fields survive,
+    // and the file comes back VERSIONLESS
+    const w = await writeSessionConfig(dir, 'session-dddd1111-2222-3332-4444-555555555555',
+      { display: 'overview', reports: [], dashboard_selected: null })
+    assert.ok(!w.error, w.error)
+    assert.ok(w.sessions[sid])
+    assert.ok(!w.sessions['bad key!'])
+    assert.ok(!w.sessions[C])
+    const r2 = await readSessionConfigs(dir)
+    assert.deepEqual(r2.sessions[sid].future_field, { nested: true })
+    assert.equal(r2.sessions[sid].report_figs, undefined)
+    assert.deepEqual(r2.warnings, [])
+    const raw = JSON.parse(await readFile(p, 'utf8'))
+    assert.equal(raw.version, undefined)
+    assert.ok(raw.sessions)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
@@ -452,9 +521,12 @@ test('session-config: single-session merge-write never clobbers siblings; prune 
     assert.equal(Object.keys(r3.sessions).length, 200)
     assert.ok(!r3.sessions[A]) // oldest dropped
     assert.ok(r3.sessions['session-00000204-2222-3332-4444-555555555555'])
-    // corrupt file degrades to empty, never throws
+    // corrupt file degrades to empty, never throws — with a visible warning (D-026)
     await writeFile(path.join(dir, '.harnessams', 'sessions.json'), '{not json', 'utf8')
-    assert.deepEqual((await readSessionConfigs(dir)).sessions, {})
+    const rc = await readSessionConfigs(dir)
+    assert.deepEqual(rc.sessions, {})
+    assert.equal(rc.warnings.length, 1)
+    assert.match(rc.warnings[0], /sessions\.json is not readable/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

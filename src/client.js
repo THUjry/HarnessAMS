@@ -118,6 +118,7 @@ window.__ModuleLoader__.load({
         'tasks.projectLabel': '项目：',
         'tasks.viewCheck': '参数检查',
         'tasks.viewDashboard': '仪表盘',
+        'tasks.storeSkipped': 'sessions.json 有 {n} 处不合规内容被跳过',
         'dash.noReports': '（暂无报告）',
         'dash.addTitle': '添加 HTML 报告',
         'dash.refresh': '刷新报告（强制重载）',
@@ -341,6 +342,7 @@ window.__ModuleLoader__.load({
         'tasks.projectLabel': 'Project: ',
         'tasks.viewCheck': 'Checks',
         'tasks.viewDashboard': 'Dashboard',
+        'tasks.storeSkipped': '{n} invalid entries skipped in sessions.json',
         'dash.noReports': '(no reports)',
         'dash.addTitle': 'Add an HTML report',
         'dash.refresh': 'Reload the report (hard reload)',
@@ -664,6 +666,7 @@ window.__ModuleLoader__.load({
 .hams-badge-bad { color: light-dark(#9a6700, #d29922); border-color: color-mix(in srgb, currentColor 45%, transparent); }
 .hams-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 6px 0; }
 .hams-err { color: #e05252; padding: 8px; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); }
+.hams-storewarn { padding: 6px 8px; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); }
 .hams-pre { font-size: calc(11.5px + var(--dsh-content-font-delta, 0px)); white-space: pre-wrap; margin: 4px 0; opacity: .8;
   overflow-wrap: anywhere; word-break: break-all; line-height: 1.5; }
 /* ClampText: read-only text over 8 rendered lines collapses to 8 (max-height in
@@ -2201,6 +2204,12 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // D-026 store read warnings: entries sessions.json skipped as invalid —
+    // surfaced by every session-config GET and rendered as one notice line
+    // inside the session branch (both sub-views). Server strings, English.
+    const storeWarningsOf = (d) => (Array.isArray(d?.warnings) ? d.warnings.filter((w) => typeof w === 'string' && w) : [])
+    const sameWarnings = (a, b) => a.length === b.length && a.every((w, i) => w === b[i])
+
     function TaskSidebarBody(props) {
       const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
       const [project, setProject] = useState(undefined) // undefined=loading, null=none
@@ -2212,6 +2221,8 @@ window.__ModuleLoader__.load({
       const [config, setConfig] = useState(() => cloneSessionConfig(sessionConfigState.get(sessionId) ?? emptySessionConfig()))
       const [view, setView] = useState(readTaskView)
       const [error, setError] = useState(null)
+      // store-level skip notices (D-026), captured from the session-config GETs
+      const [storeWarnings, setStoreWarnings] = useState([])
 
       const projectPath = project?.path ?? null
 
@@ -2249,7 +2260,7 @@ window.__ModuleLoader__.load({
       // session becomes the "previously active" for the next first-seen one.
       useEffect(() => {
         let alive = true
-        if (!sessionId) { setConfig(emptySessionConfig()); return }
+        if (!sessionId) { setConfig(emptySessionConfig()); setStoreWarnings([]); return }
         const adoptWith = async (fork, sessionsMap) => {
           const first = !sessionConfigState.has(sessionId)
           const source = first ? forkCopySource(sessionsMap, sessionId) : null
@@ -2284,6 +2295,8 @@ window.__ModuleLoader__.load({
           .then((d) => {
             if (!alive) return
             hydratedProjects.add(projectPath)
+            const ws = storeWarningsOf(d)
+            setStoreWarnings((prev) => (sameWarnings(prev, ws) ? prev : ws))
             const sessions = d?.sessions ?? {}
             for (const [sid, st] of Object.entries(sessions)) {
               if (st && typeof st === 'object' && !sessionConfigState.has(sid)) {
@@ -2362,6 +2375,8 @@ window.__ModuleLoader__.load({
           fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId))
             .then((d) => {
               if (!alive) return
+              const ws = storeWarningsOf(d)
+              setStoreWarnings((prev) => (sameWarnings(prev, ws) ? prev : ws))
               const fresh = cloneSessionConfig(d?.sessions?.[sessionId])
               setConfig((prev) => (JSON.stringify(prev) === JSON.stringify(fresh) ? prev : fresh))
               sessionConfigState.set(sessionId, fresh)
@@ -2450,6 +2465,13 @@ window.__ModuleLoader__.load({
                 'aria-selected': view === v.id,
                 onClick: () => { rememberTaskView(v.id); setView(v.id) },
               }, tr(v.labelKey)))),
+            // store-level read notices (D-026): invalid entries skipped while
+            // reading sessions.json — one warn line on top of the session
+            // branch, visible from both sub-views; the detail is server-side
+            // English text folded by ClampText.
+            storeWarnings.length > 0 && h('div', { className: 'hams-warn hams-storewarn' },
+              txt(tr('tasks.storeSkipped', { n: storeWarnings.length })),
+              h(ClampText, { text: storeWarnings.join('\n') })),
             view === 'dashboard' && h(SessionOptionFigs, { config, updateConfig }),
             view === 'dashboard' && h(SessionOptionMaxPoints, { config, updateConfig }),
             view === 'dashboard' && h(SessionDashboard, { sessionId, config, updateConfig }),

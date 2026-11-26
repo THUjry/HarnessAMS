@@ -1,9 +1,12 @@
-// Tests for the gen_sweep_report tool (D-006, 2026-11-21): spec-driven report
-// rendering, the D-006 file layout (report at the project root, its data JS in
-// SimResults/<report name>/ — one directory per report since 2026-11-25, PNGs
-// in Figs/ gated by the calling SESSION's report_figs option), the guarded
-// single-session merge-write of sessions.json (v2), and the full
-// tool.execute(args, exec) flow — the calling session comes from exec.agent.id.
+// Tests for the gen_sweep_report tool (D-006, 2026-11-21) and register_report
+// (D-026, 2026-11-26): spec-driven report rendering, the D-006 file layout
+// (report at the project root, its data JS in SimResults/<report name>/ — one
+// directory per report since 2026-11-25, PNGs in Figs/ gated by the calling
+// SESSION's report_figs option), the guarded single-session merge-write of the
+// VERSIONLESS sessions.json (D-026), the full tool.execute(args, exec) flow —
+// the calling session comes from exec.agent.id (a delegated subagent resolves
+// to its topmost user-visible ancestor) — and register_report attaching ANY
+// existing local HTML into the calling session's dashboard.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -98,7 +101,9 @@ test('inject: registerReportIntoSession appends, selects, dedupes by path, prese
     assert.ok(!r3.error, r3.error)
     const store3 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
     assert.equal(store3.sessions[sidC].reports.length, 1)
-    assert.equal(store3.version, 2)
+    // versionless (D-026): the tool's own write heals the legacy `version` key
+    // off the fixture file
+    assert.equal(store3.version, undefined)
 
     // 32-report cap on one session
     const sidFull = 'session-ffff1111-2222-3332-4444-555555555555'
@@ -525,6 +530,151 @@ test('gen_sweep_report: a subagent registers into the ancestor session; a broken
     assert.match(skip.register_error, /subagent identity did not resolve/)
     const store2 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
     assert.equal(store2.sessions[SID_CHILD], undefined, 'still no child-id entry')
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+// register_report (D-026, 2026-11-26): the standalone registration tool — an
+// EXISTING local HTML (typically NOT gen_sweep_report's output) into the
+// CALLING session's dashboard; every missing value (entry key, store location,
+// id/name/added_at) is filled from the caller.
+test('register_report: registers an EXISTING html into the CALLING session — fields auto-filled, idempotent, name override, store_warnings', async () => {
+  const { ws, storeDir } = await makeWorkspace()
+  const html = path.join(ws, 'external', 'hand.html')
+  await mkdir(path.dirname(html), { recursive: true })
+  await writeFile(html, '<html><body>external report</body></html>', 'utf8')
+  try {
+    const tool = makeTool(genReportTools(registryCtx(ws)).find((d) => d.name === 'register_report'))
+    // external (non-gen) HTML: only the path is required
+    const res = await tool.execute({ report_path: html }, { agent: { id: SID_A } })
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.registered, true)
+    assert.equal(res.session, SID_A)
+    assert.equal(res.report.path, path.resolve(html))
+    assert.equal(res.report.name, 'hand.html') // defaults to the basename
+    assert.match(res.report.id, /^r-[\w-]{1,8}$/)
+    assert.ok(res.report.added_at)
+    assert.match(res.output, /\[register\]/)
+
+    const store1 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store1.sessions[SID_A].reports.length, 1)
+    assert.equal(store1.sessions[SID_A].dashboard_selected, res.report.id)
+    assert.equal(store1.version, undefined, 'the tool\'s write is versionless (D-026)')
+
+    // same path again → same entry (idempotent); a name arg cannot rename a
+    // reused entry
+    const res2 = await tool.execute({ report_path: html, name: 'ignored' }, { agent: { id: SID_A } })
+    assert.equal(res2.report.id, res.report.id)
+    assert.equal(res2.report.name, 'hand.html', 'a reused entry keeps its original name')
+
+    // a NEW path with a name override takes it (trimmed, ≤80 chars)
+    const html2 = path.join(ws, 'external', 'second.htm')
+    await writeFile(html2, '<html></html>', 'utf8')
+    const res3 = await tool.execute({ report_path: html2, name: '  my second report  ' }, { agent: { id: SID_A } })
+    assert.equal(res3.report.name, 'my second report')
+    const store2 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store2.sessions[SID_A].reports.length, 2)
+    assert.equal(store2.sessions[SID_A].dashboard_selected, res3.report.id)
+
+    // a corrupted sibling session in the same store → the read-side skip
+    // warning rides the result as store_warnings (loud skip, D-026)
+    const raw = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    raw.sessions['bad key!'] = { display: 'overview', reports: [] }
+    await writeFile(path.join(storeDir, 'sessions.json'), JSON.stringify(raw, null, 2) + '\n', 'utf8')
+    const html3 = path.join(ws, 'external', 'third.html')
+    await writeFile(html3, '<html></html>', 'utf8')
+    const res4 = await tool.execute({ report_path: html3 }, { agent: { id: SID_A } })
+    assert.equal(res4.registered, true)
+    assert.ok(Array.isArray(res4.store_warnings) && res4.store_warnings.length === 1, JSON.stringify(res4.store_warnings))
+    assert.match(res4.store_warnings[0], /bad key!/)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('register_report: validation and identity failures throw actionable errors', async () => {
+  const { ws } = await makeWorkspace()
+  try {
+    const tool = makeTool(genReportTools(registryCtx(ws)).find((d) => d.name === 'register_report'))
+    await assert.rejects(() => tool.execute({ report_path: path.join(ws, 'missing.html') }), /report file not found/)
+    const dirPath = path.join(ws, 'not-a-file.html')
+    await mkdir(dirPath, { recursive: true })
+    await assert.rejects(() => tool.execute({ report_path: dirPath }), /not a regular file/)
+    const txt = path.join(ws, 'plain.txt')
+    await writeFile(txt, 'x', 'utf8')
+    await assert.rejects(() => tool.execute({ report_path: txt }), /must end in \.html/)
+    // no session identity → nothing to key the registration on. Unlike
+    // gen_sweep_report (whose report is already on disk) there is no partial
+    // artifact to salvage — this tool's whole purpose is the write, so it throws
+    const html = path.join(ws, 'ok.html')
+    await writeFile(html, '<html></html>', 'utf8')
+    await assert.rejects(() => tool.execute({ report_path: html }), /no session identity/)
+    // a session unknown to the registry → anchor error listing the candidates
+    await assert.rejects(() => tool.execute({ report_path: html }, { agent: { id: 'session-zzzz0000-0000-0000-0000-000000000000' } }),
+      /not accounted in any workspace/)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('register_report: a subagent registers into the ancestor session; a broken lineage throws instead of writing an orphan', async () => {
+  const { ws, storeDir } = await makeWorkspace()
+  const html = path.join(ws, 'sub.html')
+  await writeFile(html, '<html></html>', 'utf8')
+  try {
+    const SID_CHILD = 'session-child2222-2222-3332-4444-555555555555'
+    const userAgent = { id: SID_A, session: { header: {} } }
+    const agents = new Map([[SID_A, userAgent]])
+    const ctx = { ...registryCtx(ws), agents: { get: (id) => agents.get(id) } }
+    const tool = makeTool(genReportTools(ctx).find((d) => d.name === 'register_report'))
+    // seeded child of the accounted user session → lands in the ancestor's entry
+    const child = { id: SID_CHILD,
+      session: { header: { origin: 'subagent', parentSession: SID_A, isSeeded: true } } }
+    const res = await tool.execute({ report_path: html }, { agent: child })
+    assert.equal(res.registered, true)
+    assert.equal(res.session, SID_A)
+    const store = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store.sessions[SID_CHILD], undefined, 'no child-id entry')
+    assert.equal(store.sessions[SID_A].reports.length, 1)
+    // broken lineage (ancestor not live) → throws; no orphan entry
+    const orphan = { id: SID_CHILD,
+      session: { header: { origin: 'subagent', parentSession: 'session-gone2222-2222-3332-4444-555555555555', isSeeded: true } } }
+    await assert.rejects(() => tool.execute({ report_path: html }, { agent: orphan }), /subagent identity did not resolve/)
+    const store2 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store2.sessions[SID_CHILD], undefined)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('gen_sweep_report register:false renders WITHOUT registering — the deferred attach goes through register_report', async () => {
+  const { ws, storeDir } = await makeWorkspace()
+  try {
+    const proj = path.join(ws, 'projR')
+    const simres = path.join(proj, 'SimResults')
+    await mkdir(simres, { recursive: true })
+    await writeFile(path.join(simres, 'spec.json'), JSON.stringify({
+      project_dir: proj,
+      rounds: [{ id: 'Sim0_20261126_batch1', points: [{ index: 0, params: { a: 1 }, metrics: { m: 5 } }] }],
+    }), 'utf8')
+    const ctx = registryCtx(ws)
+    const gen = makeTool(genReportTools(ctx).find((d) => d.name === 'gen_sweep_report'))
+    const reg = makeTool(genReportTools(ctx).find((d) => d.name === 'register_report'))
+    const res = await gen.execute({ spec: path.join(simres, 'spec.json'), register: false }, { agent: { id: SID_A } })
+    assert.equal(res.ok, true, JSON.stringify(res))
+    assert.equal(res.registered, false)
+    assert.match(res.register_note, /register=false/)
+    assert.equal(res.register_error, undefined)
+    assert.ok(existsSync(res.report_path), 'the report still renders')
+    let store = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store.sessions[SID_A].reports.length, 0, 'register:false leaves the session unregistered')
+    // the deferred attach: register_report picks the rendered file up
+    const r2 = await reg.execute({ report_path: res.report_path }, { agent: { id: SID_A } })
+    assert.equal(r2.registered, true)
+    store = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
+    assert.equal(store.sessions[SID_A].reports.length, 1)
+    assert.equal(store.sessions[SID_A].reports[0].path, path.resolve(res.report_path))
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

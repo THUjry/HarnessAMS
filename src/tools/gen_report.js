@@ -1,17 +1,22 @@
-// gen_sweep_report (D-006, 2026-11-21; underscore name 2026-11-23): the ONLY
-// analysis-surface tool — a pure report renderer. Raw-data processing is the
-// MODEL's job (remote analysis by default; only compact results are pulled
-// back), so this tool consumes a model-written spec JSON (points/curves inline
-// or via {"$file"} references), renders the sweep dashboard in the DESIGN
-// FOLDER (D-021, 2026-11-25: <project>/<design>/ holds the report HTML, its
-// data JS in SimResults/<report name>/ — one directory per report — and Figs/)
-// and registers the report into the CALLING session's dashboard. Chart PNGs go
-// into <design>/Figs/ ONLY when that session's "Report figures" option is on
-// (HarnessAMS session panel, default off — headless jsdom+plotly+resvg,
-// fail-open). Project anchoring (D-021): the OUTPUT root comes from the spec
-// (spec.project_dir, or the spec sitting in a SimResults/ directory — its
-// parent is the design folder); the CONFIG root (sessions store, plotly
-// source) comes from the calling session's project — no walk-up from paths.
+// gen_sweep_report (D-006, 2026-11-21; underscore name 2026-11-23) and
+// register_report (D-026, 2026-11-26). The renderer is a pure report drawer:
+// raw-data processing is the MODEL's job (remote analysis by default; only
+// compact results are pulled back), so it consumes a model-written spec JSON
+// (points/curves inline or via {"$file"} references) and renders the sweep
+// dashboard in the DESIGN FOLDER (D-021, 2026-11-25: <project>/<design>/ holds
+// the report HTML, its data JS in SimResults/<report name>/ — one directory
+// per report — and Figs/). Registration is its own concern since D-026:
+// gen_sweep_report auto-registers into the CALLING session's dashboard unless
+// register: false, and register_report attaches ANY existing local HTML (not
+// only this renderer's output) into the calling session's dashboard — both
+// share the identity anchor (callerAnchor) and registerReportIntoSession
+// below. Chart PNGs go into <design>/Figs/ ONLY when that session's "Report
+// figures" option is on (HarnessAMS session panel, default off — headless
+// jsdom+plotly+resvg, fail-open). Project anchoring (D-021): the OUTPUT root
+// comes from the spec (spec.project_dir, or the spec sitting in a SimResults/
+// directory — its parent is the design folder); the CONFIG root (sessions
+// store, plotly source) comes from the calling session's project — no
+// walk-up from paths.
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -21,18 +26,41 @@ import { exportFigs } from '../figs_export.js'
 import { resolveProjectTool } from '../server/project.js'
 import { effectiveSessionId } from '../subagent.js'
 
-// --- report auto-registration target: the calling session's HarnessAMS ----
-// dashboard. Since the task retirement (2026-11-19, D-005) each DSH session
-// carries its own report list in <workspace>/.harnessams/sessions.json; the
-// calling session is identified EXACTLY through the tool execution context
-// (exec.agent.id IS the SessionId — probe-verified, see probe-taskmerge-20261119;
-// a delegated subagent resolves to its topmost user-visible ancestor via
-// src/subagent.js, so the store never gains child-id entries).
-// server/project.js owns the store and its validation; this side only merges one
-// report into one session entry through writeSessionConfig (atomic, defensive).
+// --- report registration target: the calling session's HarnessAMS dashboard.
+// Since the task retirement (2026-11-19, D-005) each DSH session carries its
+// own report list in <workspace>/.harnessams/sessions.json; the calling session
+// is identified EXACTLY through the tool execution context (exec.agent.id IS
+// the SessionId — probe-verified, see probe-taskmerge-20261119; a delegated
+// subagent resolves to its topmost user-visible ancestor via src/subagent.js,
+// so the store never gains child-id entries). Two consumers share this anchor:
+// gen_sweep_report's auto-registration (default on, register: false opts out)
+// and the register_report tool (any existing local HTML). server/project.js
+// owns the store and its validation; this side only merges one report into one
+// session entry through writeSessionConfig (atomic, defensive).
 
 const SESSIONS_DIR = '.harnessams'
 const MAX_REPORTS = 32 // same cap as the sidebar's writer (server/project.js)
+const MAX_NAME = 80 // same cap as the store's writer (server/project.js)
+
+// The shared caller anchor: resolves the calling session's identity and the
+// CONFIG root (D-021 — the session's project, or an explicit project argument;
+// never a path walk-up). A delegated subagent resolves to its topmost
+// user-visible ancestor; a subagent whose lineage did not resolve degrades to
+// NO identity (sid null, subagentUnresolved true) so the store never gains a
+// child-id entry. Returns { sid, configRoot, subagentUnresolved } or
+// { anchorError } (the caller decides whether to throw or to report).
+function callerAnchor(ctx, exec, projectArg) {
+  const rawAgentId = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
+  const effective = effectiveSessionId(ctx, exec?.agent)
+  const subagentUnresolved = effective !== null && effective === rawAgentId
+    && exec?.agent?.session?.header?.origin === 'subagent'
+  const sid = subagentUnresolved ? null : effective
+  const p = sid || projectArg
+    ? resolveProjectTool(ctx.workspaceRegistry, sid, projectArg)
+    : null
+  if (p?.error) return { anchorError: p.error }
+  return { sid, configRoot: p?.project?.path ?? null, subagentUnresolved }
+}
 
 // Sessions store at a KNOWN project root (D-021: the config root comes from
 // the calling session — no ancestor walk-up). Returns { storeDir } always
@@ -43,9 +71,13 @@ export function sessionsStoreAt(projectRoot) {
 
 // Append (or reuse) `reportPath` in session `sessionId`'s entry and select it
 // on that session's dashboard. Creates the entry when absent; preserves the
-// entry's display/check_params. Returns { session, report } or { error } —
-// never throws, never clobbers sibling sessions (single-session merge write).
-export async function registerReportIntoSession(storeDir, sessionId, reportPath) {
+// entry's display/check_params; a `name` option overrides the entry's display
+// name (missing entry fields — id, added_at — are filled here from the caller
+// side). Returns { session, report, warnings? } or { error } — never throws,
+// never clobbers sibling sessions (single-session merge write). `warnings`
+// carries the store's read-side skip notices (D-026) so tool results can
+// surface them.
+export async function registerReportIntoSession(storeDir, sessionId, reportPath, { name } = {}) {
   const { readSessionConfigs, writeSessionConfig } = await import('../server/project.js')
   const workspacePath = path.dirname(path.resolve(storeDir))
   const abs = path.resolve(reportPath)
@@ -57,13 +89,18 @@ export async function registerReportIntoSession(storeDir, sessionId, reportPath)
     if (reports.length >= MAX_REPORTS) {
       return { error: `this session already has ${MAX_REPORTS} reports (max) — remove one in the sidebar dashboard first` }
     }
-    report = { id: 'r-' + randomUUID().slice(0, 8), name: path.basename(abs), path: abs, added_at: new Date().toISOString() }
+    const label = typeof name === 'string' && name.trim() ? name.trim().slice(0, MAX_NAME) : path.basename(abs)
+    report = { id: 'r-' + randomUUID().slice(0, 8), name: label, path: abs, added_at: new Date().toISOString() }
     reports.push(report)
   }
   const state = { ...entry, reports, dashboard_selected: report.id }
   const w = await writeSessionConfig(workspacePath, sessionId, state)
   if (w.error) return { error: w.error }
-  return { session: sessionId, report }
+  return {
+    session: sessionId,
+    report,
+    ...(store.warnings && store.warnings.length ? { warnings: store.warnings } : {}),
+  }
 }
 
 // The calling session's "Report figures" option — the PNG export gate. It
@@ -201,10 +238,13 @@ export function genReportTools(ctx) {
         + 'panel, default off — disk; headless render, skipped with a visible reason when unavailable); conclusions rendered '
         + 'as a text card (paragraphs, **bold**, `code`, "- " lists). Curve charts only (one trace per '
         + 'parameter combination — scalar metrics render in the table, not as charts) and the in-report batch '
-        + 'dropdown lists rounds newest-first; charts and table cross-highlight.',
+        + 'dropdown lists rounds newest-first; charts and table cross-highlight. Registration into the calling '
+        + 'session\'s dashboard is on by default — pass register: false to render without registering and '
+        + 'attach the file later with register_report (which also takes HTML this tool did not generate).',
       parameters: {
         spec: { type: 'string', required: true, description: 'Path to the report spec JSON (see description for the schema)' },
         project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
+        register: { type: 'boolean', description: 'Set false to render WITHOUT registering into the calling session\'s dashboard (attach it later with register_report, e.g. from a different session context)' },
       },
       async execute(args, exec) {
         const specFile = resolveDir(args.spec)
@@ -226,22 +266,15 @@ export function genReportTools(ctx) {
         // subagent whose lineage did not resolve degrades to NO session
         // identity (the report still renders, registration is skipped with a
         // reason) instead of throwing at the anchor — the store never gains a
-        // child-id entry.
+        // child-id entry. The shared callerAnchor also serves register_report.
         const project = deriveProjectRoot(specFile, spec)
         if (!project) {
           throw new Error('cannot determine the output root (the design folder) — set project_dir in the spec, or place the spec '
             + 'directly inside <design>/SimResults/')
         }
-        const rawAgentId = typeof exec?.agent?.id === 'string' && exec.agent.id ? exec.agent.id : null
-        const effective = effectiveSessionId(ctx, exec?.agent)
-        const subagentUnresolved = effective !== null && effective === rawAgentId
-          && exec?.agent?.session?.header?.origin === 'subagent'
-        const sid = subagentUnresolved ? null : effective
-        const p = sid || args.project
-          ? resolveProjectTool(ctx.workspaceRegistry, sid, args.project)
-          : null
-        if (p?.error) throw new Error(p.error)
-        const configRoot = p?.project?.path ?? null
+        const anchor = callerAnchor(ctx, exec, args.project)
+        if (anchor.anchorError) throw new Error(anchor.anchorError)
+        const { sid, configRoot, subagentUnresolved } = anchor
         if (!Array.isArray(spec.rounds) || !spec.rounds.length) {
           throw new Error('spec.rounds must be a non-empty array of {id, points, curves?}')
         }
@@ -302,10 +335,16 @@ export function genReportTools(ctx) {
         }
 
         // Auto-registration into the CALLING session's dashboard (identity =
-        // the topmost user-visible session; D-005). The report is already on
-        // disk, so a failure here is reported, never thrown. The store stays
-        // keyed by USER-VISIBLE sessions only.
-        if (subagentUnresolved) {
+        // the topmost user-visible session; D-005), with an opt-out: register:
+        // false leaves the file unattached — the model then calls register_report
+        // itself (any session context, external HTML included). The report is
+        // already on disk, so a failure here is reported, never thrown. The
+        // store stays keyed by USER-VISIBLE sessions only.
+        if (args.register === false) {
+          result.registered = false
+          result.register_note = 'skipped: register=false — attach it with register_report {report_path} '
+            + 'when (and from whichever session context) you want it on a dashboard'
+        } else if (subagentUnresolved) {
           result.registered = false
           result.register_error = 'delegated subagent identity did not resolve to a user-visible session — report generated at '
             + result.report_path + ' but not registered (the parent session re-runs gen_sweep_report, or add it in the sidebar dashboard)'
@@ -320,9 +359,74 @@ export function genReportTools(ctx) {
         } else {
           const r = await registerReportIntoSession(found.storeDir, sid, gen.reportPath)
           if (r.error) { result.registered = false; result.register_error = r.error }
-          else { result.registered = true; result.session = r.session; result.report = r.report }
+          else {
+            result.registered = true
+            result.session = r.session
+            result.report = r.report
+            if (r.warnings?.length) result.store_warnings = r.warnings
+          }
         }
         return result
+      },
+    },
+    {
+      name: 'register_report',
+      description: 'Register an EXISTING local HTML report file into the CALLING session\'s HarnessAMS '
+        + 'dashboard. Use it for reports gen_sweep_report did NOT generate (hand-written or third-party '
+        + 'HTML), or to attach a report later after generating it with register: false. Everything else '
+        + 'is filled from the caller: the session entry key (a delegated subagent resolves to its '
+        + 'topmost user-visible ancestor, src/subagent.js D-025), the store location (the calling '
+        + 'session\'s project, or an explicit project argument), and any missing entry fields (id, '
+        + 'added_at, and the display name defaulting to the file\'s basename — pass name to override). '
+        + 'Pitfalls: report_path must name an existing regular file ending in .html/.htm (absolute, or '
+        + 'relative to the current working directory); registering the same path twice reuses the '
+        + 'entry (idempotent); a session holds at most 32 reports; files not produced by '
+        + 'gen_sweep_report get no plotly routing — their <script src> tags load exactly what they '
+        + 'name (offline viewing needs a self-contained file or its own local script copy).',
+      parameters: {
+        report_path: { type: 'string', required: true, description: 'Path to the report HTML file (absolute, or relative to the current working directory)' },
+        name: { type: 'string', description: 'Optional display name in the dashboard list (default: the file\'s basename)' },
+        project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
+      },
+      async execute(args, exec) {
+        if (typeof args.report_path !== 'string' || !args.report_path.trim()) {
+          throw new Error('report_path is required (absolute, or relative to the current working directory)')
+        }
+        const abs = path.resolve(args.report_path)
+        let st = null
+        try { st = fs.statSync(abs) } catch { throw new Error(`report file not found: ${abs}`) }
+        if (!st.isFile()) throw new Error(`report path is not a regular file: ${abs}`)
+        if (!/\.html?$/i.test(abs)) throw new Error(`report path must end in .html (or .htm): ${abs}`)
+        // Identity strictly from the caller (D-025: a delegated subagent anchors
+        // on its topmost user-visible ancestor; there is deliberately NO
+        // session_id override — the store stays keyed by user-visible sessions).
+        // Unlike gen_sweep_report there is no on-disk artifact to salvage, so
+        // every failure below THROWS.
+        const anchor = callerAnchor(ctx, exec, args.project)
+        if (anchor.anchorError) throw new Error(anchor.anchorError)
+        const { sid, configRoot, subagentUnresolved } = anchor
+        if (subagentUnresolved) {
+          throw new Error('delegated subagent identity did not resolve to a user-visible session — '
+            + 'call register_report from the parent session, or add the report in the HarnessAMS sidebar dashboard')
+        }
+        if (!sid) {
+          throw new Error('no session identity in the tool execution context — cannot key the registration '
+            + '(add the report in the HarnessAMS sidebar dashboard)')
+        }
+        if (!configRoot) {
+          throw new Error('no project resolved for the calling session — open the HarnessAMS sidebar in '
+            + 'this workspace once first, or pass an explicit project')
+        }
+        const r = await registerReportIntoSession(sessionsStoreAt(configRoot).storeDir, sid, abs, { name: args.name })
+        if (r.error) throw new Error(r.error)
+        return {
+          ok: true,
+          output: `[register] ${abs} -> session ${sid}`,
+          registered: true,
+          session: r.session,
+          report: r.report,
+          ...(r.warnings?.length ? { store_warnings: r.warnings } : {}),
+        }
       },
     },
   ]
