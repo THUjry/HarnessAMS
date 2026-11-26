@@ -179,6 +179,12 @@ window.__ModuleLoader__.load({
         'pset.pickDir': '选择',
         'pset.pickThisDir': '使用该目录',
         'pset.pickCurrentDir': '用当前目录',
+        'pset.refresh': '刷新',
+        'pset.newFolder': '新建文件夹',
+        'pset.newFolderName': '文件夹名',
+        'pset.newFolderOk': '创建',
+        'pset.nameRule': '名称仅接受 ASCII 可打印字符：不能含「/」、不能以「.」开头、不超过 64 字符',
+        'pset.ageFmt': '{d}天{h}小时前',
         'pset.colName': '项目名',
         'pset.colValue': '当前值',
         'pset.colMode': '工作模式',
@@ -398,6 +404,12 @@ window.__ModuleLoader__.load({
         'pset.pickDir': 'Select',
         'pset.pickThisDir': 'Use this directory',
         'pset.pickCurrentDir': 'Use current directory',
+        'pset.refresh': 'Refresh',
+        'pset.newFolder': 'New folder',
+        'pset.newFolderName': 'Folder name',
+        'pset.newFolderOk': 'Create',
+        'pset.nameRule': 'Name accepts printable ASCII only: no "/", no leading ".", at most 64 chars',
+        'pset.ageFmt': '{d}d {h}h ago',
         'pset.colName': 'Item',
         'pset.colValue': 'Value',
         'pset.colMode': 'Mode',
@@ -590,6 +602,15 @@ window.__ModuleLoader__.load({
         h('path', { d: 'M4.5 6h7M4.5 8.5h7M4.5 11h4', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round' }))
     }
 
+    // The browse dialog's refresh glyph (square icon button, spec §8 fixed
+    // 16px box): feather's rotate-cw geometry scaled 24→16 and nudged 0.4px
+    // in so the 1.5px stroke never clips at the viewBox edge.
+    function IconRefresh() {
+      return h('svg', { width: 16, height: 16, viewBox: '0 0 16 16', fill: 'none', 'aria-hidden': 'true' },
+        h('path', { d: 'M13.26 10A6 6 0 1 1 11.85 3.76L14.93 6.67', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }),
+        h('path', { d: 'M14.93 2.67V6.67H10.93', stroke: 'currentColor', strokeWidth: 1.5, strokeLinecap: 'round', strokeLinejoin: 'round' }))
+    }
+
     function ensureCss() {
       if (document.getElementById('dsh-harnessams-css')) return
       const el = document.createElement('style')
@@ -625,6 +646,11 @@ window.__ModuleLoader__.load({
   background: color-mix(in srgb, currentColor 6%, transparent); color: inherit; }
 .hams-btn:disabled { opacity: .45; cursor: default; }
 .hams-btn-sm { padding: 0 7px; font-size: calc(12px + var(--dsh-content-font-delta, 0px)); }
+/* square single-icon button (the browse dialog's refresh): a fixed-size SVG
+   child plus equal 3px padding -> a 22x22 square independent of the font size
+   (spec §8 tradeoff — SVG icons keep fixed width/height; two-class selector
+   so the padding wins over .hams-btn-sm) */
+.hams-btn.hams-iconbtn { display: inline-flex; align-items: center; justify-content: center; padding: 3px; line-height: 0; }
 .hams-input, .hams-select, .hams-textarea { font-size: calc(13px + var(--dsh-content-font-delta, 0px)); border-radius: 5px; padding: 3px 7px; color: inherit;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
   background: color-mix(in srgb, currentColor 4%, transparent); font-family: inherit; }
@@ -1455,13 +1481,27 @@ window.__ModuleLoader__.load({
     // Clicking a name enters the directory; the per-row "select" button (or the
     // footer's "use current") writes the ABSOLUTE path into remote_root — the old
     // free-typed text input is retired. Mirrors the add-report dialog's shape.
+    // 2026-11-26: each row shows the directory's age (mtime → "{d}d {h}h ago",
+    // a dash when the plain-ls fallback produced the listing, absolute local
+    // time on hover); the current-dir row ends in a square icon-only refresh
+    // button (nonce → refetch, doubles as the retry after an error); and a
+    // folder can be created in the listed directory (inline form prefilled
+    // with a default name, printable ASCII only — POST /api/remote-browse/mkdir).
     function RemoteDirBrowse({ sessionId, machineId, rootDir, onCancel, onPick }) {
       const [cwd, setCwd] = useState(null) // null = server default (the machine's remote root)
+      const [nonce, setNonce] = useState(0) // refresh: bump to refetch the current level
       const [listing, setListing] = useState(null)
       const [error, setError] = useState(null)
+      const [mkOpen, setMkOpen] = useState(false) // new-folder inline form visible
+      const [mkName, setMkName] = useState('')
+      const [mkErr, setMkErr] = useState(null)
+      const [mkBusy, setMkBusy] = useState(false)
+      const aliveRef = useRef(true) // the dialog can close mid-POST (cancel/pick)
+      useEffect(() => () => { aliveRef.current = false }, [])
       useEffect(() => {
         let alive = true
         setError(null); setListing(null)
+        setMkOpen(false); setMkErr(null) // every (re)load starts with a closed, clean form
         const q = 'sessionId=' + encodeURIComponent(sessionId)
           + '&machineId=' + encodeURIComponent(machineId)
           + (cwd ? '&dir=' + encodeURIComponent(cwd) : '')
@@ -1469,7 +1509,27 @@ window.__ModuleLoader__.load({
           .then((r) => { if (alive) setListing(r) })
           .catch((e) => { if (alive) setError(String(e.message ?? e)) })
         return () => { alive = false }
-      }, [sessionId, machineId, cwd])
+      }, [sessionId, machineId, cwd, nonce])
+      // Same rules as the server's validateDirName (the route stays
+      // authoritative — this is just instant feedback)
+      const mkInvalid = (n) => !n || n.length > 64 || n.includes('/') || n.startsWith('.') || !/^[\x20-\x7E]+$/.test(n)
+      const submitMk = () => {
+        if (mkBusy || !listing) return
+        const name = mkName.trim()
+        if (mkInvalid(name)) { setMkErr(tr('pset.nameRule')); return }
+        setMkErr(null); setMkBusy(true)
+        fetchJson(API + '/remote-browse/mkdir', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, machineId, dir: listing.dir, name }),
+        }).then(() => {
+          if (!aliveRef.current) return
+          setMkOpen(false); setMkName(''); setNonce(nonce + 1) // refresh: the new folder appears
+        }).catch((e) => {
+          if (!aliveRef.current) return
+          setMkErr(String(e.message ?? e)) // a server message (English), e.g. "File exists"
+        }).finally(() => { if (aliveRef.current) setMkBusy(false) })
+      }
       return h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) onCancel() } },
         h('div', { className: 'hams-dialog hams-browse-dialog' },
           h('h3', null, tr('pset.browseTitle')),
@@ -1480,25 +1540,55 @@ window.__ModuleLoader__.load({
                 disabled: !listing?.parent, onClick: () => setCwd(listing.parent) }, '↑'),
               h('span', { className: 'hams-dim',
                 style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                txt(listing ? listing.dir : (cwd ?? rootDir ?? '…'))))),
+                txt(listing ? listing.dir : (cwd ?? rootDir ?? '…'))),
+              h('button', { className: 'hams-btn hams-btn-sm hams-iconbtn', style: { flexShrink: 0 },
+                title: tr('pset.refresh'), disabled: listing === null && error === null,
+                onClick: () => setNonce(nonce + 1) }, h(IconRefresh)))),
           h('div', { className: 'hams-field' },
             h('label', null, tr('pset.browsePickDir')),
+            mkOpen
+              ? h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: '0 0 4px' } },
+                  h('input', { className: 'hams-input', value: mkName, autoFocus: true,
+                    title: tr('pset.newFolderName'), 'aria-label': tr('pset.newFolderName'),
+                    style: { flex: 1, minWidth: 0 },
+                    onChange: (e) => setMkName(e.target.value),
+                    onKeyDown: (e) => { if (e.key === 'Enter') submitMk() } }),
+                  h('button', { className: 'hams-btn hams-btn-sm', style: { flexShrink: 0 },
+                    disabled: mkBusy, onClick: submitMk }, tr('pset.newFolderOk')),
+                  h('button', { className: 'hams-btn hams-btn-sm', style: { flexShrink: 0 },
+                    disabled: mkBusy, onClick: () => { setMkOpen(false); setMkErr(null) } }, tr('common.cancel')))
+              : h('div', { className: 'hams-row', style: { margin: '0 0 4px' } },
+                  h('button', { className: 'hams-btn hams-btn-sm', disabled: !listing,
+                    onClick: () => { setMkOpen(true); setMkName('new_folder'); setMkErr(null) } },
+                    tr('pset.newFolder'))),
+            mkErr && h('div', { className: 'hams-bad' }, txt(mkErr)),
             h('div', { className: 'hams-list' },
               error && h('div', { className: 'hams-err' }, error),
               !error && !listing && h('div', { className: 'hams-dim', style: { padding: '8px' } }, tr('common.loading')),
               listing && !error && h('div', null,
-                (listing.dirs ?? []).map((d) => h('div', { key: 'd:' + d, className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
+                (listing.entries ?? []).map((e) => h('div', { key: 'd:' + e.name, className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
                   h('button', { className: 'hams-listitem', style: { flex: 1, textAlign: 'left', minWidth: 0 },
-                    onClick: () => setCwd(listing.dir + '/' + d) },
-                    h('span', { className: 'hams-name' }, '📁 ' + txt(d))),
+                    onClick: () => setCwd(listing.dir + '/' + e.name) },
+                    h('span', { className: 'hams-name' }, '📁 ' + txt(e.name)),
+                    h('span', { className: 'hams-dim', style: { flexShrink: 0 },
+                      title: e.mtime == null ? undefined : fmtLocalTime(new Date(e.mtime * 1000).toISOString()) },
+                      e.mtime == null ? '—' : fmtAge(e.mtime))),
                   h('button', { className: 'hams-btn hams-btn-sm', title: tr('pset.pickThisDir'),
-                    onClick: () => onPick(listing.dir + '/' + d) }, tr('pset.pickDir')))),
+                    onClick: () => onPick(listing.dir + '/' + e.name) }, tr('pset.pickDir')))),
                 listing.truncated && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('chk.truncated')),
-                !(listing.dirs ?? []).length && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('dash.emptyDir'))))),
+                !(listing.entries ?? []).length && h('div', { className: 'hams-dim', style: { padding: '4px 8px' } }, tr('dash.emptyDir'))))),
           h('div', { className: 'hams-row', style: { justifyContent: 'space-between' } },
             h('button', { className: 'hams-btn hams-btn-sm', disabled: !listing, onClick: () => onPick(listing.dir) },
               tr('pset.pickCurrentDir')),
             h('button', { className: 'hams-btn', onClick: onCancel }, tr('common.cancel')))))
+    }
+
+    // The browse picker's age column: mtime (epoch seconds) → "{d}d {h}h ago"
+    // (future mtimes / clock skew clamp to zero); null mtimes are the caller's
+    // dash (the plain-ls fallback listing carries no times).
+    function fmtAge(mtime) {
+      const diff = Math.max(0, Date.now() / 1000 - mtime)
+      return tr('pset.ageFmt', { d: Math.floor(diff / 86400), h: Math.floor((diff % 86400) / 3600) })
     }
 
     // ---------- tier 3 Overview: project settings + one-click project self-check ----------

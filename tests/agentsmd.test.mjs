@@ -358,3 +358,22 @@ test('agentsmd client: button row order and wiring, new keys bilingual', () => {
   assert.ok(!/updateConfig\(\(c\) => \(\{ \.\.\.c, dashboard_selected: e\.target\.value \}\)\)/.test(src),
     'no deferred read of e.target.value in the report dropdown')
 })
+
+test('agentsmd client: remote browse gains the age column, refresh, new-folder form', () => {
+  // the three 2026-11-26 picker enhancements ride the same routes: the
+  // listing entries carry mtime (age via fmtAge, absolute time on hover), the
+  // refresh button is a square icon-only button (nonce -> refetch), and the
+  // new-folder form POSTs the mkdir route with a validated printable-ASCII name
+  assert.ok(src.includes("API + '/remote-browse/mkdir'"), 'the picker posts the mkdir route')
+  assert.ok(src.includes('function IconRefresh') && src.includes('h(IconRefresh)'), 'the square icon button renders the refresh glyph')
+  assert.ok(src.includes('hams-iconbtn'), 'the square single-icon button class exists')
+  assert.ok(/setNonce\(nonce \+ 1\)/.test(src), 'refresh bumps the nonce into the listing effect')
+  assert.ok(src.includes('(listing.entries ?? []).map'), 'rows render the entries shape (name + mtime)')
+  assert.ok(src.includes('function fmtAge'), 'the age formatter exists')
+  assert.ok(src.includes("tr('pset.ageFmt', { d:"), 'the age column formats through the bilingual key')
+  assert.ok(src.includes("setMkName('new_folder')"), 'the new-folder form prefills a default name')
+  assert.ok(src.includes('autoFocus: true'), 'the form opens focused')
+  assertDictKeys(src, [
+    'pset.refresh', 'pset.newFolder', 'pset.newFolderName', 'pset.newFolderOk', 'pset.nameRule', 'pset.ageFmt',
+  ])
+})

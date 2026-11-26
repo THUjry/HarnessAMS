@@ -10,7 +10,9 @@
 //            argument is the single config write face, workspace_config.json).
 //            The remote working-directory browser (GET /api/remote-browse) and
 //            the dashboard report viewer (/dash/<sessionId>/…) are separate
-//            read surfaces.
+//            read surfaces; the browser's one write — creating a validated
+//            ASCII subdirectory (POST /api/remote-browse/mkdir) — rides the
+//            same dsh-ssh exec funnel as the self-check's remote probes.
 // Routes are not token-gated by the DSH web server (verified): only local
 // management reads/writes live here — no credentials, no remote-execution passthrough.
 // The Dashboard viewer is display-only: it serves session-registered local HTML
@@ -43,7 +45,7 @@ import { reconcileSettings } from './server/reconcile.js'
 import { parseFacts } from './server/agentsmd.js'
 import { getFreshMin, setFreshMin } from './server/globalstore.js'
 import { readCheckParams } from './server/checkparams.js'
-import { remoteBrowse } from './server/remotebrowse.js'
+import { remoteBrowse, remoteMkdir } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { resolveOpenableFile, openWithDefaultApp } from './server/openlocal.js'
@@ -164,8 +166,9 @@ async function handle(req, res, ctx) {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     // Write surface is narrow by design: per-session configs (sessions.json)
     // and the single tool funnel (self-check + workspace_config.json settings +
-    // AGENTS.md sync — all project-local file writes; no remote execution
-    // surface lives here).
+    // AGENTS.md sync — all project-local file writes; the one remote write is
+    // the browser's mkdir, a single validated ASCII directory name through
+    // the dsh-ssh exec funnel).
     if (req.method === 'PUT' && route === '/api/session-config') {
       // merge-write ONE session's entry ({ sessionId, state }) — never a stale
       // full-file clobber of sibling sessions
@@ -285,6 +288,46 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, project, path: target.abs, plotly_seed: plotlySeed })
       return
     }
+    if (req.method === 'POST' && route === '/api/remote-browse/mkdir') {
+      // Create one directory in the remote browser's current listing (body
+      // { sessionId, machineId, dir, name }) — the browser's single remote
+      // write: a plain `mkdir` of ONE validated printable-ASCII path segment
+      // under the listed directory (server/remotebrowse.js remoteMkdir through
+      // the dsh-ssh exec funnel; an existing name errors with "File exists"
+      // instead of silently succeeding). Same-origin fence as open-local:
+      // these routes are untokened by design, so reject Fetch-Metadata that
+      // says the request came from another site; non-browser clients (curl,
+      // tests) send no sec-fetch-site and pass.
+      const sfs = req.headers['sec-fetch-site']
+      if (typeof sfs === 'string' && sfs !== 'same-origin' && sfs !== 'none') { json(403, { error: 'cross-site requests are not accepted' }); return }
+      const origin = req.headers.origin
+      if (typeof origin === 'string' && origin !== 'null') {
+        const host = req.headers.host
+        let originHost = null
+        try { originHost = new URL(origin).host } catch { /* unparseable -> rejected below */ }
+        if (host && originHost !== host) { json(403, { error: 'cross-origin requests are not accepted' }); return }
+      }
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const sessionId = body?.sessionId
+      if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      const machineId = body?.machineId
+      if (!machineId || typeof machineId !== 'string') { json(400, { error: 'missing machineId (a configured dsh-ssh host alias)' }); return }
+      try {
+        const r = await remoteMkdir(ctx, machineId, body?.dir, body?.name)
+        json(200, { ok: true, path: r.path })
+      } catch (e) {
+        const msg = String(e?.message ?? e)
+        const code = /^name |^dir /.test(msg) ? 400
+          : /dsh-ssh hosts unavailable/.test(msg) ? 503
+          : /no such dsh-ssh host/.test(msg) ? 404
+          : 502
+        json(code, { error: msg })
+      }
+      return
+    }
     if (req.method === 'PUT' && route === '/api/global-config') {
       // The plugin-global display config (D-017: ~/.dsh/harnessams.json) —
       // today the self-check freshness window the console's display settings
@@ -296,7 +339,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, selfcheck_fresh_min: r.value })
       return
     }
-    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init, POST /api/open-local)' })
+    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir)' })
     return
   }
 
