@@ -18,6 +18,12 @@ import fs from 'node:fs'
 import path from 'node:path'
 
 const PLOTLY_CDN = 'https://cdn.plot.ly/plotly-3.0.1.min.js'
+// The plugin server's own route to the SAME packaged copy (whitelist lookup,
+// immutable caching with a size ETag — server/assets.js): the report chain's
+// DEFAULT first step. Any page served from the DSH web origin (a /dash URL,
+// the retired dashboard iframe) resolves it same-origin with ZERO per-project
+// copying; from a file:// document it simply fails and the chain moves on.
+const PLOTLY_ROUTE = '/harnessams/assets/plotly.min.js'
 
 // JSON read tolerating a UTF-8 BOM (zh-CN Windows editors add them).
 export function readJsonBom(file) {
@@ -143,10 +149,10 @@ export function curveMids(rd) {
 }
 
 // --- HTML templates ---------------------------------------------------------
-// Placeholders: __TITLE__, __PLOTLY__, __NOW__, __META__, __CONCLUSIONS__,
-// __ROUNDS__. Everything is placeholder replacement — no interpolation —
-// matching the original generator's style. Raw template preserves regex
-// backslashes in FOOT_JS verbatim.
+// Placeholders: __TITLE__, __PLOTLY__, __PLOTLY_FALLBACK__, __NOW__, __META__,
+// __CONCLUSIONS__, __ROUNDS__. Everything is placeholder replacement — no
+// interpolation — matching the original generator's style. Raw template
+// preserves regex backslashes in FOOT_JS verbatim.
 
 const HEAD = `<!DOCTYPE html>
 <html lang="en">
@@ -155,6 +161,7 @@ const HEAD = `<!DOCTYPE html>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>__TITLE__ - sweep report</title>
 <script src="__PLOTLY__"></script>
+__PLOTLY_FALLBACK__
 <script>window.Plotly || document.write('<script src="__CDN__"><\\/script>');</script>
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -597,58 +604,102 @@ function packagedPlotly() {
   return null
 }
 
-// Resolve the report's plotly <script src> (D-021): `outDir` anchors the
-// relative src (the report's own directory — the design folder);
-// `configRoot` is the session project root whose workspace.plotly_url names
-// the source. An http(s) URL is used verbatim (no local file — the PNG
-// exporter skips with its visible reason); a local path — the DEFAULT is the
-// bundled copy seeded into <configRoot>/.harnessams/assets/plotly.min.js,
-// root stays clean — is (for the default target only) copy-if-missing /
-// size-refreshed from the packaged copy and referenced by a relative route
-// (a sibling copy when outDir sits on another drive); a missing configRoot
-// or an unresolvable value falls back to the CDN. The in-page fallback line
-// in HEAD is the CDN too: bundled default first, CDN as the fallback (user
-// ruling, two-step). Returns { src, localFile } — localFile is what the PNG
-// exporter needs.
+// Resolve the report's plotly chain (user ruling 2026-11-26, three steps —
+// supersedes the D-021 two-step "seed at generation" flow): `outDir` anchors
+// the relative src of the project-copy step (the report's own directory — the
+// design folder); `configRoot` is the session project root whose
+// workspace.plotly_url names the project copy.
+//   step 2 (the DEFAULT src): the plugin server's route to the packaged copy
+//     (PLOTLY_ROUTE) — same-origin whenever the report is served from the DSH
+//     web origin, zero per-project copying;
+//   step 1 (in-page fallback): the PROJECT copy at workspace.plotly_url
+//     (default .harnessams/assets/plotly.min.js) by relative path — NOT
+//     seeded here anymore; it appears on demand when the user opens the
+//     report outside the sidebar (POST /api/open-local → seedProjectPlotly
+//     just before launching the OS viewer), which is what keeps double-click /
+//     file:// viewing offline-capable;
+//   step 3 (in-page fallback): the CDN.
+// An http(s) plotly_url is an expert override used verbatim as the single src
+// (no local file — the PNG exporter skips with its visible reason); a custom
+// LOCAL plotly_url keeps the D-021 behavior (direct relative reference, a
+// sibling copy when outDir sits on another drive) without the route step.
+// Returns { src, localSrc, localFile }: localSrc is the step-1 in-page
+// fallback line's src (null = the line is omitted — the copy may not exist
+// yet, the chain handles that); localFile is a local plotly.min.js for the
+// PNG exporter (an existing project copy, else the packaged copy).
 export function resolvePlotlySrc(outDir, configRoot) {
   const cfg = readPlotlyConfig(configRoot)
   const url = cfg?.plotly_url
-  if (url && /^https?:\/\//i.test(url)) return { src: url, localFile: null }
-  if (!configRoot) return { src: PLOTLY_CDN, localFile: null }
+  if (url && /^https?:\/\//i.test(url)) return { src: url, localSrc: null, localFile: null }
+  if (!configRoot) return { src: PLOTLY_ROUTE, localSrc: null, localFile: null }
   const projectCopy = path.join(configRoot, '.harnessams', 'assets', 'plotly.min.js')
   let target = projectCopy
   if (url) {
     const norm = url.replace(/\\/g, '/')
     target = path.isAbsolute(norm) ? norm : path.resolve(configRoot, norm)
   }
-  const isDefaultTarget = path.resolve(target) === path.resolve(projectCopy)
-  if (isDefaultTarget) {
+  if (path.resolve(target) === path.resolve(projectCopy)) {
+    // DEFAULT target: the route serves the packaged copy (step 2, the src);
+    // the project copy (step 1) may not exist yet — it is seeded on demand by
+    // the open-outside-sidebar path. No I/O side effects here.
     let seed = null
     if (cfg?.plotly_asset) {
       const a = cfg.plotly_asset.replace(/\\/g, '/')
       seed = path.isAbsolute(a) ? a : path.resolve(configRoot, a)
     }
     if (!seed || !isFileLoose(seed)) seed = packagedPlotly()
-    if (seed && isFileLoose(seed)) {
-      if (isFileLoose(target)) {
-        if (fs.statSync(target).size !== fs.statSync(seed).size) {
-          fs.copyFileSync(seed, target) // size mismatch = plotly version bump, refresh
-        }
-      } else {
-        fs.mkdirSync(path.dirname(target), { recursive: true })
-        fs.copyFileSync(seed, target)
-      }
-    }
+    const localFile = [projectCopy, seed].find(isFileLoose) ?? null
+    const rel = path.relative(outDir, projectCopy)
+    const localSrc = path.isAbsolute(rel) ? null : rel.replace(/\\/g, '/')
+    return { src: PLOTLY_ROUTE, localSrc, localFile }
   }
-  if (!isFileLoose(target)) return { src: PLOTLY_CDN, localFile: null }
+  // Expert local override (D-021 behavior kept): reference the user's own
+  // file directly — no route step, no seeding.
+  if (!isFileLoose(target)) return { src: PLOTLY_CDN, localSrc: null, localFile: null }
   const rel = path.relative(outDir, target)
   if (path.isAbsolute(rel)) {
     // out dir on a different drive than the target: no relative route, keep a sibling copy
     const sibling = path.join(outDir, 'plotly.min.js')
     fs.copyFileSync(target, sibling)
-    return { src: 'plotly.min.js', localFile: sibling }
+    return { src: 'plotly.min.js', localSrc: null, localFile: sibling }
   }
-  return { src: rel.replace(/\\/g, '/'), localFile: target }
+  return { src: rel.replace(/\\/g, '/'), localSrc: null, localFile: target }
+}
+
+// Seed the project plotly copy on demand (user ruling 2026-11-26): the "open
+// outside the sidebar" path (POST /api/open-local, report documents only)
+// calls this just before launching the OS viewer, so the file:// document's
+// step-1 relative reference resolves offline. Copy-if-missing; a size
+// mismatch refreshes from the packaged copy (plotly version bump). Only the
+// DEFAULT target is managed here — an http(s) plotly_url or a custom local
+// target is the user's own file, untouched.
+export function seedProjectPlotly(configRoot) {
+  if (!configRoot) return { seeded: false, reason: 'no project root' }
+  const cfg = readPlotlyConfig(configRoot)
+  const url = cfg?.plotly_url
+  if (url && /^https?:\/\//i.test(url)) return { seeded: false, reason: 'plotly_url is an http(s) source' }
+  const projectCopy = path.join(configRoot, '.harnessams', 'assets', 'plotly.min.js')
+  let target = projectCopy
+  if (url) {
+    const norm = url.replace(/\\/g, '/')
+    target = path.isAbsolute(norm) ? norm : path.resolve(configRoot, norm)
+  }
+  if (path.resolve(target) !== path.resolve(projectCopy)) return { seeded: false, reason: 'custom plotly_url target' }
+  let seed = null
+  if (cfg?.plotly_asset) {
+    const a = cfg.plotly_asset.replace(/\\/g, '/')
+    seed = path.isAbsolute(a) ? a : path.resolve(configRoot, a)
+  }
+  if (!seed || !isFileLoose(seed)) seed = packagedPlotly()
+  if (!seed || !isFileLoose(seed)) return { seeded: false, reason: 'no packaged plotly source' }
+  if (isFileLoose(target)) {
+    if (fs.statSync(target).size === fs.statSync(seed).size) return { seeded: false, reason: 'already present' }
+    fs.copyFileSync(seed, target) // size mismatch = plotly version bump, refresh
+    return { seeded: true, path: target, refreshed: true }
+  }
+  fs.mkdirSync(path.dirname(target), { recursive: true })
+  fs.copyFileSync(seed, target)
+  return { seeded: true, path: target }
 }
 
 // Natural-order comparison (numeric chunks compare as numbers, so Sim10 sorts
@@ -702,6 +753,14 @@ export function genReportFromSpec(projectDir, prepared, { configRoot } = {}) {
     `{id:${inlineJson(e.id)},title:${inlineJson(e.title)},file:${inlineJson(e.file)},n_points:${e.n_points}}`
   )).join(',')
   const plotly = resolvePlotlySrc(project, configRoot)
+  // Step-1 in-page fallback line: the PROJECT copy by relative path. The copy
+  // may not exist yet (it is seeded on demand by the open-outside-sidebar
+  // path); a failed load just moves the chain on to the CDN. Empty when there
+  // is no project-relative copy to reference (http(s) plotly_url, no project
+  // root, cross-drive design folder).
+  const plotlyFallback = plotly.localSrc
+    ? `<script>window.Plotly || document.write('<script src="${plotly.localSrc}"><\\/script>');</script>`
+    : ''
   const now = new Date()
   const pad = (n) => String(n).padStart(2, '0')
   const nowStamp = `${now.getUTCFullYear()}-${pad(now.getUTCMonth() + 1)}-${pad(now.getUTCDate())} `
@@ -710,6 +769,7 @@ export function genReportFromSpec(projectDir, prepared, { configRoot } = {}) {
   let html = HEAD
     .replaceAll('__TITLE__', htmlEscape(title))
     .replaceAll('__PLOTLY__', plotly.src)
+    .replaceAll('__PLOTLY_FALLBACK__', () => plotlyFallback)
     .replaceAll('__CDN__', PLOTLY_CDN)
     .replaceAll('__NOW__', nowStamp)
     .replaceAll('__META__', prepared.metaLine ? ' | ' + htmlEscape(prepared.metaLine) : '')

@@ -182,6 +182,16 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     for (const f of ['SimResults/projX_report/Sim0_20260805_batch1.js', 'SimResults/projX_report/Sim0_20260805_batch2.js']) {
       assert.ok(html.includes(JSON.stringify(f).slice(1, -1)), `manifest must reference ${f}`)
     }
+    // plotly chain (user ruling 2026-11-26): the server's route to the packaged
+    // copy is the DEFAULT src; the project copy rides as the in-page fallback
+    // line (seeded on demand by the open-outside-sidebar path, not here); the
+    // CDN is the last resort. Generation must NOT seed the project copy.
+    assert.ok(html.includes('<script src="/harnessams/assets/plotly.min.js"></script>'), 'route step must be the default src')
+    assert.ok(html.includes('window.Plotly || document.write(\'<script src="../.harnessams/assets/plotly.min.js"><\\/script>\');'),
+      'project-copy fallback line must reference the copy relatively')
+    assert.ok(html.includes('window.Plotly || document.write(\'<script src="https://cdn.plot.ly/plotly-3.0.1.min.js"><\\/script>\');'),
+      'CDN fallback line')
+    assert.ok(!existsSync(path.join(ws, '.harnessams', 'assets', 'plotly.min.js')), 'generation must not seed the project copy')
     // newest-first manifest: batch2 precedes batch1 (natural id order, desc)
     const mLine = html.split('\n').find((l) => l.includes('const MANIFEST')) ?? ''
     assert.ok(mLine.includes('Sim0_20260805_batch2') && mLine.indexOf('Sim0_20260805_batch2') < mLine.indexOf('Sim0_20260805_batch1'),
@@ -240,6 +250,60 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     assert.equal(noAgent.ok, true)
     assert.equal(noAgent.registered, false)
     assert.match(noAgent.register_error, /no session identity/)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+// seedProjectPlotly (user ruling 2026-11-26): the ONLY writer of the project
+// plotly copy — the open-outside-sidebar path calls it right before the OS
+// viewer launches. Copy-if-missing; a size mismatch refreshes from the
+// packaged copy (plotly version bump); http(s)/custom plotly_url targets are
+// the user's own file and stay untouched.
+test('seedProjectPlotly: copy-if-missing, size-refresh, no-op and override semantics', async () => {
+  const { seedProjectPlotly } = await import('../src/report_render.js')
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-seed-'))
+  try {
+    const copy = path.join(ws, '.harnessams', 'assets', 'plotly.min.js')
+    // default target (no workspace_config.json): missing → copied from the packaged copy
+    const r1 = seedProjectPlotly(ws)
+    assert.equal(r1.seeded, true, JSON.stringify(r1))
+    assert.ok(existsSync(copy))
+    const seededBytes = (await readFile(copy)).length
+    assert.ok(seededBytes > 1000, 'the seeded copy is the packaged plotly, not a stub')
+    // already present, same size → no-op
+    const r2 = seedProjectPlotly(ws)
+    assert.equal(r2.seeded, false)
+    assert.match(r2.reason, /already present/)
+    // size mismatch → refreshed from the packaged copy
+    await writeFile(copy, 'stale', 'utf8')
+    const r3 = seedProjectPlotly(ws)
+    assert.equal(r3.seeded, true)
+    assert.equal(r3.refreshed, true)
+    assert.equal((await readFile(copy)).length, seededBytes)
+
+    // explicit http(s) plotly_url → untouched, no copy created
+    await writeFile(path.join(ws, '.harnessams', 'workspace_config.json'), JSON.stringify({
+      version: 1, workspace: { plotly_url: 'https://cdn.plot.ly/plotly-3.0.1.min.js' }, settings: {},
+    }, null, 2) + '\n', 'utf8')
+    await rm(copy)
+    const r4 = seedProjectPlotly(ws)
+    assert.equal(r4.seeded, false)
+    assert.match(r4.reason, /http\(s\)/)
+    assert.ok(!existsSync(copy))
+
+    // custom local target → untouched (the user manages their own file)
+    await writeFile(path.join(ws, '.harnessams', 'workspace_config.json'), JSON.stringify({
+      version: 1, workspace: { plotly_url: 'shared/plotly.min.js' }, settings: {},
+    }, null, 2) + '\n', 'utf8')
+    const r5 = seedProjectPlotly(ws)
+    assert.equal(r5.seeded, false)
+    assert.match(r5.reason, /custom plotly_url/)
+
+    // no project root at all
+    const r6 = seedProjectPlotly(null)
+    assert.equal(r6.seeded, false)
+    assert.match(r6.reason, /no project root/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

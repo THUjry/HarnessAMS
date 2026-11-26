@@ -7,6 +7,7 @@
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { existsSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -235,17 +236,36 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
     }
 
     // happy path: same-origin browser headers, known session, viewable file
-    const ok = await call({ sessionId: SID, path: htmlPath }, { 'sec-fetch-site': 'same-origin', origin: 'http://127.0.0.1:1', host: '127.0.0.1:1' })
+    const sameOrigin = { 'sec-fetch-site': 'same-origin', origin: 'http://127.0.0.1:1', host: '127.0.0.1:1' }
+    const ok = await call({ sessionId: SID, path: htmlPath }, sameOrigin)
     assert.equal(ok.code, 200)
     assert.equal(ok.body.ok, true)
     assert.equal(ok.body.path, path.resolve(htmlPath))
     assert.equal(cmds.length, 1)
     if (process.platform === 'win32') assert.equal(cmds[0], 'cmd /c start "" "' + path.resolve(htmlPath) + '"')
 
+    // seed-on-open (user ruling 2026-11-26): a report document seeds the
+    // project copy copy-if-missing just before the viewer launches — this is
+    // the ONLY writer now that generation no longer seeds
+    assert.equal(ok.body.plotly_seed.seeded, true)
+    const seededCopy = path.join(ws, '.harnessams', 'assets', 'plotly.min.js')
+    assert.ok(existsSync(seededCopy), 'open-local must seed the project plotly copy')
+    const ok2 = await call({ sessionId: SID, path: htmlPath }, sameOrigin)
+    assert.equal(ok2.code, 200)
+    assert.equal(ok2.body.plotly_seed.seeded, false, 'second open is a copy-if-missing no-op')
+    assert.match(ok2.body.plotly_seed.reason, /already present/)
+
+    // non-report documents open without seeding
+    const pngPath = path.join(ws, 'fig.png')
+    await writeFile(pngPath, 'x')
+    const png = await call({ sessionId: SID, path: pngPath }, sameOrigin)
+    assert.equal(png.code, 200)
+    assert.equal(png.body.plotly_seed, null)
+
     // cross-site metadata / mismatched origin rejected before anything launches
     assert.equal((await call({ sessionId: SID, path: htmlPath }, { 'sec-fetch-site': 'cross-site' })).code, 403)
     assert.equal((await call({ sessionId: SID, path: htmlPath }, { origin: 'http://evil.example', host: '127.0.0.1:1' })).code, 403)
-    assert.equal(cmds.length, 1)
+    assert.equal(cmds.length, 3)
 
     // no browser headers (curl/tests) pass; session + fence rejections never launch
     assert.equal((await call({ sessionId: 'session-nope-0000-0000-0000-000000000000', path: htmlPath })).code, 404)
@@ -254,7 +274,7 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
     assert.equal((await call({ sessionId: SID, path: exePath })).code, 400)
     assert.equal((await call({ sessionId: SID })).code, 400)
     assert.equal((await call({})).code, 400)
-    assert.equal(cmds.length, 1)
+    assert.equal(cmds.length, 3)
 
     // shell seam absent -> 500 with the reason, never a throw
     const bare = await registerRoutes({ workspaceRegistry: { list: () => [{ id: 'w-dash', path: ws, title: 'dash', sessionIds: [SID] }] } })

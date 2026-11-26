@@ -5,10 +5,12 @@
 - plotly.js v3.0.1, unmodified distribution bundle `plotly.min.js`
 - Copyright (c) 2012-2025 Plotly, Inc. — MIT License
 - Source: https://github.com/plotly/plotly.js
-- This is the **single shared copy** for the whole HarnessAMSproject tree: the sweep
-  report generator discovers it by walking up from its own location (or via the
-  workspace `harnessams.json` `plotly_asset` field) and places a copy beside each generated
-  report so reports render fully offline. Do not add a second copy anywhere else.
+- This is the **single shared copy** for the whole HarnessAMSproject tree: reports
+  load it by default through the plugin server's `/harnessams/assets/` route, and a
+  per-project copy (discovered via the workspace `plotly_asset` field or the package
+  location) is placed under `<project>/.harnessams/assets/` only when a report is
+  opened outside the sidebar, so local-file viewing renders fully offline. Do not add
+  a second copy anywhere else.
 - License text (from the upstream repository):
 
 ```

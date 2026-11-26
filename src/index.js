@@ -47,6 +47,7 @@ import { remoteBrowse } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { resolveOpenableFile, openWithDefaultApp } from './server/openlocal.js'
+import { seedProjectPlotly } from './report_render.js'
 import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
 import { progressRemotePayload } from './server/progressRemote.js'
 import { registerTools } from './tool.js'
@@ -268,9 +269,20 @@ async function handle(req, res, ctx) {
       if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
       const target = await resolveOpenableFile(body?.path)
       if (target.error) { json(target.code ?? 400, { error: target.error }); return }
+      // Seed the project plotly copy before launching the viewer (user
+      // ruling 2026-11-26): a report opened OUTSIDE the sidebar renders as a
+      // file:// document whose step-1 relative reference needs the copy, and
+      // this click is exactly what creates it (copy-if-missing; the
+      // report-resolved route step serves the packaged copy anyway when the
+      // page is viewed from the DSH web origin). Fail-open — a seed problem
+      // never blocks the open. Report documents only; PNGs/logs don't need it.
+      let plotlySeed = null
+      if (/\.(html?)$/i.test(target.abs)) {
+        try { plotlySeed = seedProjectPlotly(project.path) } catch (e) { plotlySeed = { seeded: false, reason: String(e?.message ?? e) } }
+      }
       const opened = await openWithDefaultApp(ctx, target.abs)
       if (opened.error) { json(500, { error: opened.error }); return }
-      json(200, { ok: true, project, path: target.abs })
+      json(200, { ok: true, project, path: target.abs, plotly_seed: plotlySeed })
       return
     }
     if (req.method === 'PUT' && route === '/api/global-config') {

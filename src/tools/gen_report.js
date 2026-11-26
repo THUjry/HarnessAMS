@@ -255,7 +255,8 @@ export function genReportTools(ctx) {
         // The calling session (identity = exec.agent.id, which IS the SessionId
         // — D-005) and its store: the PNG gate and the registration both key
         // off them. No session-resolved project → no store lookup (the report
-        // still renders; the plotly source falls to the CDN).
+        // still renders; the plotly chain falls to the CDN after the route
+        // step and the never-seeded project copy).
         const found = configRoot ? sessionsStoreAt(configRoot) : null
 
         // PNG export is OPT-IN per session: the "Report figures" option of the
