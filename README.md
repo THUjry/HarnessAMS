@@ -61,8 +61,10 @@ Both environments assume ONE filesystem shared by all cluster nodes; they differ
 | scheduler | in-cluster | out-of-cluster |
 |---|---|---|
 | `local` | the DSH host itself, detached background worker (in-cluster ONLY — rejected out-of-cluster) | unavailable |
-| `ssh` | another node over ssh: staging stays a local copy, only the execution crosses ssh | the ssh node itself, foreground (a second hop goes through the dsh-ssh proxy config) |
+| `ssh` | another node over ssh: staging stays a local copy, only the detached launch crosses ssh | the ssh node itself, detached launch (a second hop goes through the dsh-ssh proxy config) |
 | `lsf` (default) | `bsub` on this host through the official ctx.shell seam; bjobs and the progress files read locally | ssh to the cluster, then `bsub`/`bjobs` there |
+
+All three schedulers share ONE submit contract: the submit is a quick launch (stage, start the worker, verify startup, record `.batch_job.json`, return a non-terminal state) and all monitoring goes through `batch_poll` — only the launch internals differ (local spawn / nohup over ssh / bsub; progress comes from the run-dir ladder / remote progress files / bjobs respectively).
 
 `machine_id` (a dsh-ssh alias) and the fencing `remote_root` resolve from the project settings when omitted — the normal case; a per-call `machine_id` is only for spreading a sweep across nodes. The toolchain pins resolve the same way (D-016): `remote_python` (the interpreter that runs the worker) and `remote_spectre_cmd` (the spectre executable the bundled worker drives) are the project's absolute paths on the cluster side — omit `remote_python` and the pin applies, `null` keeps the bare default, and an explicit value must be an absolute path; a green self-check pins the measured paths automatically and the `cluster-setup` skill verifies/overrides from the login startup chain. In-cluster lsf needs no machine (bsub runs right here). The worker scripts tree for the remote modes is the project's `sim_scripts_dir` (projects stage their own copy at `<project>/.harnessams/scripts` plus the sibling `assets/` bucket at initialization — the sidebar-open `POST /api/project-init`, with the self-check start as backstop — D-015; legacy explicit values stay, e.g. the sibling SmartAnaSim package's `scripts/`; env `HARNESSAMS_SIM_SCRIPTS_DIR` overrides). A `sim_scripts_dir` argument to `batch_submit` that names an existing directory replaces that root for any scheduler (a custom or test worker tree); any other value only anchors the project walk-up.
 
@@ -81,18 +83,19 @@ gen_sweep_report(spec=...)                            # after your own analysis
 
 Everything lands in the local run directory — analyze immediately, no retrieval step.
 
-### Mode 2 — ssh (foreground on a node, no LSF)
+### Mode 2 — ssh (detached launch on a node, no LSF)
 
-Same worker, but executed on the target node as a foreground process. Requires the target's dsh-ssh alias (`machine_id`) and the project's `remote_root`.
+Same worker, but launched on the target node as a DETACHED background process: the submit's guarded block (`flock` + replay markers + worker + done marker) runs as one `nohup sh -c …` with every fd redirected (stdout/stderr → `ssh_worker.log` in the run dir), so it survives the ssh channel closing; the submit waits ~20 s for the worker's own `.worker_started` marker, records the job file, and returns `running` — then `batch_poll` monitors exactly like the other schedulers. Requires the target's dsh-ssh alias (`machine_id`) and the project's `remote_root`.
 
 spectre_pre_check(run_dir=...)                         # after hand-writing the run dir (write step)
 batch_submit(run_dir=..., worker="spectre/spectre_sweep_worker.py",   # machine/root resolve from config;
-             scheduler="ssh")                                          # remote_dir omitted -> next Sim<N>_<date>_batch<M>
-batch_poll(run_dir=..., wait_sec=0) # progress files, not bjobs; terminal poll auto-fetches sweep_progress.json
-                                     # + errlog.txt; wait_sec>0 = bounded blocking wait (cap 600)
+             scheduler="ssh")                                          # returns running after startup check;
+                                                                      # remote_dir omitted -> next Sim<N>_<date>_batch<M>
+batch_poll(run_dir=..., wait_sec=600)  # remote progress files, not bjobs; terminal poll auto-fetches
+                                       # sweep_progress.json + errlog.txt; bounded blocking wait (cap 600)
 gen_sweep_report(spec=SimResults/<name>_spec.json)   # after your own (remote-first) analysis
 
-Gotchas: the whole worker must finish inside the 600 s ssh deadline (the exec funnel wraps every command in a remote `timeout -s KILL`; long sweeps belong on lsf); raw psf/sp artifacts stay where they ran — analyze them there; `overwrite: true` clears the stale replay markers so a finished dir actually re-runs.
+Gotchas: there is NO per-run ssh deadline anymore — the exec budget is launch-scale and the worker's own global budget is the only run deadline (the old 600 s ceiling that forced long sweeps onto lsf is gone); raw psf/sp artifacts stay where they ran — analyze them there; `overwrite: true` clears the stale replay markers so a finished dir actually re-runs; pressing the session stop settles the submit call at once but the launched worker is deliberately left running — re-submitting is safe (markers + flock), see the abort contract in the `batch_submit` description.
 
 ### Mode 3 — LSF (the cluster queue; locally when in-cluster)
 

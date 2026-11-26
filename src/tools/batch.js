@@ -1,14 +1,25 @@
-// Generic batch tools: submit a worker script through LSF (bsub), run it on a
-// node over ssh (scheduler=ssh, foreground), or run it on THIS host as a
-// detached background process (scheduler=local — batch_poll then reads the
-// run directory's own files). Scheduler semantics follow the project's working
-// environment (cluster_env, D-002): out-of-cluster every remote operation
-// crosses dsh-ssh; in-cluster bsub runs on THIS host (the official ctx.shell
-// seam) and file "transfers" are local copies on the shared filesystem —
-// scheduler=ssh still executes over ssh, on any other node. Then poll
-// (auto-retrieving the light result files on completion) — nothing in this
-// file names a simulator; a Spectre run is just a worker choice, and the
-// worker tree comes from the workspace sim_scripts_dir (see ../batch.js).
+// Generic batch tools: the unified submit contract — every scheduler is a
+// QUICK LAUNCH (stage the run dir, start the worker, verify startup, record
+// the job file, return a non-terminal state) and all monitoring goes through
+// batch_poll. Only the launch internals differ: LSF wraps the worker in bsub
+// (bjobs verifies it), scheduler=ssh launches the guarded worker detached
+// over ssh (nohup + markers + flock; the .worker_started marker verifies it),
+// scheduler=local spawns it on THIS host as a detached background process
+// (batch_poll then reads the run directory's own files). Scheduler semantics
+// follow the project's working environment (cluster_env, D-002): out-of-cluster
+// every remote operation crosses dsh-ssh; in-cluster bsub runs on THIS host
+// (the official ctx.shell seam) and file "transfers" are local copies on the
+// shared filesystem — scheduler=ssh still executes over ssh, on any other
+// node. Nothing in this file names a simulator; a Spectre run is just a
+// worker choice, and the worker tree comes from the workspace
+// sim_scripts_dir (see ../batch.js).
+//
+// Abort contract (D-029): every remote/local channel call here carries the
+// turn's exec.signal (the session stop button), so an aborted call settles
+// at once — but an ALREADY LAUNCHED worker is deliberately left alone
+// (detached spawn/nohup'd block; markers + flock make re-runs idempotent).
+// An aborted submit therefore means the remote state is uncertain; the tool
+// descriptions tell the model how to re-verify before re-submitting.
 //
 // Cluster toolchain pins (D-016): the project settings name the executables
 // this channel launches on the cluster side by ABSOLUTE path —
@@ -44,6 +55,20 @@ const AUTO_FETCH_FILES = ['sweep_progress.json', 'errlog.txt']
 // batch_poll wait_sec cadence (D-008): the gap between re-polls of a blocking
 // wait. 10 s matches the wait policy's preferred first-backoff step.
 const WAIT_GAP_MS = 10_000
+
+// Abortable gap for the wait loops (D-029): sleeps up to `ms`, but wakes the
+// moment `signal` aborts so the tool call settles at once when the session
+// stop fires mid-wait (an aborted poll is read-only — nothing to clean up;
+// an aborted submit's guidance lives in the tool description).
+function sleepAbortable(ms, signal) {
+  return new Promise((resolve) => {
+    if (!signal) { setTimeout(resolve, ms); return }
+    if (signal.aborted) { resolve(); return }
+    const t = setTimeout(() => { signal.removeEventListener('abort', onAbort); resolve() }, ms)
+    const onAbort = () => { clearTimeout(t); resolve() }
+    signal.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 // The session-level scan-size ceiling (D-019): the calling session's
 // "Max points per scan" field, defaulting to 100. Fail-open — a missing
@@ -103,7 +128,11 @@ function underRoot(root, candidate) {
 // terminates by itself. The same toolchain pins as the remote schedulers
 // (D-016) apply here: the pinned interpreter spawns the worker, the pinned
 // spectre rides as --spectre-cmd for the bundled worker.
-async function submitLocal(args, runDir, settings, projectPath) {
+async function submitLocal(args, runDir, settings, projectPath, signal) {
+  // D-029: abort before the spawn cancels the launch; once spawned the
+  // worker is a detached orphan by design (same ruling as the ssh nohup
+  // launch) — the job file still lands so a later poll can attach.
+  if (signal?.aborted) throw new Error('aborted before the local worker was spawned')
   const rawWorker = String(args.worker)
   if (rawWorker.startsWith('/') || /^[A-Za-z]:[\\/]/.test(rawWorker)) {
     throw new Error('scheduler=local needs a scripts-root-relative worker (e.g. "spectre/spectre_sweep_worker.py"), not an absolute path')
@@ -239,20 +268,30 @@ export function batchTools(ctx) {
   return [
     {
       name: 'batch_submit',
-      description: 'Submit a batch through the suite\'s worker scripts under one of three schedulers, with '
-        + 'semantics set by the project\'s working environment (read the cluster_env row of the project\'s AGENTS.md '
-        + 'config block). scheduler="local" runs the worker on THIS host detached and returns '
-        + 'immediately — poll with batch_poll (in-cluster only; an out-of-cluster host cannot run it). '
-        + 'scheduler="lsf" (default) runs it under bsub: in-cluster bsub runs right on this host and the run '
-        + 'directory stages as a local copy on the shared filesystem; out-of-cluster the directory and the worker '
-        + 'scripts tree (the workspace sim_scripts_dir) upload to a dsh-ssh host and bsub runs there. '
-        + 'scheduler="ssh" runs the worker directly on the target host in the foreground and waits for it '
-        + '(out-of-cluster: the ssh node itself, a second hop goes through the dsh-ssh proxy config; in-cluster: '
-        + 'any other node — files never cross ssh). The worker path is scripts-root-relative (e.g. '
-        + '"spectre/spectre_sweep_worker.py") or absolute on the target; worker_args are passed through. Writes '
-        + '.batch_job.json in the run directory for batch_poll. Rejects a scan whose total point count (from '
-        + 'sweep_config.json) exceeds the calling session\'s Max points per scan field (default 100) — split the '
-        + 'grid into multiple batches instead. The project config resolves from the calling session\'s workspace '
+      description: 'Submit a batch through the suite\'s worker scripts. ONE unified contract across the three '
+        + 'schedulers (working-environment semantics still apply — read the cluster_env row of the project\'s '
+        + 'AGENTS.md config block): every submit is a QUICK LAUNCH — it stages the run directory plus the worker '
+        + 'scripts tree, starts the worker, verifies startup, writes .batch_job.json in the run directory, and '
+        + 'returns a non-terminal state (running/submitted/queued, or completed when a done-marker replay '
+        + 'short-circuits); ALL monitoring and light-result retrieval go through batch_poll. Only the launch '
+        + 'internals differ. scheduler="local": the worker spawns on THIS host detached (in-cluster only; an '
+        + 'out-of-cluster host cannot run it). scheduler="lsf" (default): the worker runs under bsub — '
+        + 'in-cluster bsub runs right on this host and the run directory stages as a local copy on the shared '
+        + 'filesystem; out-of-cluster the directory and the scripts tree (the workspace sim_scripts_dir) upload '
+        + 'to a dsh-ssh host and bsub runs there. scheduler="ssh": the guarded worker launches DETACHED on the '
+        + 'target host (nohup — it survives the ssh channel closing; stdout/stderr land in ssh_worker.log in the '
+        + 'run dir; startup is verified against the worker\'s own .worker_started marker; out-of-cluster: the '
+        + 'ssh node itself, a second hop goes through the dsh-ssh proxy config; in-cluster: any other node — '
+        + 'files never cross ssh). There is no per-run ssh deadline: the worker\'s own global budget is the only '
+        + 'run-level deadline. The worker path is scripts-root-relative (e.g. '
+        + '"spectre/spectre_sweep_worker.py") or absolute on the target; worker_args are passed through. '
+        + 'Rejects a scan whose total point count (from sweep_config.json) exceeds the calling session\'s Max '
+        + 'points per scan field (default 100) — split the grid into multiple batches instead. ABORT BEHAVIOR: '
+        + 'the session stop settles this call immediately, but an ALREADY LAUNCHED worker is deliberately left '
+        + 'running (orphaned by design — replay markers + flock make re-submits idempotent), so an aborted '
+        + 'submit means the remote state is UNCERTAIN: re-verify before re-submitting (batch_poll once a job '
+        + 'file exists, or ssh_exec the run dir for sweep_progress.json / .worker_started / .hams_ssh_done). '
+        + 'The project config resolves from the calling session\'s workspace '
         + 'with the AGENTS.md yaml block overlaid (D-021: hand-edits of that block take effect immediately at '
         + 'this read; an invalid row keeps the stored value and warns in the result).',
       parameters: {
@@ -280,8 +319,9 @@ export function batchTools(ctx) {
         queue: { type: 'string', description: 'LSF queue (default normal)' },
         scheduler: { type: 'string', enum: ['lsf', 'ssh', 'local'],
           description: 'local runs the worker on THIS host in the background (in-cluster only); lsf (default) '
-            + 'submits through bsub (locally in-cluster, on the target host out-of-cluster); ssh runs it directly '
-            + 'on the target host (foreground, no LSF) and waits for it to finish' },
+            + 'submits through bsub (locally in-cluster, on the target host out-of-cluster); ssh launches the '
+            + 'worker detached on the target host (nohup, no LSF) and returns after startup verification — '
+            + 'monitor with batch_poll exactly like the other schedulers' },
         lsf_node: { type: 'string', description: 'LSF only: pin the job to a host or host list — bsub -m "<lsf_node>" '
           + '(e.g. node2, or "node2 node3" to spread). Combine with repeated submits to run one sweep on several nodes' },
         job_name: { type: 'string', description: 'bsub -J name (default hams-<run dir name>)' },
@@ -296,6 +336,11 @@ export function batchTools(ctx) {
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
+        // D-029: the turn's abort signal (set by the host before the body
+        // runs; fires when the session stop is pressed). It rides EVERY
+        // channel call below (exec/upload/download), settling the call at
+        // once — an already-launched worker is deliberately left alone.
+        const turnSignal = exec?.signal ?? null
         // D-021 project anchoring: the calling session (or an explicit `project`
         // argument) — NOT a path walk-up from run_dir — decides which project's
         // config this submission resolves. The AGENTS.md yaml block overlays at
@@ -334,7 +379,7 @@ export function batchTools(ctx) {
           } else {
             const preArgs = { run_dir: args.run_dir }
             if (sid) preArgs.session_id = sid
-            const pre = await callTool(ctx, 'spectre_pre_check', preArgs, { timeoutMs: 30_000 })
+            const pre = await callTool(ctx, 'spectre_pre_check', preArgs, { timeoutMs: 30_000, signal: turnSignal })
             if (pre.isError || pre.value?.ok === false) {
               const detail = (Array.isArray(pre.value?.errors) && pre.value.errors.length
                 ? pre.value.errors : [pre.text || 'no details']).map(String).join('\n')
@@ -356,7 +401,7 @@ export function batchTools(ctx) {
             throw new Error('scheduler=local requires cluster_env=in-cluster (an out-of-cluster host cannot run '
               + 'the worker — use scheduler="ssh" or "lsf")')
           }
-          const local = await submitLocal(args, runDir, settings, projectPath)
+          const local = await submitLocal(args, runDir, settings, projectPath, turnSignal)
           local.warnings = [...preCheckWarnings, ...(local.warnings || [])]
           return local
         }
@@ -385,14 +430,18 @@ export function batchTools(ctx) {
         }
         const channel = {
           alias: target.alias,
+          // D-029: turnSignal rides every call — exec-shaped calls get the
+          // dsh-ssh KILL+close path (or the ctx.shell kill in-cluster) plus
+          // the callTool race; transfers get the race (sftp has no abort
+          // path — the orphaned upload is harmless, re-staging is idempotent).
           exec: sshExec
-            ? (command, opts) => execRemote(ctx, target.alias, command, opts)
-            : (command, opts) => execLocal(ctx, command, opts),
+            ? (command, opts) => execRemote(ctx, target.alias, command, { ...opts, signal: turnSignal })
+            : (command, opts) => execLocal(ctx, command, { ...opts, signal: turnSignal }),
           upload: !inCluster
-            ? (localPath, remotePath) => uploadFile(ctx, target.alias, localPath, remotePath)
+            ? (localPath, remotePath) => uploadFile(ctx, target.alias, localPath, remotePath, { signal: turnSignal })
             : localCopy,
           download: !inCluster
-            ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath)
+            ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath, { signal: turnSignal })
             : localCopy,
         }
         let remoteDir
@@ -484,12 +533,18 @@ export function batchTools(ctx) {
         const queue = args.queue || 'normal'
         const jobName = args.job_name || `hams-${path.basename(runDir)}`
         if (scheduler === 'ssh') {
-          // Foreground mode: no bsub, no queue — run the worker on the target
-          // node and wait for it, exactly like an interactive run. The
-          // execution crosses ssh; in-cluster the staging itself stayed a
-          // local copy (only out-of-cluster uploads over sftp). poll/fetch
-          // still work through the recorded job file (batch_poll
-          // scheduler=ssh reads the progress files).
+          // Detached launch (the unified submit contract, D-028): staging is
+          // shared above; this branch launches the guarded worker in the
+          // BACKGROUND over ssh, verifies startup, records the job file, and
+          // returns a NON-TERMINAL state — monitoring is batch_poll's job
+          // (scheduler=ssh reads the remote progress files; only the launch
+          // internals differ from bsub/local). The exec budget is
+          // launch-scale (the command itself waits ~20 s for the worker's
+          // .worker_started marker); the worker's own global budget is the
+          // only run-level deadline. An aborted call settles here at once
+          // (turnSignal rides the channel) while an already-launched worker
+          // is deliberately left alone (D-029) — re-submitting is safe
+          // (markers + flock).
           const command = buildSshCommand({
             remoteDir,
             python: remotePython,
@@ -497,7 +552,11 @@ export function batchTools(ctx) {
             workerArgs,
             overwrite: args.overwrite === true,
           })
-          const ran = await channel.exec(command, { timeoutMs: 600_000 })
+          const ran = await channel.exec(command, { timeoutMs: 60_000 })
+          if (!ran.ok) {
+            throw new Error(`ssh launch failed (exit ${ran.exitCode}): `
+              + `${(ran.stderr || ran.stdout || ran.text || '').slice(0, 1200)}`)
+          }
           const jobId = `ssh-${Date.now()}`
           const job = {
             machine_id: args.machine_id || target.machine?.id || null,
@@ -516,20 +575,31 @@ export function batchTools(ctx) {
             total_points: totalFromConfig(runDir),
           }
           writeJob(runDir, job)
-          if (!ran.ok) {
-            throw new Error(`ssh run failed (exit ${ran.exitCode}): `
-              + `${(ran.stderr || ran.stdout || ran.text || '').slice(0, 1200)}`)
+          // Launch-verification mapping: a done-marker replay short-circuits
+          // in the foreground (already completed); __STARTED__ = the worker's
+          // own .worker_started marker was read back (running); anything
+          // else = detached but unconfirmed (submitted + a warning — a slow
+          // NFS start or a replay queued behind a running flock; poll
+          // decides). The worker's stdout now lands in ssh_worker.log in the
+          // run dir instead of this result's output field.
+          const launchOut = (ran.stdout || '').trim()
+          const replayDone = launchOut.includes('already completed')
+          const started = launchOut.includes('__STARTED__')
+          const warnings = [...preCheckWarnings]
+          if (!started && !replayDone) {
+            warnings.push('worker detached but the .worker_started marker was not seen within the launch window '
+              + '(slow start or a replay queued behind a running batch) — poll to confirm')
           }
           return {
             ok: true,
             job_id: jobId,
-            state: 'completed',
+            state: replayDone ? 'completed' : started ? 'running' : 'submitted',
             scheduler: 'ssh',
             remote_dir: remoteDir,
             scripts_dir: scriptsRoot,
-            warnings: preCheckWarnings,
+            warnings,
             job_file: path.join(runDir, '.batch_job.json'),
-            output: (ran.stdout || '').trim().slice(0, 4000),
+            output: launchOut.slice(0, 2000),
           }
         }
         const command = buildSubmitCommand({
@@ -624,7 +694,11 @@ export function batchTools(ctx) {
         + 'window where the session progress card live-updates. Polling discipline (D-021, moved here from the '
         + 'AGENTS.md workflow table): poll, never blind-sleep — re-check after each bounded wait, back off '
         + '10 s -> 20 s -> 40 s with the ETA computed from completed over total; while a progress card is up, '
-        + 'refresh it at least every 5 s. Analysis recipe after a terminal state (raw data stays where it '
+        + 'refresh it at least every 5 s. ABORT BEHAVIOR: polling is read-only, so the session stop settles a '
+        + 'blocking poll at once with no side effects — but if the SUBMIT that created the batch was aborted, '
+        + 'no job file may exist (the "no job record" error) and the remote state is UNCERTAIN: verify it '
+        + 'directly with ssh_exec (cat sweep_progress.json / .worker_started / .hams_ssh_done, tail errlog.txt) '
+        + 'before drawing conclusions. Analysis recipe after a terminal state (raw data stays where it '
         + 'executed): in-cluster run the parsers on the host that holds the data (shared filesystem) with the '
         + 'interpreter named by the remote_python row of the project\'s AGENTS.md yaml (null = the bare default '
         + 'the self-check verified — python for the in-cluster local chain, python3 otherwise) — '
@@ -646,6 +720,10 @@ export function batchTools(ctx) {
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
+        // D-029: the turn's abort signal — rides every channel call and wakes
+        // the wait_sec gaps, so the session stop settles a blocking poll at
+        // once (polling is read-only: an aborted poll leaves nothing behind).
+        const turnSignal = exec?.signal ?? null
         // D-021 anchoring: the calling session's project (or an explicit
         // `project` argument) — no walk-up from run_dir; a subagent caller
         // resolves to its topmost user-visible ancestor (src/subagent.js). The
@@ -657,7 +735,11 @@ export function batchTools(ctx) {
         const { settings, warnings: overlayWarnings } = overlaySettingsAt(p.project.path)
         const job = readJob(runDir)
         const jobId = args.job_id || job?.job_id
-        if (!jobId) throw new Error('no job id: pass job_id or run batch_submit first')
+        if (!jobId) throw new Error('no job record: <run_dir>/.batch_job.json is absent and no job_id was passed '
+          + '— the batch state is UNCERTAIN (the submit may have been aborted before the job file was written, '
+          + 'or this run dir was never submitted from this machine). Verify the remote state directly first '
+          + '(ssh_exec the run dir: cat sweep_progress.json / .worker_started / .hams_ssh_done, tail errlog.txt), '
+          + 'or pass job_id')
         if (!/^[\w.-]+$/.test(jobId)) throw new Error(`invalid job_id ${JSON.stringify(jobId)} (word/dot/dash only — it is joined into local paths)`)
         let scheduler = args.scheduler || job?.scheduler || 'lsf'
         // wait_sec (D-008): 0 keeps the single-snapshot contract; a positive
@@ -677,7 +759,8 @@ export function batchTools(ctx) {
             if (!waitSec || TERMINAL_POLL_STATES.has(frame.state)) break
             const remain = deadline - Date.now()
             if (remain <= 0) break
-            await new Promise((res) => setTimeout(res, Math.min(WAIT_GAP_MS, remain)))
+            await sleepAbortable(Math.min(WAIT_GAP_MS, remain), turnSignal)
+            if (turnSignal?.aborted) break
           }
           return {
             ok: true,
@@ -710,11 +793,13 @@ export function batchTools(ctx) {
           target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
         }
         const channel = {
+          // D-029: turnSignal rides the poll execs and the terminal fetch —
+          // read-only calls, so an abort settles at once and leaves nothing.
           exec: sshExec
-            ? (cmd, opts) => execRemote(ctx, target.alias, cmd, opts)
-            : (cmd, opts) => execLocal(ctx, cmd, opts),
+            ? (cmd, opts) => execRemote(ctx, target.alias, cmd, { ...opts, signal: turnSignal })
+            : (cmd, opts) => execLocal(ctx, cmd, { ...opts, signal: turnSignal }),
           download: !inCluster
-            ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath)
+            ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath, { signal: turnSignal })
             : localCopy,
         }
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
@@ -729,7 +814,8 @@ export function batchTools(ctx) {
           if (!waitSec || TERMINAL_POLL_STATES.has(parsed.state)) break
           const remain = deadline - Date.now()
           if (remain <= 0) break
-          await new Promise((res) => setTimeout(res, Math.min(WAIT_GAP_MS, remain)))
+          await sleepAbortable(Math.min(WAIT_GAP_MS, remain), turnSignal)
+          if (turnSignal?.aborted) break
         }
         // Terminal state: absorb the old fetch — pull the light result files
         // straight down per file (existence probed once, no archive). The

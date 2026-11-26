@@ -458,7 +458,7 @@ export async function stopSelfcheck(id, projectPath) {
 }
 
 async function killSubmittedLsfJobs(run) {
-  const ch = runChannel(run)
+  const ch = runChannel(run, { withSignal: false })
   for (const topo of TOPOS) {
     const job = readJob(path.join(run.runDir, 'remote', topo))
     if (job?.scheduler === 'lsf' && job.job_id) {
@@ -887,18 +887,26 @@ function remoteDirFor(run, topo, scheduler) {
 // (in-cluster LSF). Transfers cross ssh ONLY out-of-cluster (D-002): an
 // in-cluster run stages and fetches with plain local copies on the shared
 // filesystem, whatever the scheduler. Same value shapes either way, so the
-// chains below stay channel-agnostic.
-function runChannel(run) {
+// chains below stay channel-agnostic. The run's cancel controller signal
+// rides every call (D-029 discipline): the self-check stop then settles
+// in-flight remote execs at once (dsh-ssh KILL + close / ctx.shell kill)
+// instead of waiting out their budgets — previously the signal only reached
+// the callTool-invoked batch tools, not these direct channel calls.
+function runChannel(run, { withSignal = true } = {}) {
   const { ctx, alias, inCluster } = run._priv
+  // Cancel cleanup (killSubmittedLsfJobs) runs AFTER the controller aborted —
+  // carrying the dead signal there would abort the bkill before dispatch, so
+  // that path opts out (withSignal: false): cleanup must outlive the cancel.
+  const signal = withSignal ? (run._priv.cancel?.controller?.signal ?? null) : null
   return {
     exec: alias
-      ? (cmd, opts) => execRemote(ctx, alias, cmd, opts)
-      : (cmd, opts) => execLocal(ctx, cmd, opts),
+      ? (cmd, opts) => execRemote(ctx, alias, cmd, { ...opts, signal })
+      : (cmd, opts) => execLocal(ctx, cmd, { ...opts, signal }),
     upload: !inCluster && alias
-      ? (localPath, remotePath) => uploadFile(ctx, alias, localPath, remotePath)
+      ? (localPath, remotePath) => uploadFile(ctx, alias, localPath, remotePath, { signal })
       : localCopy,
     download: !inCluster && alias
-      ? (remotePath, localPath) => downloadFile(ctx, alias, remotePath, localPath)
+      ? (remotePath, localPath) => downloadFile(ctx, alias, remotePath, localPath, { signal })
       : localCopy,
   }
 }

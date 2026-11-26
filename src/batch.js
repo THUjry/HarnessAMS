@@ -1,8 +1,10 @@
-// Generic remote batch channel: submit a worker through LSF (bsub), or run the
-// same worker on a node over ssh (scheduler=ssh, foreground). Out-of-cluster
-// both paths upload one run directory plus the suite's worker scripts over
-// dsh-ssh; in-cluster the uploads are local copies on the shared filesystem
-// and in-cluster LSF submits locally (the channel matrix lives in
+// Generic remote batch channel: submit a worker through LSF (bsub), or launch
+// the same worker on a node over ssh DETACHED (scheduler=ssh — the unified
+// submit contract: every scheduler is a quick launch that returns a job file
+// for batch_poll; only the internals differ, bsub vs nohup vs a local spawn).
+// Out-of-cluster both paths upload one run directory plus the suite's worker
+// scripts over dsh-ssh; in-cluster the uploads are local copies on the shared
+// filesystem and in-cluster LSF submits locally (the channel matrix lives in
 // tools/batch.js, the environment ruling in docs/decisions.md D-002). Both
 // paths record the same job file for batch_poll.
 //
@@ -264,16 +266,25 @@ export function buildSubmitCommand({ remoteDir, queue, jobName, node, python, wo
   ].join(' ')
 }
 
-// scheduler=ssh: run the SAME worker directly on the target node (the
-// foreground mode — no LSF involvement), executed synchronously through
-// ssh_exec. Same guard family as the LSF submit: a completed run
-// short-circuits on the .hams_ssh_done marker (read back, exit 0); a
-// still-running first attempt holds the flock so a replay queues behind it
-// instead of double-running; a dead first attempt releases the lock (its
-// holder was killed), letting the replay rerun. The exec timeout wrapper
-// (ssh out-of-cluster, the ctx.shell deadline in-cluster) bounds any lock
-// wait. overwrite=true uses the same clear-and-tag scheme as the LSF submit
-// (see there).
+// scheduler=ssh: launch the SAME worker on the target node DETACHED and
+// return at once — the unified submit contract (local spawn / bsub / nohup
+// launch all behave identically toward the session; only the internals
+// differ). The guard family is unchanged, but the whole guarded block
+// (flock + replay check + worker + done marker) runs as one backgrounded
+// `sh -c` under nohup with every fd redirected (stdout/stderr ->
+// ssh_worker.log, stdin < /dev/null), so it survives the exec channel
+// closing; the foreground part only cds, runs the pre-lock replay check,
+// launches, and waits a bounded ~20 s for the worker's own .worker_started
+// marker (the worker writes it with pid/host/started_at right after its
+// imports — a completed-run replay short-circuits the foreground on
+// .hams_ssh_done before anything is launched; a still-running first attempt
+// holds the flock so a replay's background block queues behind it instead of
+// double-running while its foreground sees the existing .worker_started and
+// reports running; a dead holder releases the lock, letting the replay
+// rerun). overwrite=true uses the same clear-and-tag scheme as the LSF
+// submit (see there). The exec budget is launch-scale (tools/batch.js), NOT
+// a per-run ssh deadline — the worker's own global budget is the only
+// run-level deadline left.
 export function buildSshCommand({ remoteDir, python, workerPath, workerArgs, overwrite }) {
   const args = (workerArgs || []).map(String)
   if (!args.includes('--work-dir')) args.push('--work-dir', remoteDir)
@@ -286,12 +297,19 @@ export function buildSshCommand({ remoteDir, python, workerPath, workerArgs, ove
   const done = overwrite
     ? 'printf \'#hams-overwrite\\n\' > .hams_ssh_done'
     : 'touch .hams_ssh_done'
-  return [
-    'cd', shq(remoteDir), '|| exit 9;',
-    preLock,
+  const guarded = [
     'exec 9>.hams_ssh.lock; flock 9;',
     inLock,
     shq(python), shq(workerPath), ...args.map(shq), `&& ${done}`,
+  ].join(' ')
+  return [
+    'cd', shq(remoteDir), '|| exit 9;',
+    preLock,
+    `nohup sh -c ${shq(guarded)} > ssh_worker.log 2>&1 < /dev/null &`,
+    'i=0; while [ $i -lt 20 ] && [ ! -f .worker_started ]; do sleep 1; i=$((i+1)); done;',
+    'echo \'[hams] worker detached (stdout/stderr -> ssh_worker.log)\';',
+    'if [ -f .worker_started ]; then echo __STARTED__; cat .worker_started; '
+      + 'else echo \'[hams] no .worker_started marker yet (slow start or replay queued on the flock) — poll to confirm\'; fi',
   ].join(' ')
 }
 

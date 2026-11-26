@@ -28,6 +28,11 @@
 //     busybox-flavored timeout treats it as the command) so the remote
 //     process is guaranteed to die at the deadline (dsh-ssh's own kill on
 //     timeout is best-effort: stream KILL + channel close, connection kept);
+//   - an outer abort `signal` (the turn's exec.signal) both rides the batch
+//     input — dsh-ssh's exec tool forwards it into stream KILL + channel
+//     close — and races the batch in callTool, because the host drains an
+//     aborted batch until its bodies settle and sftp has no dsh-ssh abort
+//     path at all; the orphaned transfer/upload is harmless (idempotent);
 //   - dsh-ssh replays a broken-connection exec up to 3 times and each replay
 //     resets the command budget — the outer AbortSignal covers
 //     3 × (deadline + connect), the only hard stop in town;
@@ -81,13 +86,22 @@ export function shq(s) {
 // The one programmatic tool-call funnel (batch contract, see header). Returns
 // { isError, text, value } — never throws; pipeline errors land in .text with
 // their cause unwrapped and channel-open shapes annotated. An optional external
-// `signal` (self-check stop) combines with the timeout so an in-flight call
-// aborts without waiting out its budget.
+// `signal` (the turn abort signal from a tool's exec.signal, or the self-check
+// stop) combines with the timeout AND races the batch: the host never abandons
+// a started tool body (an aborted batch drains until its bodies settle, and
+// dsh-ssh uploads/downloads have no abort support at all), so without the race
+// an aborted turn would still wait out the transfer. Losing the race returns
+// here at once; the orphaned batch keeps running underneath — harmless
+// (re-staging uploads are idempotent, and exec-shaped calls additionally
+// receive the fused signal, which dsh-ssh turns into KILL + channel close).
+const RACE_ABORTED = Symbol('race-aborted')
+const ABORT_TEXT = 'aborted: the session stop cancelled this call locally — the remote operation state is uncertain (it may still be in flight); re-verify the remote state before acting'
 export async function callTool(ctx, name, args, { timeoutMs = 40_000, signal } = {}) {
   const def = ctx?.tools?.get?.(name)
   if (!def) return { isError: true, text: `${name} is not registered (install/enable @linxin666/dsh-ssh)`, value: null }
+  if (signal?.aborted) return { isError: true, text: ABORT_TEXT, value: null }
   try {
-    const batch = await ctx.tools.execute({
+    const batchPromise = ctx.tools.execute({
       calls: [{
         type: 'tool-call',
         id: 'hams-sim-' + crypto.randomUUID(),
@@ -98,6 +112,23 @@ export async function callTool(ctx, name, args, { timeoutMs = 40_000, signal } =
         ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)])
         : AbortSignal.timeout(timeoutMs),
     })
+    let batch
+    if (signal) {
+      let onAbort = null
+      const abortPromise = new Promise((resolve) => {
+        onAbort = () => resolve(RACE_ABORTED)
+        signal.addEventListener('abort', onAbort, { once: true })
+      })
+      try {
+        const winner = await Promise.race([batchPromise, abortPromise])
+        if (winner === RACE_ABORTED) return { isError: true, text: ABORT_TEXT, value: null }
+        batch = winner
+      } finally {
+        signal.removeEventListener('abort', onAbort)
+      }
+    } else {
+      batch = await batchPromise
+    }
     const r = batch?.results?.[0]?.result
     if (!r) return { isError: true, text: `${name}: ToolBatchResult carried no result entry`, value: null }
     return { isError: !!r.isError, text: resultText(r), value: resultValue(r) }
@@ -139,7 +170,7 @@ export async function listMachines(ctx, timeoutMs = 10_000) {
 // runs as `timeout -s KILL <N>s sh -c <command>` remotely (no `--`, see
 // header), so exit 137
 // (128+SIGKILL) is the remote deadline firing, not a command failure.
-export async function execRemote(ctx, machine, command, { timeoutMs = 40_000 } = {}) {
+export async function execRemote(ctx, machine, command, { timeoutMs = 40_000, signal } = {}) {
   const alias = typeof machine === 'string' ? machine : (machine?.alias ?? machine?.id)
   if (!alias) return { ok: false, isError: true, text: 'no machine alias', stdout: '', stderr: 'no machine alias', exitCode: -1, timedOut: false }
   const seconds = Math.max(1, Math.ceil(timeoutMs / 1000))
@@ -151,9 +182,11 @@ export async function execRemote(ctx, machine, command, { timeoutMs = 40_000 } =
     // Tool-level budget sits above the remote deadline so the wrapper's exit
     // code comes back as a value; the outer signal covers 3 broken-connection
     // replays (each replay re-runs the wrapped command, so each costs at most
-    // deadline + connect).
+    // deadline + connect). `signal` is the caller's abort signal (the turn's
+    // exec.signal): it both races the call (see callTool) and rides the batch
+    // input, where dsh-ssh's exec tool forwards it into KILL + channel close.
     { alias, command: wrapped, timeoutMs: timeoutMs + 90_000 },
-    { timeoutMs: 3 * (timeoutMs + 90_000) + 60_000 })
+    { timeoutMs: 3 * (timeoutMs + 90_000) + 60_000, signal })
   if (r.isError) {
     const text = attributeSshError(r.text)
     return { ok: false, isError: true, text, stdout: '', stderr: text, exitCode: -1, timedOut: false }
@@ -180,9 +213,12 @@ export async function execRemote(ctx, machine, command, { timeoutMs = 40_000 } =
 }
 
 // Single-file upload (dsh-ssh auto-creates parent directories remotely).
-export async function uploadFile(ctx, machine, localPath, remotePath) {
+// dsh-ssh sftp has no abort support, so `signal` only races the wait here —
+// an aborted turn returns at once while the orphaned transfer finishes
+// underneath (uploads are idempotent re-staging; no log side effects).
+export async function uploadFile(ctx, machine, localPath, remotePath, { signal } = {}) {
   const alias = typeof machine === 'string' ? machine : (machine?.alias ?? machine?.id)
-  const r = await callTool(ctx, 'ssh_upload', { alias, localPath, remotePath }, { timeoutMs: 300_000 })
+  const r = await callTool(ctx, 'ssh_upload', { alias, localPath, remotePath }, { timeoutMs: 300_000, signal })
   const v = (r.value && typeof r.value === 'object' && !r.isError) ? r.value : {}
   const ok = !r.isError && v.ok === true
   return {
@@ -194,10 +230,12 @@ export async function uploadFile(ctx, machine, localPath, remotePath) {
 }
 
 // Single-file download (directories are not supported by dsh-ssh; the batch
-// channel tars remotely and downloads the one archive).
-export async function downloadFile(ctx, machine, remotePath, localPath) {
+// channel tars remotely and downloads the one archive). Same signal semantics
+// as uploadFile: race-only (sftp has no abort path), orphaned transfer is
+// harmless.
+export async function downloadFile(ctx, machine, remotePath, localPath, { signal } = {}) {
   const alias = typeof machine === 'string' ? machine : (machine?.alias ?? machine?.id)
-  const r = await callTool(ctx, 'ssh_download', { alias, remotePath, localPath }, { timeoutMs: 300_000 })
+  const r = await callTool(ctx, 'ssh_download', { alias, remotePath, localPath }, { timeoutMs: 300_000, signal })
   const v = (r.value && typeof r.value === 'object' && !r.isError) ? r.value : {}
   const ok = !r.isError && v.ok === true
   return {

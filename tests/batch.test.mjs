@@ -1,6 +1,6 @@
 // Generic remote batch tools: machine resolution, upload/submit/poll against
 // a mocked @linxin666/dsh-ssh tool shell (structured values, no network, no SSH, no
-// LSF required). The scheduler=ssh path is the foreground mode (no bsub). The
+// LSF required). The scheduler=ssh path is the detached launch mode (nohup, no bsub). The
 // channel matrix follows the project's cluster_env (D-002): out-of-cluster (the
 // default for bare temp dirs) keeps every operation over the mocked ssh shell;
 // in-cluster tests plant a .harnessams project root with cluster_env=in-cluster
@@ -24,6 +24,7 @@ import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { syncAgentsMd } from '../src/server/agentsmd.js'
 import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginAssets, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/batch.js'
+import { callTool } from '../src/remote.js'
 
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
 
@@ -160,6 +161,14 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
         }
         if (cmd.includes('wc -l')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: `${existing}\n`, stderr: '', durationMs: 3 }))
         if (cmd.includes('ls -1') && cmd.includes('/home/op/sim')) return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: ls, stderr: '', durationMs: 3 }))
+        if (cmd.includes('nohup sh -c') && cmd.includes('.hams_ssh_done')) {
+          // scheduler=ssh launch: the detached block + the .worker_started readback
+          return reply(ok({
+            success: true, exitCode: 0, timedOut: false, durationMs: 5, stderr: '',
+            stdout: '[hams] worker detached (stdout/stderr -> ssh_worker.log)\n__STARTED__\n'
+              + '{"pid": 4242, "host": "node2", "started_at": "2026-01-01T00:00:00Z", "total_points": 2}\n',
+          }))
+        }
         return reply(ok({ success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 3 }))
       },
     },
@@ -608,7 +617,7 @@ test('submit/ssh commands carry the replay idempotency guards (and bsub -m)', ()
     workerPath: '/w/spectre_sweep_worker.py', workerArgs: [], overwrite: true,
   })
   assert.match(owSsh, /rm -f \.hams_submitted \.hams_ssh_done/, 'ssh clears both markers too')
-  assert.match(owSsh, /#hams-overwrite\\n' > \.hams_ssh_done/, 'the done marker is tagged')
+  assert.match(owSsh, /#hams-overwrite\\+n' > \.hams_ssh_done/, 'the done marker is tagged')
 })
 
 test('batch_submit uploads the worker scripts tree and run files, then records the job', async () => {
@@ -734,7 +743,7 @@ test('batch_submit rejects a worker outside the scripts root with guidance', asy
   }
 })
 
-test('batch_submit scheduler=ssh runs the worker directly on the target host (no bsub)', async () => {
+test('batch_submit scheduler=ssh launches the worker detached on the target host (no bsub)', async () => {
   const run = makeRunDir()
   try {
     const ctx = makeCtx()
@@ -748,7 +757,10 @@ test('batch_submit scheduler=ssh runs the worker directly on the target host (no
     }, {})
     assert.equal(res.ok, true, JSON.stringify(res))
     assert.equal(res.scheduler, 'ssh')
-    assert.equal(res.state, 'completed')
+    // D-028: a quick launch returns the non-terminal state — the mocked worker
+    // reports its .worker_started marker, so the startup verification maps to running
+    assert.equal(res.state, 'running')
+    assert.match(res.output, /worker detached/)
 
     const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
     assert.equal(job.scheduler, 'ssh')
@@ -757,12 +769,21 @@ test('batch_submit scheduler=ssh runs the worker directly on the target host (no
     assert.match(job.job_id, /^ssh-/)
     assert.equal(job.remote_dir, '/home/op/sim/fore')
 
-    const commands = ctx.calls.filter((c) => c.name === 'ssh_exec')
-      .map((c) => String(c.arguments.command).replace(/\\"/g, '"'))
-    const ssh = commands.find((c) => c.includes('spectre_sweep_worker.py'))
-    assert.ok(ssh, 'ssh worker command sent')
+    const launch = ctx.calls.find((c) => c.name === 'ssh_exec'
+      && String(c.arguments.command).includes('spectre_sweep_worker.py'))
+    assert.ok(launch, 'ssh worker command sent')
+    const ssh = String(launch.arguments.command).replace(/\\+"/g, '"')
     assert.match(ssh, /"--work-dir" "\/home\/op\/sim\/fore"/)
     assert.ok(ssh.includes('.hams_ssh_done'), 'ssh run carries the done-marker guard')
+    // D-028 shape: the guarded block is backgrounded with every fd redirected
+    // (survives the channel closing) and the foreground waits for the marker
+    assert.ok(ssh.includes('nohup sh -c'), 'guarded block runs under nohup')
+    assert.ok(ssh.includes('> ssh_worker.log 2>&1 < /dev/null &'), 'worker fds redirected away from the channel')
+    assert.match(ssh, /while \[ \\?\$i -lt 20 \]/, 'bounded startup wait')
+    assert.ok(ssh.includes('.worker_started'), 'startup wait watches the worker marker')
+    assert.ok(ssh.includes('__STARTED__'), 'startup verification marker in the launch output')
+    // the exec budget is launch-scale (60 s + execRemote's 90 s headroom), NOT the retired 600 s per-run deadline
+    assert.equal(launch.arguments.timeoutMs, 150_000)
   } finally {
     restoreEnv()
   }
@@ -1218,7 +1239,7 @@ test('in-cluster scheduler=ssh (D-002): exec over ssh, staging stays a local cop
     }, {})
     assert.equal(res.ok, true, JSON.stringify(res))
     assert.equal(res.scheduler, 'ssh')
-    assert.equal(res.state, 'completed')
+    assert.equal(res.state, 'running')
 
     const job = JSON.parse(fs.readFileSync(path.join(run, '.batch_job.json'), 'utf8'))
     assert.equal(job.cluster_env, 'in-cluster')
@@ -1260,7 +1281,7 @@ function plantPins(root, pins) {
 const flatCommand = (ctx, needle) => {
   const call = ctx.calls.find((c) => c.name === 'ssh_exec' && String(c.arguments.command).includes(needle))
   assert.ok(call, `no ssh_exec command carrying ${needle}`)
-  return String(call.arguments.command).replace(/\\"/g, '"')
+  return String(call.arguments.command).replace(/\\+"/g, '"')
 }
 
 test('toolchain pins (D-016): remote_python / remote_spectre_cmd resolve from the project settings on every remote scheduler', async () => {
@@ -1290,7 +1311,7 @@ test('toolchain pins (D-016): remote_python / remote_spectre_cmd resolve from th
     assert.equal(job.remote_python, PIN_PY, 'the job file records the interpreter that ran')
     assert.deepEqual(job.worker_args, ['--config', 'sweep_config.json', '--spectre-cmd', PIN_SPECTRE])
 
-    // ssh scheduler: the same pair, foreground
+    // ssh scheduler: the same pair, detached launch (D-028)
     const sshCtx = makeCtx({ project: root })
     const res2 = await submit(sshCtx, { remote_dir: 'fore', scheduler: 'ssh' })
     assert.equal(res2.ok, true, JSON.stringify(res2))
@@ -1381,6 +1402,68 @@ test('toolchain pins (D-016): in-cluster — the local bsub carries the pins, th
     assert.ok(!fs.existsSync(path.join(noRun, '.batch_job.json')))
   } finally {
     fs.rmSync(localShared, { recursive: true, force: true })
+    restoreEnv()
+  }
+})
+
+// ---- abort contract (D-029) --------------------------------------------------
+//
+// The session stop reaches the channels as the tool's exec.signal. callTool
+// must settle AT ONCE even when the nested tool body never settles (dsh-ssh
+// sftp has no abort path; the host pipeline likewise drains an aborted batch
+// until its bodies settle), and the batch input must carry the signal down so
+// exec-shaped calls get dsh-ssh's KILL + channel close.
+
+test('abort contract (D-029): callTool races a never-settling nested call and reports the uncertainty', async () => {
+  const ac = new AbortController()
+  let nestedSignal = null
+  const ctx = {
+    tools: {
+      get: () => ({ name: 'ssh_exec' }),
+      execute: (input) => {
+        nestedSignal = input.signal
+        return new Promise(() => {}) // sftp-style body: ignores cancellation forever
+      },
+    },
+  }
+  const t0 = Date.now()
+  const pending = callTool(ctx, 'ssh_exec', { alias: 'node1', command: 'x' }, { timeoutMs: 60_000, signal: ac.signal })
+  setTimeout(() => ac.abort(), 50)
+  const r = await pending
+  const elapsed = Date.now() - t0
+  assert.equal(r.isError, true)
+  assert.match(r.text, /uncertain/i)
+  assert.ok(elapsed < 2000, `settled in ${elapsed} ms — the race, not the budget`)
+  assert.ok(nestedSignal && nestedSignal.aborted, 'the nested batch input carried and aborted the signal')
+})
+
+test('abort contract (D-029): an already-aborted signal returns without dispatching', async () => {
+  let dispatched = false
+  const ctx = {
+    tools: {
+      get: () => ({ name: 'ssh_exec' }),
+      execute: () => { dispatched = true; return new Promise(() => {}) },
+    },
+  }
+  const ac = new AbortController()
+  ac.abort()
+  const r = await callTool(ctx, 'ssh_exec', { alias: 'node1', command: 'x' }, { signal: ac.signal })
+  assert.equal(r.isError, true)
+  assert.match(r.text, /uncertain/i)
+  assert.equal(dispatched, false)
+})
+
+test('batch_poll without a job record states the batch uncertainty (D-029)', async () => {
+  const run = makeRunDir()
+  try {
+    const ctx = makeCtx()
+    await assert.rejects(
+      () => tool(ctx, 'batch_poll').execute({ run_dir: run }, {}),
+      (e) => /UNCERTAIN/.test(e.message)
+        && /sweep_progress\.json/.test(e.message)
+        && /job_id/.test(e.message),
+    )
+  } finally {
     restoreEnv()
   }
 })

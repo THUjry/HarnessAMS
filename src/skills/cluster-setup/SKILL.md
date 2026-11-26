@@ -18,6 +18,8 @@ Since 2026-11-25 the pinning is automatic in the common case: a GREEN self-check
 
 **Never guess a path and never choose an interpreter by taste.** A path enters the settings only after it was measured (by the self-check's own jobs, or by stages 1 and 2 here), and when candidates disagree the user decides.
 
+**Never assume clock synchronization between the local host and the cluster nodes.** Timestamps taken on two machines are not comparable: never order events or measure elapsed time across hosts by them, measure on one side.
+
 ## The moving parts (why a bare name is not enough)
 
 - **Interactive login shell** (a human typing `ssh node`): `/etc/profile` -> `/etc/profile.d/*.sh` -> `~/.bash_profile` -> `~/.bashrc`. On RHEL/Rocky-style clusters `/etc/profile.d/modules.sh` defines the `module` function (Environment Modules; Lmod clusters ship their own profile.d entry), and every `module load <mod>` prepends that tool's absolute `bin/` directory to PATH.
