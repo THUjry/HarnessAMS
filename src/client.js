@@ -168,6 +168,7 @@ window.__ModuleLoader__.load({
         'check.badMultPair': '“{p}”须为正整数且下限 < 上限',
         'pset.title': '项目设置',
         'pset.rootLabel': '远程根路径',
+        'pset.selfchkDirLabel': '自检目录',
         'pset.dirLocalHint': '本地模式：自检产物写入本地 .harnessams/selfcheck/ 目录',
         'pset.dirRemoteRel': '相对路径按远端根路径解析',
         'pset.browse': '浏览',
@@ -390,6 +391,7 @@ window.__ModuleLoader__.load({
         'check.badPair': '"{p}" must be positive numbers with min < max',
         'pset.title': 'Project settings',
         'pset.rootLabel': 'Remote root',
+        'pset.selfchkDirLabel': 'Self-check directory',
         'pset.dirLocalHint': 'local mode: self-check artifacts go under the local .harnessams/selfcheck/ directory',
         'pset.dirRemoteRel': 'relative paths resolve under the remote root',
         'pset.browse': 'Browse',
@@ -2071,7 +2073,7 @@ window.__ModuleLoader__.load({
               disabled: !machine, title: tr('pset.browseTitle'),
               onClick: () => setBrowseOpen(true) }, tr('pset.browse'))),
           remote && h('div', { className: 'hams-dim', style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', margin: '0 0 4px' } },
-            '→ ', txt(dirPreview), ' · ', tr('pset.dirRemoteRel')),
+            tr('pset.selfchkDirLabel') + ': ', txt(dirPreview), ' · ', tr('pset.dirRemoteRel')),
           h(SettingsTable, { draft, settings, machines, run, facts, nowMs, onChange: updateSetting }),
           // confirm row: staged edits land in workspace_config.json (and AGENTS.md
           // re-syncs) only here — red "unsaved" cells mark the pending state

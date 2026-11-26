@@ -119,9 +119,11 @@ test('agentsmd: the toolchain pins mirror as yaml rows a session reads for remot
     assert.ok(md.indexOf('  compute_remote: "python"') < md.indexOf('  remote_python: ')
       && md.indexOf('  remote_python: ') < md.indexOf('  remote_spectre_cmd: ')
       && md.indexOf('  remote_spectre_cmd: ') < md.indexOf('  remote_root: '), 'row order: compute_remote, pins, remote paths')
-    // D-021: the analyze recipe moved into the batch_poll DESCRIPTION — the
-    // table only points at it
-    assert.ok(md.includes('the interpreter per the remote_python row'), 'the analyze row points at the row via the recipe pointer')
+    // 2026-11-26: pointer clauses dropped from the workflow table (the tool
+    // descriptions are already in the model context) — the analyze row states
+    // the action only and the recipe pointer is gone
+    assert.ok(md.includes('write compact JSON into <design>/SimResults/'), 'the analyze row states the action')
+    assert.ok(!md.includes('the interpreter per the remote_python row'), 'the recipe pointer is dropped')
     // an untyped settings object (no pin keys at all) still renders the rows as null
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: { ...settings, remote_python: undefined, remote_spectre_cmd: undefined } })
     const md2 = await readFile(agentsMdPath(ws), 'utf8')
