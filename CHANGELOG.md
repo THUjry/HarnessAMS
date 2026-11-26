@@ -2,6 +2,16 @@
 
 All notable changes are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semver.
 
+## [Unreleased]
+
+### Added
+
+- System-browser report viewing (2026-11-26): the session Dashboard's Open button launches the report file with the OS default application through the new `POST /api/open-local` route — as a local file, so the report's relative plotly/`SimResults` references resolve offline (the embedded iframe could not serve them past its per-report directory fence and leaned on the CDN fallback). The route is fenced (`src/server/openlocal.js`): viewable-extension whitelist, existing regular file, quoting-safe characters (no `"`/`%`/control chars), plus a same-origin guard on `sec-fetch-site`/`origin` — it is the first route that can trigger an OS process and never accepts executable/script paths. The embedded iframe viewer (iframe + reload + open-in-tab + the stat poll) is retired but fully kept behind the `DASH_SYSTEM_OPEN` flag in `src/client.js` — flip to false to restore it verbatim. Tests 154 → 157 (open-local route/fence/guard suite).
+
+### Fixed
+
+- Session-config write-channel unification (2026-11-26): the first-level tab pills wrote through `mutateConfig`, which PUT the closure snapshot unrebased — clicking a session pill right after `gen_sweep_report` registered a report wiped the injected report (the in-memory snapshot only refreshes while the Dashboard sub-view is open). `mutateConfig` keeps the optimistic local flip but now rides the rebased persist channel (`persistConfig`: GET the latest server entry, re-apply the mutator, PUT, adopt the confirmed entry); the mutator contract stays idempotent (applied once to the optimistic snapshot, once to the fresh base). The first-seen tombstone PUT also re-checks the server first — an entry the second writer created between the hydrate GET and the PUT is adopted instead of tombstoned over.
+
 ## [0.1.0] - 2026-11-10
 
 Initial release (stage 1 scope).
