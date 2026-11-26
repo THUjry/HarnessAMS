@@ -17,11 +17,18 @@
 // management reads/writes live here — no credentials, no remote-execution passthrough.
 // The Dashboard viewer is display-only: it serves session-registered local HTML
 // reports read-only (bounded by each report's own directory) and a one-level
-// listing for the add-report picker (/api/browse) — no file writes.
-// The system-browser open action (POST /api/open-local, 2026-11-26) is the one
-// route that launches an OS process: a view action fenced to viewable file
-// types (whitelist + existing regular file + quoting-safe characters) with
-// same-origin checks — never an executable/script path, never arguments.
+// listing for the add-report picker (/api/browse — the dialog's FALLBACK path;
+// its primary local-directory access is the host's native OS folder chooser
+// through GET/POST /api/pick-directory, 2026-11-26 ruling: system first) —
+// no file writes.
+// The system-browser open action (POST /api/open-local, 2026-11-26) stays the
+// only route that spawns an OS process from THIS plugin's code: a view action
+// fenced to viewable file types (whitelist + existing regular file +
+// quoting-safe characters) with same-origin checks — never an executable/
+// script path, never arguments. POST /api/pick-directory pops the host's
+// native folder dialog through the host 'directoryPicker' service (the host
+// spawns the dialog child; the service is read via ctx.get without an inject
+// declaration, server/pickdir.js — headless embeds simply get 503).
 // Remote connectivity is delegated entirely to @linxin666/dsh-ssh (ssh_* tools
 // by alias, zero gating); each project's remote root is its own setting
 // (workspace_config.json settings.remote_root — the family harnessams.json and
@@ -49,6 +56,7 @@ import { remoteBrowse, remoteMkdir } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
 import { resolveOpenableFile, openWithDefaultApp } from './server/openlocal.js'
+import { pickerCapability, pickDirectory } from './server/pickdir.js'
 import { seedProjectPlotly } from './report_render.js'
 import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
 import { progressRemotePayload } from './server/progressRemote.js'
@@ -154,6 +162,26 @@ async function readBodyJson(req, limit = 1 << 20) {
   return JSON.parse(Buffer.concat(chunks).toString('utf8'))
 }
 
+// Shared same-origin fence for the untokened POST routes that touch the host
+// desktop (open-local launches a viewer, remote-browse/mkdir writes remotely,
+// pick-directory pops a modal OS dialog): these routes carry no host token by
+// design, so reject Fetch-Metadata that says the request came from another
+// site (a cross-site no-cors text/plain POST can still carry a JSON body;
+// sec-fetch-site sees through it). Non-browser clients (curl, tests) send no
+// sec-fetch-site and pass. Returns the rejection message or null.
+function sameOriginError(req) {
+  const sfs = req.headers['sec-fetch-site']
+  if (typeof sfs === 'string' && sfs !== 'same-origin' && sfs !== 'none') return 'cross-site requests are not accepted'
+  const origin = req.headers.origin
+  if (typeof origin === 'string' && origin !== 'null') {
+    const host = req.headers.host
+    let originHost = null
+    try { originHost = new URL(origin).host } catch { /* unparseable -> rejected below */ }
+    if (host && originHost !== host) return 'cross-origin requests are not accepted'
+  }
+  return null
+}
+
 async function handle(req, res, ctx) {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   const route = url.pathname.replace(/^\/harnessams/, '') || '/'
@@ -250,22 +278,13 @@ async function handle(req, res, ctx) {
       // viewing path for reports (body { sessionId, path }). This is the FIRST
       // route that can trigger an OS process, so it carries its own fence:
       // viewable-extension whitelist + existing regular file + quoting-safe
-      // characters (server/openlocal.js), plus a same-origin guard — these
-      // routes are untokened by design, so reject Fetch-Metadata that says the
-      // request came from another site (a cross-site no-cors text/plain POST
-      // can still carry a JSON body; sec-fetch-site sees through it). Non-
-      // browser clients (curl, tests) send no sec-fetch-site and pass. The
-      // window opens on the DSH host's desktop — in-cluster/headless hosts may
-      // have no default handler and the spawn error surfaces inline.
-      const sfs = req.headers['sec-fetch-site']
-      if (typeof sfs === 'string' && sfs !== 'same-origin' && sfs !== 'none') { json(403, { error: 'cross-site requests are not accepted' }); return }
-      const origin = req.headers.origin
-      if (typeof origin === 'string' && origin !== 'null') {
-        const host = req.headers.host
-        let originHost = null
-        try { originHost = new URL(origin).host } catch { /* unparseable -> rejected below */ }
-        if (host && originHost !== host) { json(403, { error: 'cross-origin requests are not accepted' }); return }
-      }
+      // characters (server/openlocal.js), plus the shared same-origin guard
+      // (sameOriginError — untokened POST routes only accept same-origin
+      // fetches). The window opens on the DSH host's desktop — in-cluster/
+      // headless hosts may have no default handler and the spawn error
+      // surfaces inline.
+      const guard = sameOriginError(req)
+      if (guard) { json(403, { error: guard }); return }
       let body
       try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
       const sessionId = body?.sessionId
@@ -303,19 +322,10 @@ async function handle(req, res, ctx) {
       // write: a plain `mkdir` of ONE validated printable-ASCII path segment
       // under the listed directory (server/remotebrowse.js remoteMkdir through
       // the dsh-ssh exec funnel; an existing name errors with "File exists"
-      // instead of silently succeeding). Same-origin fence as open-local:
-      // these routes are untokened by design, so reject Fetch-Metadata that
-      // says the request came from another site; non-browser clients (curl,
-      // tests) send no sec-fetch-site and pass.
-      const sfs = req.headers['sec-fetch-site']
-      if (typeof sfs === 'string' && sfs !== 'same-origin' && sfs !== 'none') { json(403, { error: 'cross-site requests are not accepted' }); return }
-      const origin = req.headers.origin
-      if (typeof origin === 'string' && origin !== 'null') {
-        const host = req.headers.host
-        let originHost = null
-        try { originHost = new URL(origin).host } catch { /* unparseable -> rejected below */ }
-        if (host && originHost !== host) { json(403, { error: 'cross-origin requests are not accepted' }); return }
-      }
+      // instead of silently succeeding). Shared same-origin guard as
+      // open-local (sameOriginError).
+      const guard = sameOriginError(req)
+      if (guard) { json(403, { error: guard }); return }
       let body
       try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
       const sessionId = body?.sessionId
@@ -337,6 +347,22 @@ async function handle(req, res, ctx) {
       }
       return
     }
+    if (req.method === 'POST' && route === '/api/pick-directory') {
+      // Pop the host's native OS folder chooser (2026-11-26 ruling: system
+      // open first for local directory access; the self-made listing is the
+      // fallback). No body, no sessionId — a folder pick has no project
+      // dependency. Delegates to the host 'directoryPicker' service through
+      // server/pickdir.js (ctx.get, no inject declaration — headless embeds
+      // where the service never exists just get 503). Same-origin guard as
+      // open-local: an untokened route that disturbs the host desktop with a
+      // modal dialog accepts same-origin fetches only.
+      const guard = sameOriginError(req)
+      if (guard) { json(403, { error: guard }); return }
+      const r = await pickDirectory(ctx)
+      if (r.error) { json(r.code ?? 500, { error: r.error }); return }
+      json(200, { ok: true, ...(r.canceled ? { canceled: true } : { path: r.path }) })
+      return
+    }
     if (req.method === 'PUT' && route === '/api/global-config') {
       // The plugin-global display config (D-017: ~/.dsh/harnessams.json) —
       // today the self-check freshness window the console's display settings
@@ -348,7 +374,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, selfcheck_fresh_min: r.value })
       return
     }
-    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir)' })
+    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir, POST /api/pick-directory)' })
     return
   }
 
@@ -415,11 +441,21 @@ async function handle(req, res, ctx) {
     return
   }
   if (route === '/api/browse') {
-    // One-level directory listing for the add-report dialog; no path param =
+    // One-level directory listing for the add-report dialog (its fallback
+    // path since the 2026-11-26 system-first ruling — the primary folder
+    // access is the native chooser at /api/pick-directory); no path param =
     // start at the home dir (report paths are absolute local paths anyway).
     const r = await browseDir(url.searchParams.get('path'), os.homedir())
     if (r.error) { json(400, { error: r.error }); return }
     json(200, { ok: true, ...r })
+    return
+  }
+  if (route === '/api/pick-directory') {
+    // Capability probe backing the add-report dialog's system browse button:
+    // 'native' renders the button, 'browse'/'none' hide it (the host's
+    // documented default for unknown capability kinds) — the self-made
+    // listing above stays the fallback either way. Read-only, no side effect.
+    json(200, { ok: true, kind: pickerCapability(ctx) })
     return
   }
   if (route === '/api/remote-browse') {

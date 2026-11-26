@@ -133,6 +133,8 @@ window.__ModuleLoader__.load({
         'dash.addFirst': '+ 添加报告',
         'dash.currentDir': '当前目录',
         'dash.parentDir': '上一级',
+        'dash.sysBrowse': '系统浏览',
+        'dash.sysBrowseTitle': '用系统对话框选择目录（选后定位到该目录）',
         'dash.pickFile': '选择 HTML 文件（点击即添加）',
         'dash.emptyDir': '（此目录没有子目录或 HTML 文件）',
         'dash.manualLabel': '或输入报告的绝对路径',
@@ -357,6 +359,8 @@ window.__ModuleLoader__.load({
         'dash.addFirst': '+ Add report',
         'dash.currentDir': 'Current directory',
         'dash.parentDir': 'Parent directory',
+        'dash.sysBrowse': 'System browse',
+        'dash.sysBrowseTitle': 'Choose a folder with the system dialog (the list jumps to it)',
         'dash.pickFile': 'Pick an HTML file (click to add it)',
         'dash.emptyDir': '(no subdirectories or HTML files here)',
         'dash.manualLabel': 'Or type the report’s absolute path',
@@ -2678,15 +2682,24 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // Add-report browser: a one-level directory listing (server /api/browse —
-    // subdirectories + *.html files, dot-directories hidden) starting at the
-    // workspace root; clicking an HTML file registers it. The manual path field
-    // covers paths outside the browsable tree.
+    // Add-report browser (2026-11-26 ruling: system open first, self-made as
+    // fallback): the PRIMARY folder access is the host's native OS directory
+    // chooser — the same dialog the host's add-workspace flow uses (GET/POST
+    // /api/pick-directory over the host 'directoryPicker' service; the button
+    // renders only when the capability probe says kind 'native', i.e. local
+    // loopback win32/darwin hosts). That dialog can only choose a FOLDER:
+    // a pick lands the listing in it and the .html click registers the report.
+    // The one-level listing (server /api/browse — subdirectories + *.html
+    // files, dot-directories hidden) is the fallback when no native picker
+    // exists (web-SSH/remote hosts, headless) and stays the in-dialog file
+    // picker; the manual path field covers paths outside the browsable tree.
     function AddReportDialog({ onCancel, onAdd }) {
-      const [cwd, setCwd] = useState(null) // null = server default (workspace root)
+      const [cwd, setCwd] = useState(null) // null = server default (home dir)
       const [listing, setListing] = useState(null)
       const [error, setError] = useState(null)
       const [manual, setManual] = useState('')
+      const [pickKind, setPickKind] = useState(null) // null = probing, 'native' = show the button
+      const [picking, setPicking] = useState(false)
       useEffect(() => {
         let alive = true
         setError(null); setListing(null)
@@ -2695,6 +2708,29 @@ window.__ModuleLoader__.load({
           .catch((e) => { if (alive) setError(String(e.message ?? e)) })
         return () => { alive = false }
       }, [cwd])
+      // one-shot capability probe at open: 'native' renders the system browse
+      // button, anything else (browse backend, no service, failed probe) hides
+      // it — the host's documented default for unknown kinds is hide, not fail
+      useEffect(() => {
+        let alive = true
+        fetchJson(API + '/pick-directory')
+          .then((r) => { if (alive) setPickKind(r.kind === 'native' ? 'native' : 'none') })
+          .catch(() => { if (alive) setPickKind('none') })
+        return () => { alive = false }
+      }, [])
+      // System folder pick: a path jumps the listing there (the [cwd] effect
+      // refetches), a user cancel is a silent no-op, failures surface inline
+      const pickSystem = () => {
+        setPicking(true); setError(null)
+        fetchJson(API + '/pick-directory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: '{}',
+        })
+          .then((r) => { if (r.path) setCwd(r.path) })
+          .catch((e) => setError(String(e.message ?? e)))
+          .finally(() => setPicking(false))
+      }
       const addManual = () => { const p = manual.trim(); if (p) onAdd(p, '') }
       return h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) onCancel() } },
         h('div', { className: 'hams-dialog hams-browse-dialog' },
@@ -2704,6 +2740,9 @@ window.__ModuleLoader__.load({
             h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: 0 } },
               h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.parentDir'),
                 disabled: !listing?.parent, onClick: () => setCwd(listing.parent) }, '↑'),
+              pickKind === 'native' && h('button', { className: 'hams-btn hams-btn-sm',
+                title: tr('dash.sysBrowseTitle'), disabled: picking, onClick: pickSystem },
+                '📂 ' + tr('dash.sysBrowse')),
               h('span', { className: 'hams-dim',
                 style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
                 txt(listing ? listing.path : '…')))),
