@@ -75,7 +75,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': '套件合计 11 个工具：SmartAnaSim 6（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析脚本）＋HarnessAMS 5（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」HTML 报告查看器（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
         'hosts.ok': 'dsh-ssh：{n} 台主机',
         'hosts.missing': 'dsh-ssh 不可用',
@@ -127,6 +127,10 @@ window.__ModuleLoader__.load({
         'dash.refreshShort': '刷新',
         'dash.removeShort': '移除',
         'dash.openShort': '打开',
+        'dash.openSys': '打开',
+        'dash.openSysTitle': '在系统默认浏览器中打开报告（本地文件，可离线渲染）',
+        'dash.sysHint': '报告通过系统默认浏览器以本地文件打开 — plotly 与数据走本地相对路径，可离线渲染。',
+        'dash.openFailed': '打开失败：{err}',
         'dash.empty': '尚未添加报告 — 浏览本地磁盘加入已有的 HTML 报告。',
         'dash.addFirst': '+ 添加报告',
         'dash.currentDir': '当前目录',
@@ -290,7 +294,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'The suite registers 11 tools in total: SmartAnaSim 6 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, and the gen_vsch_import/export pair — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser scripts) and HarnessAMS 5 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, safe_trash and the harnessams_selfcheck self-check). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, an HTML report viewer (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
         'hosts.ok': 'dsh-ssh: {n} host(s)',
         'hosts.missing': 'dsh-ssh not available',
@@ -342,6 +346,10 @@ window.__ModuleLoader__.load({
         'dash.refreshShort': 'Refresh',
         'dash.removeShort': 'Remove',
         'dash.openShort': 'Open',
+        'dash.openSys': 'Open',
+        'dash.openSysTitle': 'Open the report with the system default browser (local file, renders offline)',
+        'dash.sysHint': 'Reports open as local files in the system default browser — plotly and data load from relative local paths, offline-capable.',
+        'dash.openFailed': 'Open failed: {err}',
         'dash.empty': 'No report added yet — browse the local disk to add an existing HTML report.',
         'dash.addFirst': '+ Add report',
         'dash.currentDir': 'Current directory',
@@ -2438,9 +2446,18 @@ window.__ModuleLoader__.load({
     // effect) and this component polls the current report's /api/report-stat —
     // a regenerated document (mtime/size change) reloads through the nonce,
     // so an externally re-run gen_sweep_report shows up without a manual ↻.
+    // System-browser viewing (2026-11-26 ruling): reports open with the OS
+    // default application through POST /api/open-local — as local files, whose
+    // relative plotly/SimResults references resolve offline (the embedded
+    // iframe could not serve them past its per-report directory fence and
+    // leaned on the CDN fallback). The embedded viewer (iframe + ↻ + ↗ + the
+    // stat poll) is RETIRED BUT KEPT: flip this flag to false to restore it.
+    const DASH_SYSTEM_OPEN = true
+
     function SessionDashboard({ sessionId, config, updateConfig }) {
       const [nonce, setNonce] = useState(0)
       const [dialogOpen, setDialogOpen] = useState(false)
+      const [openErr, setOpenErr] = useState(null)
       // newest first: the dropdown and every fallback pick order by added_at
       // descending, so the latest simulation's report is the default view
       // (storage order stays insertion; sort is stable for equal stamps)
@@ -2457,6 +2474,7 @@ window.__ModuleLoader__.load({
       // loaded document is never reloaded.
       const statRef = useRef(null)
       useEffect(() => {
+        if (DASH_SYSTEM_OPEN) return // no embedded document to reload
         statRef.current = null
         if (!current) return
         let alive = true
@@ -2508,6 +2526,18 @@ window.__ModuleLoader__.load({
         return { ...c, reports: rest, dashboard_selected: newest?.id ?? null }
       })
       const dashUrl = current ? '/harnessams/dash/' + encodeURIComponent(sessionId) + '/' + encodeURIComponent(current.id) + '/' : null
+      // System-browser open: the report file is launched with the OS default
+      // application (fenced server-side: viewable types, existing file,
+      // quoting-safe characters); failures surface inline, never thrown.
+      const openInSystemBrowser = () => {
+        if (!current) return
+        setOpenErr(null)
+        fetchJson(API + '/open-local', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, path: current.path }),
+        }).catch((e) => { setOpenErr(String(e.message ?? e)) })
+      }
 
       return h('div', { className: 'hams-dashview' },
         h('div', { className: 'hams-row hams-dashtoolbar' },
@@ -2522,19 +2552,23 @@ window.__ModuleLoader__.load({
               ? reports.map((r) => h('option', { key: r.id, value: r.id }, txt(r.name)))
               : h('option', { value: '' }, tr('dash.noReports'))),
           h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.addTitle'), onClick: () => setDialogOpen(true) }, '\uFF0B ' + tr('dash.add')),
-          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻ ' + tr('dash.refreshShort')),
+          !DASH_SYSTEM_OPEN && h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻ ' + tr('dash.refreshShort')),
           h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.remove'), disabled: !current, onClick: removeCurrent }, '× ' + tr('dash.removeShort')),
-          current && h('a', { className: 'hams-btn hams-btn-sm', title: tr('dash.openTab'), href: dashUrl, target: '_blank', rel: 'noopener' }, '↗ ' + tr('dash.openShort'))),
-        current
-          ? h('iframe', {
-              key: current.id + ':' + nonce,
-              className: 'hams-dashframe',
-              title: current.name,
-              src: dashUrl + '?_r=' + nonce,
-            })
-          : h('div', { className: 'hams-dash' },
-              tr('dash.empty'), ' ',
-              h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDialogOpen(true) }, tr('dash.addFirst'))),
+          DASH_SYSTEM_OPEN && h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.openSysTitle'), disabled: !current, onClick: openInSystemBrowser }, '↗ ' + tr('dash.openSys')),
+          !DASH_SYSTEM_OPEN && current && h('a', { className: 'hams-btn hams-btn-sm', title: tr('dash.openTab'), href: dashUrl, target: '_blank', rel: 'noopener' }, '↗ ' + tr('dash.openShort'))),
+        openErr && h('div', { className: 'hams-err' }, txt(tr('dash.openFailed', { err: openErr }))),
+        current && DASH_SYSTEM_OPEN && h('div', { className: 'hams-dash' },
+          tr('dash.sysHint'), ' ',
+          h('span', { className: 'hams-dim' }, txt(current.path))),
+        current && !DASH_SYSTEM_OPEN && h('iframe', {
+          key: current.id + ':' + nonce,
+          className: 'hams-dashframe',
+          title: current.name,
+          src: dashUrl + '?_r=' + nonce,
+        }),
+        !current && h('div', { className: 'hams-dash' },
+          tr('dash.empty'), ' ',
+          h('button', { className: 'hams-btn hams-btn-sm', onClick: () => setDialogOpen(true) }, tr('dash.addFirst'))),
         dialogOpen && h(AddReportDialog, {
           onCancel: () => setDialogOpen(false),
           onAdd: (p, n) => { setDialogOpen(false); addReport(p, n) },

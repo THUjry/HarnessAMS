@@ -1,7 +1,8 @@
 // Unit tests for the Dashboard viewer surface: session-attached report store
 // (project.js reports[]/dashboard_selected inside sessions.json v2), report
-// file resolution + MIME (dashboard.js), the add-report directory browser, and
-// the /api/report-stat auto-refresh endpoint (route-level, through the
+// file resolution + MIME (dashboard.js), the add-report directory browser, the
+// /api/report-stat auto-refresh endpoint, and the system-browser open action
+// (openlocal.js + POST /api/open-local; route-level, through the
 // apply()-registered handler).
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
@@ -11,7 +12,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { writeSessionConfig, readSessionConfigs } from '../src/server/project.js'
 import { mimeFor, resolveReportFile, browseDir } from '../src/server/dashboard.js'
-import { registerRoutes, callGet } from './helpers.mjs'
+import { resolveOpenableFile, openWithDefaultApp } from '../src/server/openlocal.js'
+import { registerRoutes, callGet, fakeRes } from './helpers.mjs'
 
 const SID = 'session-dash1111-2222-3332-4444-555555555555'
 
@@ -138,5 +140,130 @@ test('dashboard: browseDir lists dirs + *.html, hides dot entries, reports paren
     assert.equal(fallback.path, path.resolve(dir))
   } finally {
     await rm(dir, { recursive: true, force: true })
+  }
+})
+
+// ---- system-browser open (openlocal.js + POST /api/open-local, 2026-11-26) -
+
+test('openlocal: resolveOpenableFile enforces the viewable fence', async () => {
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-open-'))
+  try {
+    const html = path.join(ws, 'r.html')
+    const png = path.join(ws, 'fig.png')
+    const exe = path.join(ws, 'evil.exe')
+    await writeFile(html, '<html></html>')
+    await writeFile(png, 'x')
+    await writeFile(exe, 'x')
+    await mkdir(path.join(ws, 'dir.html'))
+
+    // happy path: viewable existing files, forward slashes resolve on win32
+    assert.equal((await resolveOpenableFile(html)).abs, path.resolve(html))
+    assert.equal((await resolveOpenableFile(png)).abs, path.resolve(png))
+    assert.equal((await resolveOpenableFile(html.split(path.sep).join('/'))).abs, path.resolve(html))
+
+    // fence: relative / missing / directory / non-viewable / unsafe chars / bad input
+    assert.equal((await resolveOpenableFile('r.html')).code, 400)
+    assert.equal((await resolveOpenableFile(path.join(ws, 'nope.html'))).code, 404)
+    assert.match((await resolveOpenableFile(path.join(ws, 'dir.html'))).error, /not a regular file/)
+    assert.match((await resolveOpenableFile(exe)).error, /not a viewable file type/)
+    assert.match((await resolveOpenableFile(path.join(ws, 'p%th.html'))).error, /quote safely/)
+    assert.match((await resolveOpenableFile(path.join(ws, 'q"r.html'))).error, /quote safely/)
+    assert.equal((await resolveOpenableFile('')).code, 400)
+    assert.equal((await resolveOpenableFile(null)).code, 400)
+    assert.equal((await resolveOpenableFile(42)).code, 400)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
+  }
+})
+
+test('openlocal: openWithDefaultApp composes the platform one-liner and surfaces shell failure', async () => {
+  const cmds = []
+  const okCtx = { shell: {
+    resolve: (spec) => spec,
+    execute: (spec) => { cmds.push(spec.command); return { result: async () => ({ exitCode: 0, stdout: { text: '' }, stderr: { text: '' }, timedOut: false }) } },
+  } }
+  const r = await openWithDefaultApp(okCtx, 'C:\proj\demo r.html')
+  assert.ok(r.ok, JSON.stringify(r))
+  assert.equal(cmds.length, 1)
+  if (process.platform === 'win32') {
+    assert.equal(cmds[0], 'cmd /c start "" "C:\proj\demo r.html"')
+  } else if (process.platform === 'darwin') {
+    assert.match(cmds[0], /^open '/)
+  } else {
+    assert.match(cmds[0], /^xdg-open '/)
+  }
+
+  // absent seam -> value error, never a throw
+  const noShell = await openWithDefaultApp({}, 'C:\\x.html')
+  assert.match(noShell.error, /ctx\.shell is unavailable|open failed/)
+
+  // nonzero exit surfaces the shell stderr
+  const badCtx = { shell: {
+    resolve: (spec) => spec,
+    execute: () => ({ result: async () => ({ exitCode: 127, stdout: { text: '' }, stderr: { text: 'xdg-open: not found' }, timedOut: false }) }),
+  } }
+  const r2 = await openWithDefaultApp(badCtx, '/tmp/x.html')
+  assert.match(r2.error, /xdg-open: not found/)
+})
+
+test('openlocal: POST /api/open-local guards origin, fences the path, launches through ctx.shell', async () => {
+  const ws = await mkdtemp(path.join(tmpdir(), 'hams-open-route-'))
+  try {
+    const htmlPath = path.join(ws, 'demo', 'r.html')
+    await mkdir(path.dirname(htmlPath), { recursive: true })
+    await writeFile(htmlPath, '<html></html>')
+    await writeSessionConfig(ws, SID, { display: 'session', reports: [{ id: 'rep-1', path: htmlPath }], dashboard_selected: 'rep-1' })
+    const exePath = path.join(ws, 'evil.exe')
+    await writeFile(exePath, 'x')
+
+    const cmds = []
+    const shell = {
+      resolve: (spec) => spec,
+      execute: (spec) => { cmds.push(spec.command); return { result: async () => ({ exitCode: 0, stdout: { text: '' }, stderr: { text: '' }, timedOut: false }) } },
+    }
+    const handler = await registerRoutes({ workspaceRegistry: { list: () => [{ id: 'w-dash', path: ws, title: 'dash', sessionIds: [SID] }] }, shell })
+    const post = (payload, headers = {}) => ({
+      method: 'POST', url: 'http://127.0.0.1/harnessams/api/open-local', headers,
+      async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(payload)) },
+    })
+    const call = async (payload, headers) => {
+      const res = fakeRes()
+      handler(post(payload, headers), res)
+      for (let i = 0; i < 200 && res.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
+      assert.ok(res.code, `route never responded: ${JSON.stringify(payload)}`)
+      return { code: res.code, body: res.body ? JSON.parse(res.body) : null }
+    }
+
+    // happy path: same-origin browser headers, known session, viewable file
+    const ok = await call({ sessionId: SID, path: htmlPath }, { 'sec-fetch-site': 'same-origin', origin: 'http://127.0.0.1:1', host: '127.0.0.1:1' })
+    assert.equal(ok.code, 200)
+    assert.equal(ok.body.ok, true)
+    assert.equal(ok.body.path, path.resolve(htmlPath))
+    assert.equal(cmds.length, 1)
+    if (process.platform === 'win32') assert.equal(cmds[0], 'cmd /c start "" "' + path.resolve(htmlPath) + '"')
+
+    // cross-site metadata / mismatched origin rejected before anything launches
+    assert.equal((await call({ sessionId: SID, path: htmlPath }, { 'sec-fetch-site': 'cross-site' })).code, 403)
+    assert.equal((await call({ sessionId: SID, path: htmlPath }, { origin: 'http://evil.example', host: '127.0.0.1:1' })).code, 403)
+    assert.equal(cmds.length, 1)
+
+    // no browser headers (curl/tests) pass; session + fence rejections never launch
+    assert.equal((await call({ sessionId: 'session-nope-0000-0000-0000-000000000000', path: htmlPath })).code, 404)
+    assert.equal((await call({ sessionId: SID, path: 'relative.html' })).code, 400)
+    assert.equal((await call({ sessionId: SID, path: path.join(ws, 'missing.html') })).code, 404)
+    assert.equal((await call({ sessionId: SID, path: exePath })).code, 400)
+    assert.equal((await call({ sessionId: SID })).code, 400)
+    assert.equal((await call({})).code, 400)
+    assert.equal(cmds.length, 1)
+
+    // shell seam absent -> 500 with the reason, never a throw
+    const bare = await registerRoutes({ workspaceRegistry: { list: () => [{ id: 'w-dash', path: ws, title: 'dash', sessionIds: [SID] }] } })
+    const res2 = fakeRes()
+    bare(post({ sessionId: SID, path: htmlPath }, {}), res2)
+    for (let i = 0; i < 200 && res2.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
+    assert.equal(res2.code, 500)
+    assert.match(JSON.parse(res2.body).error, /ctx\.shell is unavailable|open failed/)
+  } finally {
+    await rm(ws, { recursive: true, force: true })
   }
 })

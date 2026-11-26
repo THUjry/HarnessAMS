@@ -16,6 +16,10 @@
 // The Dashboard viewer is display-only: it serves session-registered local HTML
 // reports read-only (bounded by each report's own directory) and a one-level
 // listing for the add-report picker (/api/browse) — no file writes.
+// The system-browser open action (POST /api/open-local, 2026-11-26) is the one
+// route that launches an OS process: a view action fenced to viewable file
+// types (whitelist + existing regular file + quoting-safe characters) with
+// same-origin checks — never an executable/script path, never arguments.
 // Remote connectivity is delegated entirely to @linxin666/dsh-ssh (ssh_* tools
 // by alias, zero gating); each project's remote root is its own setting
 // (workspace_config.json settings.remote_root — the family harnessams.json and
@@ -42,6 +46,7 @@ import { readCheckParams } from './server/checkparams.js'
 import { remoteBrowse } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile, browseDir } from './server/dashboard.js'
+import { resolveOpenableFile, openWithDefaultApp } from './server/openlocal.js'
 import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
 import { progressRemotePayload } from './server/progressRemote.js'
 import { registerTools } from './tool.js'
@@ -234,6 +239,40 @@ async function handle(req, res, ctx) {
       }
       return
     }
+    if (req.method === 'POST' && route === '/api/open-local') {
+      // Open a local file with the OS default application — the system-browser
+      // viewing path for reports (body { sessionId, path }). This is the FIRST
+      // route that can trigger an OS process, so it carries its own fence:
+      // viewable-extension whitelist + existing regular file + quoting-safe
+      // characters (server/openlocal.js), plus a same-origin guard — these
+      // routes are untokened by design, so reject Fetch-Metadata that says the
+      // request came from another site (a cross-site no-cors text/plain POST
+      // can still carry a JSON body; sec-fetch-site sees through it). Non-
+      // browser clients (curl, tests) send no sec-fetch-site and pass. The
+      // window opens on the DSH host's desktop — in-cluster/headless hosts may
+      // have no default handler and the execLocal error surfaces inline.
+      const sfs = req.headers['sec-fetch-site']
+      if (typeof sfs === 'string' && sfs !== 'same-origin' && sfs !== 'none') { json(403, { error: 'cross-site requests are not accepted' }); return }
+      const origin = req.headers.origin
+      if (typeof origin === 'string' && origin !== 'null') {
+        const host = req.headers.host
+        let originHost = null
+        try { originHost = new URL(origin).host } catch { /* unparseable -> rejected below */ }
+        if (host && originHost !== host) { json(403, { error: 'cross-origin requests are not accepted' }); return }
+      }
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const sessionId = body?.sessionId
+      if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      const target = await resolveOpenableFile(body?.path)
+      if (target.error) { json(target.code ?? 400, { error: target.error }); return }
+      const opened = await openWithDefaultApp(ctx, target.abs)
+      if (opened.error) { json(500, { error: opened.error }); return }
+      json(200, { ok: true, project, path: target.abs })
+      return
+    }
     if (req.method === 'PUT' && route === '/api/global-config') {
       // The plugin-global display config (D-017: ~/.dsh/harnessams.json) —
       // today the self-check freshness window the console's display settings
@@ -245,7 +284,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, selfcheck_fresh_min: r.value })
       return
     }
-    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init)' })
+    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init, POST /api/open-local)' })
     return
   }
 
