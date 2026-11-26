@@ -259,7 +259,9 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
 // plotly copy — the open-outside-sidebar path calls it right before the OS
 // viewer launches. Copy-if-missing; a size mismatch refreshes from the
 // packaged copy (plotly version bump); http(s)/custom plotly_url targets are
-// the user's own file and stay untouched.
+// the user's own file and stay untouched. Every path where the copy EXISTS at
+// the default target afterwards carries present:true (the route then declares
+// plotly_url in workspace_config.json); refusal paths omit the flag.
 test('seedProjectPlotly: copy-if-missing, size-refresh, no-op and override semantics', async () => {
   const { seedProjectPlotly } = await import('../src/report_render.js')
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-seed-'))
@@ -268,27 +270,31 @@ test('seedProjectPlotly: copy-if-missing, size-refresh, no-op and override seman
     // default target (no workspace_config.json): missing → copied from the packaged copy
     const r1 = seedProjectPlotly(ws)
     assert.equal(r1.seeded, true, JSON.stringify(r1))
+    assert.equal(r1.present, true)
     assert.ok(existsSync(copy))
     const seededBytes = (await readFile(copy)).length
     assert.ok(seededBytes > 1000, 'the seeded copy is the packaged plotly, not a stub')
     // already present, same size → no-op
     const r2 = seedProjectPlotly(ws)
     assert.equal(r2.seeded, false)
+    assert.equal(r2.present, true)
     assert.match(r2.reason, /already present/)
     // size mismatch → refreshed from the packaged copy
     await writeFile(copy, 'stale', 'utf8')
     const r3 = seedProjectPlotly(ws)
     assert.equal(r3.seeded, true)
     assert.equal(r3.refreshed, true)
+    assert.equal(r3.present, true)
     assert.equal((await readFile(copy)).length, seededBytes)
 
-    // explicit http(s) plotly_url → untouched, no copy created
+    // explicit http(s) plotly_url → untouched, no copy created, nothing declared
     await writeFile(path.join(ws, '.harnessams', 'workspace_config.json'), JSON.stringify({
       version: 1, workspace: { plotly_url: 'https://cdn.plot.ly/plotly-3.0.1.min.js' }, settings: {},
     }, null, 2) + '\n', 'utf8')
     await rm(copy)
     const r4 = seedProjectPlotly(ws)
     assert.equal(r4.seeded, false)
+    assert.equal(r4.present, undefined)
     assert.match(r4.reason, /http\(s\)/)
     assert.ok(!existsSync(copy))
 
@@ -298,11 +304,13 @@ test('seedProjectPlotly: copy-if-missing, size-refresh, no-op and override seman
     }, null, 2) + '\n', 'utf8')
     const r5 = seedProjectPlotly(ws)
     assert.equal(r5.seeded, false)
+    assert.equal(r5.present, undefined)
     assert.match(r5.reason, /custom plotly_url/)
 
     // no project root at all
     const r6 = seedProjectPlotly(null)
     assert.equal(r6.seeded, false)
+    assert.equal(r6.present, undefined)
     assert.match(r6.reason, /no project root/)
   } finally {
     await rm(ws, { recursive: true, force: true })

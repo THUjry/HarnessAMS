@@ -135,18 +135,24 @@ export function resolveScriptsSource(workspacePath) {
 export function defaultWorkspaceSection() {
   return {
     sim_scripts_dir: defaultSimScriptsDir(),
-    // the shipped copy inside this package — in an installed layout that IS the
-    // ~/.dsh node_modules location
-    plotly_asset: path.join(PKG_ROOT, 'assets', 'plotly.min.js'),
-    // the report's plotly <script src> source (D-021): a project-relative or
-    // absolute LOCAL path (the default is the bundled plotly.min.js seeded
-    // into <project>/.harnessams/assets — offline-capable, root stays clean),
-    // or an http(s) URL (used verbatim; then no local file and PNG export
-    // skips). An unresolvable value falls back to the CDN at render time.
-    plotly_url: '.harnessams/assets/plotly.min.js',
     trash_dir: '.harnessams/trash',
   }
 }
+
+// Workspace keys the file may carry BEYOND the defaults (2026-11-26 ruling):
+// known so a present value survives every parseConfig rewrite, but never
+// default-filled. plotly_url — the project-copy declaration — enters the file
+// only after a successful seed-on-open copy (declarePlotlyUrl) or as a
+// hand-edited expert override; plotly_asset — the seed-source override, an
+// absolute path — is hand-edit only, since writing the package location by
+// default would pin a stale install as the refresh source. Absent values are
+// fine downstream: the report HEAD defaults to the same-origin package route
+// and seeding falls back to the packaged copy.
+const OPTIONAL_WORKSPACE_KEYS = ['plotly_asset', 'plotly_url']
+
+// The plotly_url declaration declarePlotlyUrl writes after a successful
+// seed: the seeded copy's location, project-relative.
+const DEFAULT_PLOTLY_URL = '.harnessams/assets/plotly.min.js'
 
 // ---- file location -----------------------------------------------------------
 
@@ -164,7 +170,7 @@ function parseConfig(raw) {
   }
   const wsIn = raw.workspace
   if (wsIn && typeof wsIn === 'object' && !Array.isArray(wsIn)) {
-    for (const k of Object.keys(workspace)) {
+    for (const k of [...Object.keys(workspace), ...OPTIONAL_WORKSPACE_KEYS]) {
       const v = wsIn[k]
       if (typeof v === 'string' && v.trim()) workspace[k] = v.trim()
     }
@@ -258,7 +264,9 @@ export function resolveWorkspacePathsAt(projectRoot) {
   return {
     root: base,
     sim_scripts_dir: path.isAbsolute(ws.sim_scripts_dir) ? ws.sim_scripts_dir : path.resolve(base, ws.sim_scripts_dir),
-    plotly_asset: path.isAbsolute(ws.plotly_asset) ? ws.plotly_asset : path.resolve(base, ws.plotly_asset),
+    plotly_asset: typeof ws.plotly_asset === 'string' && ws.plotly_asset
+      ? (path.isAbsolute(ws.plotly_asset) ? ws.plotly_asset : path.resolve(base, ws.plotly_asset))
+      : null,
     plotly_url: typeof ws.plotly_url === 'string' ? ws.plotly_url : '',
     trash_dir: path.isAbsolute(ws.trash_dir) ? ws.trash_dir : path.resolve(base, ws.trash_dir),
   }
@@ -430,9 +438,10 @@ export async function initProjectStorage(workspacePath, { settings } = {}) {
 }
 
 // Read-modify-write of the settings section only — the workspace section
-// survives untouched. Fresh file: workspace defaults are laid down (the
-// "initialize with npm-default plotly / sibling scripts" ruling) and the
-// AGENTS.md config-table template rides the .harnessams creation moment —
+// survives untouched. Fresh file: workspace defaults are laid down (script
+// dir and trash dir; the plotly fields stay out until a seed declares them,
+// see declarePlotlyUrl) and the AGENTS.md config-table template rides the
+// .harnessams creation moment —
 // which also stages the project's reusable simulation scripts and points
 // sim_scripts_dir at the project-local copy (2026-11-24: what the self-check
 // exercises must stay usable afterwards; existing projects keep their
@@ -448,6 +457,41 @@ export async function writeSettings(workspacePath, settings) {
   await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings }, null, 2) + '\n', 'utf8')
   await fsp.rename(tmp, finalPath)
   return settings
+}
+
+// ---- plotly declaration (seed-on-open policy, 2026-11-26 ruling) -------------
+//
+// The workspace section carries no plotly fields until they mean something:
+// once a seed-on-open copy exists at the default target, this adds the
+// plotly_url declaration so the config states where the copy lives. The
+// write is SURGICAL on the raw JSON — a present value (default, custom
+// local, http(s)) is never touched, unknown keys survive (parseConfig would
+// drop them), and the settings section round-trips verbatim. A missing file
+// becomes the minimal { version, workspace, settings } shape. IO errors
+// propagate; the caller (the open-local route) fail-opens.
+export async function declarePlotlyUrl(workspacePath) {
+  const file = configPath(workspacePath)
+  let raw = null
+  try {
+    raw = JSON.parse(await fsp.readFile(file, 'utf8'))
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e
+  }
+  const base = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {}
+  const wsIn = base.workspace && typeof base.workspace === 'object' && !Array.isArray(base.workspace)
+    ? base.workspace
+    : null
+  if (wsIn && typeof wsIn.plotly_url === 'string' && wsIn.plotly_url.trim()) {
+    return { added: false, reason: 'already declared' }
+  }
+  const out = { ...base, version: typeof base.version === 'number' ? base.version : 1 }
+  out.workspace = { ...(wsIn ?? {}), plotly_url: DEFAULT_PLOTLY_URL }
+  if (out.settings === undefined) out.settings = {}
+  await fsp.mkdir(path.dirname(file), { recursive: true })
+  const tmp = file + '.tmp'
+  await fsp.writeFile(tmp, JSON.stringify(out, null, 2) + '\n', 'utf8')
+  await fsp.rename(tmp, file)
+  return { added: true, path: file }
 }
 
 // Prefill NULL settings fields from the plugin-global memories (D-017, widened

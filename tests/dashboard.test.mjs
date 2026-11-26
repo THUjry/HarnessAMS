@@ -7,7 +7,7 @@
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { existsSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -177,37 +177,32 @@ test('openlocal: resolveOpenableFile enforces the viewable fence', async () => {
   }
 })
 
-test('openlocal: openWithDefaultApp composes the platform one-liner and surfaces shell failure', async () => {
-  const cmds = []
-  const okCtx = { shell: {
-    resolve: (spec) => spec,
-    execute: (spec) => { cmds.push(spec.command); return { result: async () => ({ exitCode: 0, stdout: { text: '' }, stderr: { text: '' }, timedOut: false }) } },
-  } }
-  const r = await openWithDefaultApp(okCtx, 'C:\proj\demo r.html')
+test('openlocal: openWithDefaultApp composes the platform arg vector and surfaces launcher failure', async () => {
+  const launches = []
+  const okCtx = { openLauncher: async (file, args) => { launches.push({ file, args }); return { ok: true } } }
+  const r = await openWithDefaultApp(okCtx, 'C:\\proj\\demo r.html')
   assert.ok(r.ok, JSON.stringify(r))
-  assert.equal(cmds.length, 1)
-  if (process.platform === 'win32') {
-    assert.equal(cmds[0], 'cmd /c start "" "C:\proj\demo r.html"')
-  } else if (process.platform === 'darwin') {
-    assert.match(cmds[0], /^open '/)
-  } else {
-    assert.match(cmds[0], /^xdg-open '/)
-  }
+  assert.equal(launches.length, 1)
+  const expect = process.platform === 'win32'
+    ? { file: 'cmd', args: ['/c', 'start', '', 'C:\\proj\\demo r.html'] }
+    : process.platform === 'darwin'
+      ? { file: 'open', args: ['C:\\proj\\demo r.html'] }
+      : { file: 'xdg-open', args: ['C:\\proj\\demo r.html'] }
+  assert.deepEqual(launches[0], expect)
 
-  // absent seam -> value error, never a throw
-  const noShell = await openWithDefaultApp({}, 'C:\\x.html')
-  assert.match(noShell.error, /ctx\.shell is unavailable|open failed/)
+  // no injected launcher -> the REAL spawn runs on a missing file (nothing
+  // opens): the value contract still holds — ok or error, never a throw
+  const bare = await openWithDefaultApp({}, path.join(tmpdir(), 'hams-open-missing-file.html'))
+  assert.ok(bare && (bare.ok === true || typeof bare.error === 'string'), JSON.stringify(bare))
 
-  // nonzero exit surfaces the shell stderr
-  const badCtx = { shell: {
-    resolve: (spec) => spec,
-    execute: () => ({ result: async () => ({ exitCode: 127, stdout: { text: '' }, stderr: { text: 'xdg-open: not found' }, timedOut: false }) }),
-  } }
-  const r2 = await openWithDefaultApp(badCtx, '/tmp/x.html')
-  assert.match(r2.error, /xdg-open: not found/)
+  // an erroring / throwing launcher surfaces in the returned value
+  const r2 = await openWithDefaultApp({ openLauncher: async () => ({ error: 'open failed on win32: spawn ENOENT xdg-open' }) }, '/tmp/x.html')
+  assert.match(r2.error, /spawn ENOENT/)
+  const r3 = await openWithDefaultApp({ openLauncher: async () => { throw new Error('boom') } }, '/tmp/x.html')
+  assert.match(r3.error, /open failed .*boom/)
 })
 
-test('openlocal: POST /api/open-local guards origin, fences the path, launches through ctx.shell', async () => {
+test('openlocal: POST /api/open-local guards origin, fences the path, launches the direct spawn, declares plotly', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-open-route-'))
   try {
     const htmlPath = path.join(ws, 'demo', 'r.html')
@@ -217,12 +212,11 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
     const exePath = path.join(ws, 'evil.exe')
     await writeFile(exePath, 'x')
 
-    const cmds = []
-    const shell = {
-      resolve: (spec) => spec,
-      execute: (spec) => { cmds.push(spec.command); return { result: async () => ({ exitCode: 0, stdout: { text: '' }, stderr: { text: '' }, timedOut: false }) } },
-    }
-    const handler = await registerRoutes({ workspaceRegistry: { list: () => [{ id: 'w-dash', path: ws, title: 'dash', sessionIds: [SID] }] }, shell })
+    // The launcher seam replaces the real spawn (production always runs
+    // node:child_process, openlocal.js); tests inject through ctx.
+    const launches = []
+    const openLauncher = async (file, args) => { launches.push({ file, args }); return { ok: true } }
+    const handler = await registerRoutes({ workspaceRegistry: { list: () => [{ id: 'w-dash', path: ws, title: 'dash', sessionIds: [SID] }] }, openLauncher })
     const post = (payload, headers = {}) => ({
       method: 'POST', url: 'http://127.0.0.1/harnessams/api/open-local', headers,
       async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify(payload)) },
@@ -241,21 +235,31 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
     assert.equal(ok.code, 200)
     assert.equal(ok.body.ok, true)
     assert.equal(ok.body.path, path.resolve(htmlPath))
-    assert.equal(cmds.length, 1)
-    if (process.platform === 'win32') assert.equal(cmds[0], 'cmd /c start "" "' + path.resolve(htmlPath) + '"')
+    assert.equal(launches.length, 1)
+    if (process.platform === 'win32') {
+      assert.deepEqual(launches[0], { file: 'cmd', args: ['/c', 'start', '', path.resolve(htmlPath)] })
+    }
 
     // seed-on-open (user ruling 2026-11-26): a report document seeds the
     // project copy copy-if-missing just before the viewer launches — this is
-    // the ONLY writer now that generation no longer seeds
+    // the ONLY writer now that generation no longer seeds. A successful seed
+    // (or an existing copy — the present flag) also DECLARES plotly_url in
+    // workspace_config.json: the config stays plotly-free until this click.
     assert.equal(ok.body.plotly_seed.seeded, true)
+    assert.equal(ok.body.plotly_seed.present, true)
+    assert.equal(ok.body.plotly_seed.declared, true)
     const seededCopy = path.join(ws, '.harnessams', 'assets', 'plotly.min.js')
     assert.ok(existsSync(seededCopy), 'open-local must seed the project plotly copy')
+    const cfg = JSON.parse(readFileSync(path.join(ws, '.harnessams', 'workspace_config.json'), 'utf8'))
+    assert.equal(cfg.workspace.plotly_url, '.harnessams/assets/plotly.min.js')
     const ok2 = await call({ sessionId: SID, path: htmlPath }, sameOrigin)
     assert.equal(ok2.code, 200)
     assert.equal(ok2.body.plotly_seed.seeded, false, 'second open is a copy-if-missing no-op')
+    assert.equal(ok2.body.plotly_seed.present, true)
+    assert.equal(ok2.body.plotly_seed.declared, false, 'the declaration is already in place')
     assert.match(ok2.body.plotly_seed.reason, /already present/)
 
-    // non-report documents open without seeding
+    // non-report documents open without seeding or declaring
     const pngPath = path.join(ws, 'fig.png')
     await writeFile(pngPath, 'x')
     const png = await call({ sessionId: SID, path: pngPath }, sameOrigin)
@@ -265,7 +269,7 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
     // cross-site metadata / mismatched origin rejected before anything launches
     assert.equal((await call({ sessionId: SID, path: htmlPath }, { 'sec-fetch-site': 'cross-site' })).code, 403)
     assert.equal((await call({ sessionId: SID, path: htmlPath }, { origin: 'http://evil.example', host: '127.0.0.1:1' })).code, 403)
-    assert.equal(cmds.length, 3)
+    assert.equal(launches.length, 3)
 
     // no browser headers (curl/tests) pass; session + fence rejections never launch
     assert.equal((await call({ sessionId: 'session-nope-0000-0000-0000-000000000000', path: htmlPath })).code, 404)
@@ -274,15 +278,15 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
     assert.equal((await call({ sessionId: SID, path: exePath })).code, 400)
     assert.equal((await call({ sessionId: SID })).code, 400)
     assert.equal((await call({})).code, 400)
-    assert.equal(cmds.length, 3)
+    assert.equal(launches.length, 3)
 
-    // shell seam absent -> 500 with the reason, never a throw
-    const bare = await registerRoutes({ workspaceRegistry: { list: () => [{ id: 'w-dash', path: ws, title: 'dash', sessionIds: [SID] }] } })
+    // a failing launcher surfaces as a 500 value error, never a throw
+    const failing = await registerRoutes({ workspaceRegistry: { list: () => [{ id: 'w-dash', path: ws, title: 'dash', sessionIds: [SID] }] }, openLauncher: async () => ({ error: 'open failed on win32: spawn ENOENT xdg-open' }) })
     const res2 = fakeRes()
-    bare(post({ sessionId: SID, path: htmlPath }, {}), res2)
+    failing(post({ sessionId: SID, path: htmlPath }, {}), res2)
     for (let i = 0; i < 200 && res2.code === 0; i++) await new Promise((r) => setTimeout(r, 5))
     assert.equal(res2.code, 500)
-    assert.match(JSON.parse(res2.body).error, /ctx\.shell is unavailable|open failed/)
+    assert.match(JSON.parse(res2.body).error, /open failed/)
   } finally {
     await rm(ws, { recursive: true, force: true })
   }

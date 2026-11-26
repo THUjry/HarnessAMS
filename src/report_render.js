@@ -672,7 +672,10 @@ export function resolvePlotlySrc(outDir, configRoot) {
 // step-1 relative reference resolves offline. Copy-if-missing; a size
 // mismatch refreshes from the packaged copy (plotly version bump). Only the
 // DEFAULT target is managed here — an http(s) plotly_url or a custom local
-// target is the user's own file, untouched.
+// target is the user's own file, untouched. Every path where the copy EXISTS
+// at the default target afterwards carries present: true (the open-local
+// route then declares plotly_url in workspace_config.json); refusal paths
+// omit the flag.
 export function seedProjectPlotly(configRoot) {
   if (!configRoot) return { seeded: false, reason: 'no project root' }
   const cfg = readPlotlyConfig(configRoot)
@@ -691,15 +694,18 @@ export function seedProjectPlotly(configRoot) {
     seed = path.isAbsolute(a) ? a : path.resolve(configRoot, a)
   }
   if (!seed || !isFileLoose(seed)) seed = packagedPlotly()
-  if (!seed || !isFileLoose(seed)) return { seeded: false, reason: 'no packaged plotly source' }
   if (isFileLoose(target)) {
-    if (fs.statSync(target).size === fs.statSync(seed).size) return { seeded: false, reason: 'already present' }
-    fs.copyFileSync(seed, target) // size mismatch = plotly version bump, refresh
-    return { seeded: true, path: target, refreshed: true }
+    // the copy already exists: a size match is a no-op, a mismatch refreshes
+    // (plotly version bump); present: true either way — the route declares it
+    if (!seed || !isFileLoose(seed)) return { seeded: false, present: true, reason: 'no packaged plotly source' }
+    if (fs.statSync(target).size === fs.statSync(seed).size) return { seeded: false, present: true, reason: 'already present' }
+    fs.copyFileSync(seed, target)
+    return { seeded: true, present: true, path: target, refreshed: true }
   }
+  if (!seed || !isFileLoose(seed)) return { seeded: false, reason: 'no packaged plotly source' }
   fs.mkdirSync(path.dirname(target), { recursive: true })
   fs.copyFileSync(seed, target)
-  return { seeded: true, path: target }
+  return { seeded: true, present: true, path: target }
 }
 
 // Natural-order comparison (numeric chunks compare as numbers, so Sim10 sorts

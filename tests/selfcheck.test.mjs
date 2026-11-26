@@ -29,7 +29,7 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { apply, toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { defaultSettings, readSettings, readConfig, validateSettings, writeSettings, configPath, healFromGlobalMemory, initProjectStorage } from '../src/server/settings.js'
+import { defaultSettings, readSettings, readConfig, validateSettings, writeSettings, configPath, healFromGlobalMemory, initProjectStorage, declarePlotlyUrl } from '../src/server/settings.js'
 import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR, autoPinToolchain } from '../src/server/selfcheck.js'
 import { getNodePins, getLocalFacts, readGlobalStore, setFreshMin, updateNodePins, updateLocalFacts } from '../src/server/globalstore.js'
 import { reconcileSettings, overlaySettingsAt } from '../src/server/reconcile.js'
@@ -565,12 +565,17 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(facts.settings.local_python_path, 'C:\\Python314\\python.exe', 'Windows paths are legal for the local facts')
   assert.match(validateSettings({ ...factsBase, local_python_version: 'x'.repeat(401) }).error, /local_python_version too long/)
   assert.match(validateSettings({ ...factsBase, local_python_path: 'a\nb' }).error, /control characters/)
-  // D-021 plotly_url: a workspace-section key, defaulted to the bundled copy
-  // seeded into .harnessams/assets (the project root stays clean)
+  // D-021 plotly fields (2026-11-26 ruling): NOT default-materialized — the
+  // report chain runs off the package route; the project-copy declaration
+  // (plotly_url) enters the file only after a successful seed-on-open copy
+  // (declarePlotlyUrl), plotly_asset stays hand-edit only. A fresh read has
+  // no plotly keys.
   const cfgDir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hams-cfg-'))
   try {
     const { config: cfg } = await readConfig(cfgDir)
-    assert.equal(cfg.workspace.plotly_url, '.harnessams/assets/plotly.min.js')
+    assert.equal(cfg.workspace.trash_dir, '.harnessams/trash')
+    assert.equal(cfg.workspace.plotly_url, undefined, 'plotly_url is not default-filled')
+    assert.equal(cfg.workspace.plotly_asset, undefined, 'plotly_asset is not default-filled')
   } finally {
     await rmRetry(cfgDir)
   }
@@ -645,17 +650,21 @@ test('settings: defaults, validation, persistence, workspace section', async () 
     assert.ok(fs.existsSync(path.join(tmp, '.harnessams', 'assets', 'numfallback.py')), 'assets bucket staged')
   }
   assert.equal(raw.workspace.trash_dir, '.harnessams/trash')
-  assert.ok(path.isAbsolute(raw.workspace.plotly_asset))
+  assert.equal(raw.workspace.plotly_url, undefined, 'fresh file carries no plotly_url declaration')
+  assert.equal(raw.workspace.plotly_asset, undefined, 'fresh file carries no plotly_asset override')
   const back = await readSettings(tmp)
   assert.equal(back.settings.machine_id, 'm1')
   assert.equal(back.settings.remote_root, '/home/op/sim')
   assert.equal(back.settings.compute_script_remote, 'js')
-  // read-modify-write keeps a hand-edited workspace section intact
+  // read-modify-write keeps a hand-edited workspace section intact (the plotly
+  // keys are known-but-optional: present values survive, absent stay absent)
   raw.workspace.plotly_asset = 'C:/custom/plotly.min.js'
+  raw.workspace.plotly_url = 'shared/plotly.min.js'
   await fsp.writeFile(configPath(tmp), JSON.stringify(raw, null, 2), 'utf8')
   await writeSettings(tmp, { ...v.settings, machine_id: 'm2' })
   const raw2 = JSON.parse(await fsp.readFile(configPath(tmp), 'utf8'))
   assert.equal(raw2.workspace.plotly_asset, 'C:/custom/plotly.min.js')
+  assert.equal(raw2.workspace.plotly_url, 'shared/plotly.min.js')
   assert.equal(raw2.settings.machine_id, 'm2')
   // local mode keeps remote fields stored (in-cluster: local spectre is legal)
   const local = validateSettings({ ...v.settings, run_mode: 'local', cluster_env: 'in-cluster' })
@@ -691,6 +700,52 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(legacy.selfcheck_remote_dir, '.harnessams/legacycheck')
   assert.ok(!('remote_dir' in legacy), 'the legacy key does not surface as a setting')
   assert.equal(legacy.run_mode, 'local', 'the rest stays at defaults')
+})
+
+test('settings: declarePlotlyUrl adds the declaration surgically (seed-on-open policy)', async () => {
+  const ws = await tmpDir()
+  try {
+    // missing file -> the minimal config carrying only the declaration
+    const r1 = await declarePlotlyUrl(ws)
+    assert.equal(r1.added, true)
+    const raw1 = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
+    assert.equal(raw1.version, 1)
+    assert.equal(raw1.workspace.plotly_url, '.harnessams/assets/plotly.min.js')
+    assert.deepEqual(raw1.settings, {})
+
+    // already declared -> untouched
+    const r2 = await declarePlotlyUrl(ws)
+    assert.equal(r2.added, false)
+    assert.match(r2.reason, /already declared/)
+
+    // surgical write: a blank value counts as undeclared; unknown keys and
+    // the settings section round-trip verbatim
+    await fsp.writeFile(configPath(ws), JSON.stringify({
+      version: 1,
+      workspace: { trash_dir: '.harnessams/trash', note: 'keep-me', plotly_url: '   ' },
+      settings: { machine_id: 'm1' },
+      extra: true,
+    }, null, 2), 'utf8')
+    const r3 = await declarePlotlyUrl(ws)
+    assert.equal(r3.added, true, 'a blank value reads as undeclared')
+    const raw3 = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
+    assert.equal(raw3.workspace.plotly_url, '.harnessams/assets/plotly.min.js')
+    assert.equal(raw3.workspace.note, 'keep-me', 'unknown workspace keys survive the surgical write')
+    assert.equal(raw3.workspace.trash_dir, '.harnessams/trash')
+    assert.equal(raw3.settings.machine_id, 'm1')
+    assert.equal(raw3.extra, true, 'unknown top-level keys survive too')
+
+    // a present custom value is never touched
+    await fsp.writeFile(configPath(ws), JSON.stringify({
+      version: 1, workspace: { plotly_url: 'https://cdn.plot.ly/plotly-3.0.1.min.js' }, settings: {},
+    }, null, 2), 'utf8')
+    const r4 = await declarePlotlyUrl(ws)
+    assert.equal(r4.added, false)
+    const raw4 = JSON.parse(await fsp.readFile(configPath(ws), 'utf8'))
+    assert.equal(raw4.workspace.plotly_url, 'https://cdn.plot.ly/plotly-3.0.1.min.js')
+  } finally {
+    await rmRetry(ws)
+  }
 })
 
 // ---------------------------------------------------------------------------

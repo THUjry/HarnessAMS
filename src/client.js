@@ -122,14 +122,11 @@ window.__ModuleLoader__.load({
         'dash.addTitle': '添加 HTML 报告',
         'dash.refresh': '刷新报告（强制重载）',
         'dash.remove': '移除当前报告（只解除登记，不删除文件）',
-        'dash.openTab': '在新标签页打开',
         'dash.add': '添加',
         'dash.refreshShort': '刷新',
         'dash.removeShort': '移除',
-        'dash.openShort': '打开',
         'dash.openSys': '打开',
         'dash.openSysTitle': '在系统默认浏览器中打开报告（本地文件，可离线渲染）',
-        'dash.sysHint': '报告通过系统默认浏览器以本地文件打开 — plotly 与数据走本地相对路径，可离线渲染。',
         'dash.openFailed': '打开失败：{err}',
         'dash.empty': '尚未添加报告 — 浏览本地磁盘加入已有的 HTML 报告。',
         'dash.addFirst': '+ 添加报告',
@@ -347,14 +344,11 @@ window.__ModuleLoader__.load({
         'dash.addTitle': 'Add an HTML report',
         'dash.refresh': 'Reload the report (hard reload)',
         'dash.remove': 'Remove the current report (unregisters it; the file is kept)',
-        'dash.openTab': 'Open in a new tab',
         'dash.add': 'Add',
         'dash.refreshShort': 'Refresh',
         'dash.removeShort': 'Remove',
-        'dash.openShort': 'Open',
         'dash.openSys': 'Open',
         'dash.openSysTitle': 'Open the report with the system default browser (local file, renders offline)',
-        'dash.sysHint': 'Reports open as local files in the system default browser — plotly and data load from relative local paths, offline-capable.',
         'dash.openFailed': 'Open failed: {err}',
         'dash.empty': 'No report added yet — browse the local disk to add an existing HTML report.',
         'dash.addFirst': '+ Add report',
@@ -2536,13 +2530,12 @@ window.__ModuleLoader__.load({
     // effect) and this component polls the current report's /api/report-stat —
     // a regenerated document (mtime/size change) reloads through the nonce,
     // so an externally re-run gen_sweep_report shows up without a manual ↻.
-    // System-browser viewing (2026-11-26 ruling): reports open with the OS
-    // default application through POST /api/open-local — as local files, whose
-    // relative plotly/SimResults references resolve offline (the embedded
-    // iframe could not serve them past its per-report directory fence and
-    // leaned on the CDN fallback). The embedded viewer (iframe + ↻ + ↗ + the
-    // stat poll) is RETIRED BUT KEPT: flip this flag to false to restore it.
-    const DASH_SYSTEM_OPEN = true
+    // Hybrid viewing (2026-11-26 ruling): the embedded iframe is back — the
+    // report HEAD's same-origin route step (/harnessams/assets/plotly.min.js)
+    // renders offline inside it, closing the gap that had retired it — and the
+    // ↗ button keeps opening the report with the OS default application as a
+    // local file (full-screen file:// viewing; that server path also seeds the
+    // project plotly copy and declares plotly_url in workspace_config.json).
 
     function SessionDashboard({ sessionId, config, updateConfig }) {
       const [nonce, setNonce] = useState(0)
@@ -2564,7 +2557,6 @@ window.__ModuleLoader__.load({
       // loaded document is never reloaded.
       const statRef = useRef(null)
       useEffect(() => {
-        if (DASH_SYSTEM_OPEN) return // no embedded document to reload
         statRef.current = null
         if (!current) return
         let alive = true
@@ -2642,15 +2634,11 @@ window.__ModuleLoader__.load({
               ? reports.map((r) => h('option', { key: r.id, value: r.id }, txt(r.name)))
               : h('option', { value: '' }, tr('dash.noReports'))),
           h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.addTitle'), onClick: () => setDialogOpen(true) }, '\uFF0B ' + tr('dash.add')),
-          !DASH_SYSTEM_OPEN && h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻ ' + tr('dash.refreshShort')),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.refresh'), disabled: !current, onClick: () => setNonce(nonce + 1) }, '↻ ' + tr('dash.refreshShort')),
           h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.remove'), disabled: !current, onClick: removeCurrent }, '× ' + tr('dash.removeShort')),
-          DASH_SYSTEM_OPEN && h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.openSysTitle'), disabled: !current, onClick: openInSystemBrowser }, '↗ ' + tr('dash.openSys')),
-          !DASH_SYSTEM_OPEN && current && h('a', { className: 'hams-btn hams-btn-sm', title: tr('dash.openTab'), href: dashUrl, target: '_blank', rel: 'noopener' }, '↗ ' + tr('dash.openShort'))),
+          h('button', { className: 'hams-btn hams-btn-sm', title: tr('dash.openSysTitle'), disabled: !current, onClick: openInSystemBrowser }, '↗ ' + tr('dash.openSys'))),
         openErr && h('div', { className: 'hams-err' }, txt(tr('dash.openFailed', { err: openErr }))),
-        current && DASH_SYSTEM_OPEN && h('div', { className: 'hams-dash' },
-          tr('dash.sysHint'), ' ',
-          h('span', { className: 'hams-dim' }, txt(current.path))),
-        current && !DASH_SYSTEM_OPEN && h('iframe', {
+        current && h('iframe', {
           key: current.id + ':' + nonce,
           className: 'hams-dashframe',
           title: current.name,

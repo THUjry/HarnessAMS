@@ -1,17 +1,15 @@
 // Open a local file with the OS default application — the "system browser"
 // viewing path for generated reports (2026-11-26 ruling: the report HTML is
 // opened as a file:// document so its RELATIVE plotly/SimResults references
-// resolve offline; the embedded /dash iframe view could not serve them past
-// its per-report directory fence and leaned on the CDN fallback instead).
+// resolve offline; the sidebar's embedded iframe covers in-panel viewing
+// through the same-origin plotly route).
 // This is a VIEW action, never an execution surface: the path must survive
 // strict validation (absolute, existing regular file, viewable-extension
 // whitelist, no characters that could break out of the quoting) before the
-// platform's one-line "open with default handler" runs through the host
-// ctx.shell seam (execLocal — the same seam the in-cluster bsub commands
-// use; never a hand-composed pipeline).
+// platform's one-line "open with default handler" runs.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { execLocal } from '../localchannel.js'
+import { spawn } from 'node:child_process'
 
 // Viewable documents only — no executables, no script types: opening a file
 // must never become running a file. Reports are .html; the rest covers the
@@ -47,28 +45,65 @@ export async function resolveOpenableFile(p) {
   return { abs }
 }
 
-// POSIX single-quoting (shlex-style): wrap in single quotes, escaping any
-// embedded quote as '\'' — safe against every POSIX shell's parsing.
-const quotePosix = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'"
-
-// Launch with the OS default handler. The opener itself returns immediately
-// (it spawns the viewer and exits), so a short timeout only guards a hung
-// shell. Returns { ok: true } or { error } — never throws.
-export async function openWithDefaultApp(ctx, abs) {
-  let command
-  if (process.platform === 'win32') {
-    // `""` is start's window-title argument (without it a quoted path is
-    // eaten as the title and nothing opens). The path is safe inside double
-    // quotes because '"' and '%' are both rejected upstream.
-    command = `cmd /c start "" "${abs}"`
-  } else if (process.platform === 'darwin') {
-    command = `open ${quotePosix(abs)}`
-  } else {
-    // Headless Linux hosts (in-cluster) may lack xdg-open: the execLocal
-    // failure lands in the returned error and surfaces inline in the UI.
-    command = `xdg-open ${quotePosix(abs)}`
+// Real launcher: spawn the opener directly as an argument vector — the same
+// local-launch pattern as py.js and the batch submitLocal worker — because
+// ctx.shell's workspace-write sandbox is unusable on hosts whose workspace
+// contains %TEMP% (the Windows ACL runner refuses to start, so every
+// execLocal call fails; observed on a web instance whose workspace was
+// C:\Users\<user>). ctx.shell stays reserved for in-cluster shell command
+// strings (bsub). The opener itself returns immediately (it hands the file
+// to the viewer and exits), so the timeout only guards a hung opener; the
+// 'error' event and a non-zero exit both surface as { error }.
+const defaultLauncher = (file, args) => new Promise((resolve) => {
+  let child
+  try {
+    child = spawn(file, args, { stdio: 'ignore', windowsHide: true })
+  } catch (e) {
+    resolve({ error: `open failed on ${process.platform}: ${String(e?.message ?? e)}` })
+    return
   }
-  const r = await execLocal(ctx, command, { timeoutMs: 15_000 })
-  if (r.ok) return { ok: true }
-  return { error: `open failed on ${process.platform}: ${r.stderr || r.text || 'unknown error'}` }
+  const timer = setTimeout(() => {
+    child.kill()
+    resolve({ error: `open failed on ${process.platform}: timed out after 15 s` })
+  }, 15_000)
+  child.once('error', (e) => {
+    clearTimeout(timer)
+    resolve({ error: `open failed on ${process.platform}: ${String(e?.message ?? e)}` })
+  })
+  child.once('close', (code) => {
+    clearTimeout(timer)
+    if (code === 0) resolve({ ok: true })
+    else resolve({ error: `open failed on ${process.platform}: exit code ${code}` })
+  })
+})
+
+// Launch with the OS default handler. Tests inject a launcher through
+// ctx.openLauncher (production never sets it and always runs the real
+// spawn). Returns { ok: true } or { error } — never throws.
+export async function openWithDefaultApp(ctx, abs) {
+  let file, args
+  if (process.platform === 'win32') {
+    // '' is start's window-title argument (without it a quoted path is
+    // eaten as the title and nothing opens); Node quotes the path argument
+    // itself. '%' is still rejected upstream — cmd expands %VAR% inside
+    // whatever command line it receives.
+    file = 'cmd'
+    args = ['/c', 'start', '', abs]
+  } else if (process.platform === 'darwin') {
+    file = 'open'
+    args = [abs]
+  } else {
+    // Headless Linux hosts (in-cluster) may lack xdg-open: the spawn error
+    // lands in the returned error and surfaces inline in the UI.
+    file = 'xdg-open'
+    args = [abs]
+  }
+  const launcher = typeof ctx?.openLauncher === 'function' ? ctx.openLauncher : defaultLauncher
+  try {
+    const r = await launcher(file, args)
+    if (r && r.error) return { error: r.error }
+    return { ok: true }
+  } catch (e) {
+    return { error: `open failed on ${process.platform}: ${String(e?.message ?? e)}` }
+  }
 }

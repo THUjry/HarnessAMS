@@ -40,7 +40,7 @@ import os from 'node:os'
 import { sessionProject, readSessionConfigs, writeSessionConfig } from './server/project.js'
 import { isForkSession } from './server/forkdetect.js'
 import { remoteMachinesStatus, fetchMachines, checkableMachines } from './server/machines.js'
-import { initProjectStorage, healFromGlobalMemory, readSettings } from './server/settings.js'
+import { initProjectStorage, healFromGlobalMemory, readSettings, declarePlotlyUrl } from './server/settings.js'
 import { reconcileSettings } from './server/reconcile.js'
 import { parseFacts } from './server/agentsmd.js'
 import { getFreshMin, setFreshMin } from './server/globalstore.js'
@@ -254,7 +254,7 @@ async function handle(req, res, ctx) {
       // can still carry a JSON body; sec-fetch-site sees through it). Non-
       // browser clients (curl, tests) send no sec-fetch-site and pass. The
       // window opens on the DSH host's desktop — in-cluster/headless hosts may
-      // have no default handler and the execLocal error surfaces inline.
+      // have no default handler and the spawn error surfaces inline.
       const sfs = req.headers['sec-fetch-site']
       if (typeof sfs === 'string' && sfs !== 'same-origin' && sfs !== 'none') { json(403, { error: 'cross-site requests are not accepted' }); return }
       const origin = req.headers.origin
@@ -277,11 +277,18 @@ async function handle(req, res, ctx) {
       // file:// document whose step-1 relative reference needs the copy, and
       // this click is exactly what creates it (copy-if-missing; the
       // report-resolved route step serves the packaged copy anyway when the
-      // page is viewed from the DSH web origin). Fail-open — a seed problem
-      // never blocks the open. Report documents only; PNGs/logs don't need it.
+      // page is viewed from the DSH web origin). When the copy exists at the
+      // default target afterwards (seedProjectPlotly's present flag), the
+      // workspace config gains the plotly_url declaration (declarePlotlyUrl —
+      // the config stays plotly-free until this click succeeds). Both steps
+      // fail-open — a seed or declare problem never blocks the open. Report
+      // documents only; PNGs/logs don't need it.
       let plotlySeed = null
       if (/\.(html?)$/i.test(target.abs)) {
         try { plotlySeed = seedProjectPlotly(project.path) } catch (e) { plotlySeed = { seeded: false, reason: String(e?.message ?? e) } }
+        if (plotlySeed?.present === true) {
+          try { plotlySeed.declared = (await declarePlotlyUrl(project.path)).added } catch { plotlySeed.declared = false }
+        }
       }
       const opened = await openWithDefaultApp(ctx, target.abs)
       if (opened.error) { json(500, { error: opened.error }); return }

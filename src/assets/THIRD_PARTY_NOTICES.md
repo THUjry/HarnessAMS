@@ -7,10 +7,11 @@
 - Source: https://github.com/plotly/plotly.js
 - This is the **single shared copy** for the whole HarnessAMSproject tree: reports
   load it by default through the plugin server's `/harnessams/assets/` route, and a
-  per-project copy (discovered via the workspace `plotly_asset` field or the package
+  per-project copy (seeded from the workspace `plotly_asset` field or the package
   location) is placed under `<project>/.harnessams/assets/` only when a report is
-  opened outside the sidebar, so local-file viewing renders fully offline. Do not add
-  a second copy anywhere else.
+  opened outside the sidebar, so local-file viewing renders fully offline — that
+  first successful copy is also when the project's workspace config gains its
+  `plotly_url` declaration. Do not add a second copy anywhere else.
 - License text (from the upstream repository):
 
 ```
