@@ -21,11 +21,13 @@ test('checkparams: defaults on missing file, per-key fallback on a corrupted one
     let r = await readCheckParams(dir)
     assert.deepEqual(r.params, defaultCheckParams())
     assert.ok(r.defaults)
+    assert.equal(r.params.nf_warn, 50)
     // hand-edited off-spec values fall back per-key; valid ones survive
     await mkdir(path.join(dir, '.harnessams'), { recursive: true })
     await writeFile(checkParamsPath(dir), JSON.stringify({
       rcl: { r: [1, 10], c: 'nope', l: [5, 1] },
       mult: { nf: [2, 64], m: [0, 10] },
+      nf_warn: 80,
       unit_check: 'yes',
     }), 'utf8')
     r = await readCheckParams(dir)
@@ -35,6 +37,11 @@ test('checkparams: defaults on missing file, per-key fallback on a corrupted one
     assert.deepEqual(r.params.mult.nf, [2, 64])
     assert.deepEqual(r.params.mult.m, defaultCheckParams().mult.m) // min<=0 -> default
     assert.equal(r.params.unit_check, true) // non-boolean -> default
+    assert.equal(r.params.nf_warn, 80) // a valid threshold survives
+    // an off-spec threshold falls back per-key like the pairs
+    await writeFile(checkParamsPath(dir), JSON.stringify({ nf_warn: 'nope' }), 'utf8')
+    const r2 = await readCheckParams(dir)
+    assert.equal(r2.params.nf_warn, 50)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
@@ -52,6 +59,13 @@ test('checkparams: validateCheckParams rejects bad shapes, accepts good ones', (
   assert.ok(validateCheckParams({ ...good, mult: { ...good.mult, nf: [0, 64] } }).error) // min>0
   assert.ok(validateCheckParams({ ...good, mult: { ...good.mult, m: [1, 2.5] } }).error) // non-integer
   assert.ok(validateCheckParams({ ...good, unit_check: 'on' }).error)
+  // nf_warn is optional: absent keeps the default (tables written before the
+  // key existed stay valid); a present value must be a positive integer
+  assert.equal(validateCheckParams(good).params.nf_warn, 50)
+  assert.equal(validateCheckParams({ ...good, nf_warn: 80 }).params.nf_warn, 80)
+  assert.ok(validateCheckParams({ ...good, nf_warn: 0 }).error)
+  assert.ok(validateCheckParams({ ...good, nf_warn: 2.5 }).error)
+  assert.ok(validateCheckParams({ ...good, nf_warn: 'x' }).error)
   // a session table must carry the full shape: no mult table -> rejected
   // (tables are never auto-migrated between shapes)
   assert.ok(validateCheckParams({ rcl: good.rcl, unit_check: true }).error) // no mult table
@@ -78,18 +92,21 @@ test('per-session table + fallback_params ride /api/session-config', async () =>
     await writeFile(checkParamsPath(dir), JSON.stringify({
       rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] },
       mult: { nf: [1, 64], m: [1, 1000] },
+      nf_warn: 80,
     }), 'utf8')
     const g2 = await callGet(handler, base + '?sessionId=s1')
     assert.deepEqual(g2.body.fallback_params.rcl.r, [1, 100])
     assert.deepEqual(g2.body.fallback_params.mult.nf, [1, 64])
+    assert.equal(g2.body.fallback_params.nf_warn, 80)
     // once the session HAS an entry, no fork verdict is carried (tombstone)
     const sid = 'session-sess1111-2222-3332-4444-555555555555'
     await writeSessionConfig(dir, sid, {
       display: 'session', reports: [], dashboard_selected: null,
-      check_params: { ...defaultCheckParams(), unit_check: false },
+      check_params: { ...defaultCheckParams(), unit_check: false, nf_warn: 64 },
     })
     const g3 = await callGet(handler, base + '?sessionId=' + sid)
     assert.equal(g3.body.sessions[sid].check_params.unit_check, false)
+    assert.equal(g3.body.sessions[sid].check_params.nf_warn, 64)
     assert.equal(g3.body.fork, undefined)
   } finally { await rm(dir, { recursive: true, force: true }) }
 })

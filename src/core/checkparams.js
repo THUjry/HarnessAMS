@@ -20,11 +20,13 @@ const PARAMS_FILE = 'check_params.json'
 
 // rcl mirrors spectre pre-check IDEAL_RCL_RANGES (kind -> [lo, hi] in the base
 // unit: ohm / farad / henry), mult the nf/m multiplier ranges (positive
-// integers); unit_check gates the geometry-suffix family.
+// integers), nf_warn the nf warning threshold (optional key, default 50);
+// unit_check gates the geometry-suffix family.
 export function defaultCheckParams() {
   return {
     rcl: { r: [0.1, 1e6], c: [1e-15, 1e-6], l: [1e-13, 1e-8] },
     mult: { nf: [1, 128], m: [1, 1000] },
+    nf_warn: 50,
     unit_check: true,
   }
 }
@@ -59,6 +61,7 @@ function applyLayer(params, raw) {
       if (validMultPair(raw.mult[k])) params.mult[k] = [Number(raw.mult[k][0]), Number(raw.mult[k][1])]
     }
   }
+  if (Number.isInteger(raw.nf_warn) && raw.nf_warn > 0) params.nf_warn = raw.nf_warn
   if (typeof raw.unit_check === 'boolean') params.unit_check = raw.unit_check
 }
 
@@ -104,6 +107,14 @@ export function validateCheckParams(input) {
       return { error: `mult.${k} must be [min, max]: two positive integers, min < max` }
     }
     out.mult[k] = [Number(input.mult[k][0]), Number(input.mult[k][1])]
+  }
+  // nf_warn is optional: tables written before the key existed stay valid
+  // (absent = the built-in default); a present value must be a threshold.
+  if (input.nf_warn !== undefined) {
+    if (!Number.isInteger(input.nf_warn) || input.nf_warn <= 0) {
+      return { error: 'nf_warn must be a positive integer (the nf warning threshold)' }
+    }
+    out.nf_warn = input.nf_warn
   }
   if (typeof input.unit_check !== 'boolean') return { error: 'unit_check must be a boolean (on/off switch)' }
   out.unit_check = input.unit_check

@@ -158,6 +158,8 @@ window.__ModuleLoader__.load({
         'check.multNf': 'nf 指数范围',
         'check.multM': 'm 并联倍数范围',
         'check.noteMult': '正整数；下限 < 上限',
+        'check.nfWarn': 'nf 警告阈',
+        'check.noteNfWarn': 'nf 达到/超过此值报 warning（不拦截）；正整数',
         'check.unitCheck': '单位检查',
         'check.noteUnit': '几何长度 u/n 后缀与裸数拦截',
         'check.on': '开',
@@ -169,6 +171,7 @@ window.__ModuleLoader__.load({
         'check.saveFailed': '保存失败：{msg}',
         'check.badPair': '“{p}”须为正数且下限 < 上限',
         'check.badMultPair': '“{p}”须为正整数且下限 < 上限',
+        'check.badNfWarn': '“{p}”须为正整数',
         'pset.title': '项目设置',
         'pset.rootLabel': '远程根路径',
         'pset.selfchkDirLabel': '自检目录',
@@ -384,6 +387,8 @@ window.__ModuleLoader__.load({
         'check.multNf': 'nf finger-count range',
         'check.multM': 'm multiplier range',
         'check.noteMult': 'positive integers; min < max',
+        'check.nfWarn': 'nf warning threshold',
+        'check.noteNfWarn': 'nf at or above this value warns (never blocks); a positive integer',
         'check.unitCheck': 'Unit checks',
         'check.noteUnit': 'geometry length u/n suffixes and bare-number rejection',
         'check.on': 'On',
@@ -394,6 +399,7 @@ window.__ModuleLoader__.load({
         'check.loadFailed': 'Failed to load check parameters: {msg}',
         'check.saveFailed': 'Failed to save: {msg}',
         'check.badMultPair': '"{p}" must be two positive integers, min < max',
+        'check.badNfWarn': '"{p}" must be a positive integer',
         'check.badPair': '"{p}" must be positive numbers with min < max',
         'pset.title': 'Project settings',
         'pset.rootLabel': 'Remote root',
@@ -2874,6 +2880,7 @@ window.__ModuleLoader__.load({
           nf: p.mult.nf.map((x) => String(x)),
           m: p.mult.m.map((x) => String(x)),
         },
+        nf_warn: String(p.nf_warn),
         unit_check: p.unit_check,
       })
       const toNumeric = (d) => ({
@@ -2886,6 +2893,7 @@ window.__ModuleLoader__.load({
           nf: d.mult.nf.map((x) => Number(x)),
           m: d.mult.m.map((x) => Number(x)),
         },
+        nf_warn: Number(d.nf_warn),
         unit_check: d.unit_check,
       })
 
@@ -2925,6 +2933,13 @@ window.__ModuleLoader__.load({
           const hi = Number(draft.mult[k][1])
           if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo <= 0 || lo >= hi) {
             setSaveError(tr('check.badMultPair', { p: tr(k === 'nf' ? 'check.multNf' : 'check.multM') }))
+            return
+          }
+        }
+        {
+          const n = Number(draft.nf_warn)
+          if (!Number.isInteger(n) || n <= 0) {
+            setSaveError(tr('check.badNfWarn', { p: tr('check.nfWarn') }))
             return
           }
         }
@@ -2992,6 +3007,21 @@ window.__ModuleLoader__.load({
           h('td', { className: 'hams-dim' }, tr('check.noteMult')))
       }
 
+      const nfWarnRow = () => {
+        const saved = params?.nf_warn
+        const changed = saved !== undefined && Number(draft.nf_warn) !== saved
+        return h('tr', null,
+          h('td', null, tr('check.nfWarn')),
+          h('td', null,
+            h('input', { className: 'hams-input', style: { width: '88px' }, value: draft.nf_warn,
+              onChange: (e) => setDraft({ ...draft, nf_warn: e.target.value }),
+              onKeyDown: (e) => { if (e.key === 'Enter') { e.preventDefault(); void confirm() } } }),
+            ' ',
+            changed && h('span', { className: 'hams-dim' },
+              tr('check.oldValue', { v: String(saved) }))),
+          h('td', { className: 'hams-dim' }, tr('check.noteNfWarn')))
+      }
+
       const switchRow = (key, labelKey, noteKey) => {
         const saved = params ? params[key] : null
         const changed = !!params && draft[key] !== saved
@@ -3036,6 +3066,7 @@ window.__ModuleLoader__.load({
             rclRow('l', 'check.rclL', 'check.noteL'),
             multRow('nf', 'check.multNf'),
             multRow('m', 'check.multM'),
+            nfWarnRow(),
             switchRow('unit_check', 'check.unitCheck', 'check.noteUnit'))),
         params && draft && h('div', { className: 'hams-row' },
           // an UNCONFIRMED session can always confirm: with no own table the
