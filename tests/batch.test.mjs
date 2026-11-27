@@ -25,6 +25,7 @@ import { makeTool } from '../src/tool.js'
 import { syncAgentsMd } from '../src/core/agentsmd.js'
 import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginAssets, pluginScripts, simScriptsDir } from '../src/core/batch.js'
 import { callTool } from '../src/channel/remote.js'
+import { getPollFrame, resetPollFramesForTest } from '../src/core/pollframes.js'
 
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
 
@@ -1012,6 +1013,50 @@ test('batch_poll wait_sec: deadline returns the last (non-terminal) payload', as
     assert.equal(res.state, 'running') // never settled within the deadline
     assert.equal(res.completed, 1)
   } finally {
+    restoreEnv()
+  }
+})
+
+test('batch_poll publishes its frames to the in-flight store under exec.callId', async () => {
+  const run = makeRunDir()
+  try {
+    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
+      machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 3,
+    }))
+    resetPollFramesForTest()
+    // hold the FIRST poll reply so the call stays observably in flight
+    let release
+    const gate = new Promise((r) => { release = r })
+    const ctx = makeCtx({ poll: { meta: 1, total: 3, status: 'running', bjobs: '777 RUN' } })
+    const inner = ctx.tools.execute
+    ctx.tools.execute = async (input) => {
+      const reply = await inner(input)
+      const c = input.calls[0]
+      if (c.name === 'ssh_exec' && String(JSON.parse(c.arguments || '{}').command || '').includes('__BJOB__')) await gate
+      return reply
+    }
+    const pending = tool(ctx, 'batch_poll').execute({ run_dir: run, wait_sec: 1 }, { callId: 'call-live-1' })
+    // the 0/N seed exists the moment the call starts, before any reply
+    await new Promise((r) => setTimeout(r, 25))
+    const seed = getPollFrame('call-live-1')
+    assert.ok(seed, 'the call seeds the store at dispatch')
+    assert.equal(seed.frame.state, 'submitted')
+    assert.equal(seed.frame.total, 3)
+    release()
+    // after the first tick the real frame replaces the seed while still in flight
+    let ticked = null
+    for (let i = 0; i < 40 && !(ticked && ticked.frame.state === 'running'); i++) {
+      await new Promise((r) => setTimeout(r, 10))
+      ticked = getPollFrame('call-live-1')
+    }
+    assert.ok(ticked && ticked.frame.state === 'running', 'the first tick overwrites the seed')
+    assert.equal(ticked.frame.completed, 1)
+    const res = await pending
+    assert.equal(res.state, 'running') // deadline wins: never settled within wait_sec
+    // settled → the finally removed the entry, so settled cards miss by design
+    assert.equal(getPollFrame('call-live-1'), null)
+  } finally {
+    resetPollFramesForTest()
     restoreEnv()
   }
 })

@@ -16,8 +16,14 @@
 // budget of one shared connection. Failures resolve to { unreachable: true }
 // (HTTP 200) so the card keeps its last frame plus a dim note instead of going
 // blank — the D-004 rule: a visible card at every moment, placeholder never.
+// The callId fast path comes first: a card whose own batch_poll call is in
+// flight passes that call's id (exec.callId) and is served the tool's latest
+// published frame from the in-flight store (core/pollframes.js) — zero exec
+// while the single poller ticks. Misses (settled calls, replayed cards, hosts
+// without callId) fall through to the single-flight poll below.
 import path from 'node:path'
 import { readRunProgress } from '../core/progress_files.js'
+import { getPollFrame } from '../core/pollframes.js'
 import { readJob, pollCommand, parsePollOutput } from '../core/batch.js'
 import { resolveRemoteDir } from '../lib/remotepath.js'
 import { resolveMachine, buildChannel } from '../channel/remote.js'
@@ -57,7 +63,7 @@ async function pollRemoteJob(ctx, runDir, job) {
   }
 }
 
-export async function progressRemotePayload(ctx, runDir) {
+export async function progressRemotePayload(ctx, runDir, callId) {
   const dir = String(runDir ?? '').trim()
   const job = dir ? readJob(dir) : null
   if (!job || job.scheduler === 'local') {
@@ -70,6 +76,15 @@ export async function progressRemotePayload(ctx, runDir) {
     return { remote: false, ...readRunProgress(dir) }
   }
   const key = path.resolve(dir)
+  // In-flight fast path: the entry exists exactly while the card's own poll
+  // call ticks (the tool deletes it on settle), and the run dir must match —
+  // a stale or foreign id simply misses and takes the poll below.
+  if (callId) {
+    const live = getPollFrame(String(callId))
+    if (live && path.resolve(live.runDir) === key) {
+      return { remote: true, run_dir: dir, ...live.frame }
+    }
+  }
   const hit = remoteCache.get(key)
   if (hit && Date.now() - hit.ts < CACHE_TTL_MS) return hit.promise
   const promise = pollRemoteJob(ctx, dir, job)

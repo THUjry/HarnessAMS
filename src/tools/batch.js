@@ -38,6 +38,7 @@ import { callTool, resolveMachine, shq, buildChannel } from '../channel/remote.j
 import { readJsonTolerant } from '../lib/io.js'
 import { defaultRemoteScriptsDir, remoteJoin, resolveRemoteDir, sanitizeRel } from '../lib/remotepath.js'
 import { readRunProgress, totalFromConfig } from '../core/progress_files.js'
+import { setPollFrame, deletePollFrame } from '../core/pollframes.js'
 import { normalizePin } from '../core/settings.js'
 import { overlaySettingsAt } from '../core/reconcile.js'
 import { resolveProjectTool } from '../core/project.js'
@@ -56,8 +57,12 @@ import {
 const AUTO_FETCH_FILES = ['sweep_progress.json', 'errlog.txt']
 
 // batch_poll wait_sec cadence (D-004): the gap between re-polls of a blocking
-// wait. 10 s matches the wait policy's preferred first-backoff step.
-const WAIT_GAP_MS = 10_000
+// wait. 5 s keeps the session card's data as fresh as its own polling cadence
+// — the card reads this call's published frames (core/pollframes.js), so the
+// tick gap IS the card's freshness. The model-facing backoff ladder in the
+// tool description (10 s -> 20 s -> 40 s) is the discipline for re-calling
+// the tool across turns and stays as it is.
+const WAIT_GAP_MS = 5_000
 
 // Abortable gap for the wait loops (D-004): sleeps up to `ms`, but wakes the
 // moment `signal` aborts so the tool call settles at once when the session
@@ -735,7 +740,7 @@ export function batchTools(ctx) {
         remote_dir: { type: 'string', description: 'Override the remote batch directory' },
         job_id: { type: 'string', description: 'Override the job id' },
         scheduler: { type: 'string', enum: ['lsf', 'ssh', 'local'], description: 'lsf (default) checks bjobs; ssh relies on the batch progress files; local reads the run directory itself' },
-        wait_sec: { type: 'integer', description: 'Bounded blocking wait: re-poll (~10 s apart) until a terminal state '
+        wait_sec: { type: 'integer', description: 'Bounded blocking wait: re-poll (~5 s apart) until a terminal state '
           + '(completed/failed/partial) or this many seconds elapse (capped at 600), then return the last payload. '
           + 'Default 0 = single snapshot, the original contract' },
         project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
@@ -767,8 +772,9 @@ export function batchTools(ctx) {
         // wait_sec (D-004): 0 keeps the single-snapshot contract; a positive
         // value re-polls every WAIT_GAP_MS until a terminal state or the
         // deadline, returning the LAST payload (shape unchanged). The blocking
-        // call is the window where the session card live-updates (the remote
-        // progress source polls at 5 s client-side).
+        // call is the window where the session card live-updates: the card
+        // polls this call's published frames (core/pollframes.js) at its 5 s
+        // client cadence, so the tick gap IS the card's freshness.
         const waitSec = Math.max(0, Math.min(Number(args.wait_sec) || 0, 600))
         if (scheduler === 'local') {
           // Local submission: the run directory IS the truth — read the shared
@@ -798,64 +804,92 @@ export function batchTools(ctx) {
         // session-project settings (AGENTS.md-overlaid, D-002).
         const inCluster = (job?.cluster_env ?? settings.cluster_env) === 'in-cluster'
         const sshExec = scheduler === 'ssh' || !inCluster
-        let target
-        if (!sshExec) {
-          const root = String(args.remote_root || job?.remote_root || '').trim().replace(/\\/g, '/')
-          if (!root || !root.startsWith('/')) {
-            throw new Error('remote_root is required (the absolute shared-filesystem root — pass it or re-submit so the job file records it)')
+        // D-004 shared source: while this call ticks, the session card polls
+        // /api/progress-remote with this call's exec.callId and is served the
+        // frames published below straight from memory (core/pollframes.js) —
+        // one poller, every reader. The entry lives exactly as long as the
+        // call (the finally deletes it whatever the outcome), so a settled or
+        // replayed card misses and falls back to the endpoint's own poll; a
+        // host that hands down no callId skips the store entirely — same
+        // fallback, the feature degrades without a trace.
+        const callId = exec?.callId ?? null
+        try {
+          if (callId) {
+            // Seed at dispatch, before the first tick: the 0/N submitted frame
+            // off the job record (the job-file ladder's own total source), so
+            // the card's first fetch — milliseconds in — already hits memory.
+            setPollFrame(callId, runDir, {
+              state: 'submitted', job_state: 'submitted',
+              total: Number(job?.total_points) || totalFromConfig(runDir) || 0,
+              completed: 0, succeeded: 0, failed: 0,
+            })
           }
-          target = { alias: null, remoteRoot: root }
-        } else {
-          const machineId = args.machine_id || job?.machine_id || undefined
-          target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
-        }
-        // D-004: turnSignal rides the poll execs and the terminal fetch —
-        // read-only calls, so an abort settles at once and leaves nothing.
-        const channel = buildChannel(ctx, { alias: target.alias, inCluster, signal: turnSignal })
-        const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
-        const command = pollCommand({ remoteDir, jobId, scheduler })
-        let stdout = ''
-        const parsed = await pollUntilTerminal({
-          waitSec, signal: turnSignal,
-          isTerminal: (p) => TERMINAL_POLL_STATES.has(p.state),
-          tick: async () => {
-            const r = await channel.exec(command, { timeoutMs: 30_000 })
-            if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
-            stdout = r.stdout || ''
-            return parsePollOutput(r.stdout, { total: job?.total_points })
-          },
-        })
-        // Terminal state: absorb the old fetch — pull the light result files
-        // straight down per file (existence probed once, no archive). The
-        // probe must tolerate MISSING files: ls exits 2 when any listed name
-        // is absent (errlog.txt only exists on a failed run — the green-run
-        // norm), and that nonzero exit used to skip the whole fetch, so
-        // sweep_progress.json never landed locally on a clean run (found
-        // 2026-11-25 while verifying the D-003 telemetry harvest; the
-        // trailing true keeps the exit code 0, stdout still lists only what
-        // exists).
-        const fetched = []
-        if (TERMINAL_POLL_STATES.has(parsed.state)) {
-          const probe = await channel.exec(
-            `cd ${shq(remoteDir)} && ls -1 ${AUTO_FETCH_FILES.map(shq).join(' ')} 2>/dev/null; true`,
-            { timeoutMs: 30_000 })
-          if (probe.ok) {
-            for (const name of String(probe.stdout || '').split(/\r?\n/).map((s) => s.trim())) {
-              if (!AUTO_FETCH_FILES.includes(name)) continue
-              const dl = await channel.download(remoteJoin(remoteDir, name), path.join(runDir, name))
-              if (dl.ok) fetched.push(name)
+          let target
+          if (!sshExec) {
+            const root = String(args.remote_root || job?.remote_root || '').trim().replace(/\\/g, '/')
+            if (!root || !root.startsWith('/')) {
+              throw new Error('remote_root is required (the absolute shared-filesystem root — pass it or re-submit so the job file records it)')
+            }
+            target = { alias: null, remoteRoot: root }
+          } else {
+            const machineId = args.machine_id || job?.machine_id || undefined
+            target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
+          }
+          // D-004: turnSignal rides the poll execs and the terminal fetch —
+          // read-only calls, so an abort settles at once and leaves nothing.
+          const channel = buildChannel(ctx, { alias: target.alias, inCluster, signal: turnSignal })
+          const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
+          const command = pollCommand({ remoteDir, jobId, scheduler })
+          let stdout = ''
+          const parsed = await pollUntilTerminal({
+            waitSec, signal: turnSignal,
+            isTerminal: (p) => TERMINAL_POLL_STATES.has(p.state),
+            tick: async () => {
+              const r = await channel.exec(command, { timeoutMs: 30_000 })
+              if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
+              stdout = r.stdout || ''
+              const frame = parsePollOutput(r.stdout, { total: job?.total_points })
+              // publish the fresh frame for the card's zero-exec reads
+              if (callId) setPollFrame(callId, runDir, frame)
+              return frame
+            },
+          })
+          // Terminal state: absorb the old fetch — pull the light result files
+          // straight down per file (existence probed once, no archive). The
+          // probe must tolerate MISSING files: ls exits 2 when any listed name
+          // is absent (errlog.txt only exists on a failed run — the green-run
+          // norm), and that nonzero exit used to skip the whole fetch, so
+          // sweep_progress.json never landed locally on a clean run (found
+          // 2026-11-25 while verifying the D-003 telemetry harvest; the
+          // trailing true keeps the exit code 0, stdout still lists only what
+          // exists).
+          const fetched = []
+          if (TERMINAL_POLL_STATES.has(parsed.state)) {
+            const probe = await channel.exec(
+              `cd ${shq(remoteDir)} && ls -1 ${AUTO_FETCH_FILES.map(shq).join(' ')} 2>/dev/null; true`,
+              { timeoutMs: 30_000 })
+            if (probe.ok) {
+              for (const name of String(probe.stdout || '').split(/\r?\n/).map((s) => s.trim())) {
+                if (!AUTO_FETCH_FILES.includes(name)) continue
+                const dl = await channel.download(remoteJoin(remoteDir, name), path.join(runDir, name))
+                if (dl.ok) fetched.push(name)
+              }
             }
           }
-        }
-        return {
-          ok: true,
-          job_id: jobId,
-          remote_dir: remoteDir,
-          scheduler,
-          ...parsed,
-          fetched,
-          output: (stdout || '').trim().slice(0, 1500),
-          ...(overlayWarnings.length ? { warnings: overlayWarnings } : {}),
+          return {
+            ok: true,
+            job_id: jobId,
+            remote_dir: remoteDir,
+            scheduler,
+            ...parsed,
+            fetched,
+            output: (stdout || '').trim().slice(0, 1500),
+            ...(overlayWarnings.length ? { warnings: overlayWarnings } : {}),
+          }
+        } finally {
+          // the store entry dies with the call: settled cards fall back to
+          // the endpoint's own poll
+          if (callId) deletePollFrame(callId)
         }
       },
     },

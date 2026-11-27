@@ -852,9 +852,11 @@ window.__ModuleLoader__.load({
     // directory, so the card covers local scans too); every other call,
     // batch_submit included, stays on the DSH generic card.
     // While the poll call blocks (wait_sec), the card reads /api/progress-remote
-    // (the batch's own counters on the remote host, D-004) after an instant
-    // local 0/N first frame from the job file — it never shows a dead
-    // placeholder. Result cards add the cross-batch aggregate from
+    // (the batch's own counters on the remote host, D-004) carrying the call's
+    // own callId: in flight the endpoint serves the frames that very tool call
+    // publishes (zero exec), settled cards fall back to the endpoint's own
+    // poll after an instant local 0/N first frame from the job file — it never
+    // shows a dead placeholder. Result cards add the cross-batch aggregate from
     // /api/progress-summary.
     const SIM_CARD_TOOLS = ['batch_poll']
 
@@ -896,11 +898,13 @@ window.__ModuleLoader__.load({
     // Progress data for one card: /api/progress (single run) + /api/progress-summary
     // (cross-batch aggregate); the batch_poll card swaps the single-run source for
     // /api/progress-remote (D-004, the remote batch's live counters) at the 5 s
-    // cadence the wait policy prescribes. While the tool call is in flight
-    // (active) poll with the visibility pause/resume discipline shared by the
-    // sidebar polls; settled cards fetch once on mount (one fetch per scroll-back
-    // remount is fine).
-    function useSimProgress({ runDir, projectDir, sessionId, active, remote, intervalMs }) {
+    // cadence the wait policy prescribes, carrying the card's own callId so an
+    // in-flight call is served the tool's published frames (zero exec; a settled
+    // call misses and the endpoint polls on its own). While the tool call is in
+    // flight (active) poll with the visibility pause/resume discipline shared by
+    // the sidebar polls; settled cards fetch once on mount (one fetch per
+    // scroll-back remount is fine).
+    function useSimProgress({ runDir, projectDir, sessionId, callId, active, remote, intervalMs }) {
       const [data, setData] = useState({ prog: null, agg: null, remoteErr: null })
       useEffect(() => {
         // API already ends with /api — the endpoints hang right off it. sessionId
@@ -909,7 +913,7 @@ window.__ModuleLoader__.load({
         // inject hook; without it the endpoints answer 400, so skip the fetch.
         if (!sessionId) return
         const enc = encodeURIComponent
-        const progUrl = runDir ? API + (remote ? '/progress-remote' : '/progress') + '?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) : null
+        const progUrl = runDir ? API + (remote ? '/progress-remote' : '/progress') + '?runDir=' + enc(runDir) + '&sessionId=' + enc(sessionId) + (remote && callId ? '&callId=' + enc(callId) : '') : null
         // Remote mode also reads the LOCAL progress once per tick: the job-file
         // frame (0/N submitted, no ssh) lands within milliseconds and holds the
         // card until the remote truth arrives ~1–3 s later.
@@ -966,7 +970,7 @@ window.__ModuleLoader__.load({
           clearInterval(timer)
           document.removeEventListener('visibilitychange', onVis)
         }
-      }, [runDir, projectDir, sessionId, active, remote, intervalMs])
+      }, [runDir, projectDir, sessionId, callId, active, remote, intervalMs])
       return data
     }
 
@@ -1166,12 +1170,14 @@ window.__ModuleLoader__.load({
       const result = phase === 'result' && props.block ? cardResultOf(props) : null
       const roots = cardRoots(args, result ? result.data : null)
       // batch_poll is the monitoring window: the remote progress source at
-      // the 5 s policy cadence (the instant local 0/N first frame comes from
-      // the job file, no ssh); a local submission reads the run directory's
-      // own files at the same cadence.
+      // the 5 s policy cadence, keyed to this very call (the owner's callId
+      // serves the tool's own in-flight frames, zero exec; settled calls fall
+      // back to the endpoint poll and the instant local 0/N first frame from
+      // the job file); a local submission reads the run directory's own files
+      // at the same cadence.
       const remote = toolName === 'batch_poll'
       const live = useSimProgress({ runDir: roots.runDir, projectDir: roots.projectDir,
-        sessionId: props.sessionId, active: phase === 'start', remote, intervalMs: remote ? 5000 : 3000 })
+        sessionId: props.sessionId, callId: props.callId, active: phase === 'start', remote, intervalMs: remote ? 5000 : 3000 })
       if (!on) {
         return h('div', { className: 'hams-tc' },
           h('div', { className: 'hams-tc-head' },

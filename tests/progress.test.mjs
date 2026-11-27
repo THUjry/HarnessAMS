@@ -14,6 +14,7 @@ import { registerRoutes, callGet } from './helpers.mjs'
 import { projectRootOf, readRunProgress } from '../src/core/progress_files.js'
 import { summarizeProject } from '../src/server/progress.js'
 import { resetRemoteCacheForTest } from '../src/server/progressRemote.js'
+import { setPollFrame, resetPollFramesForTest } from '../src/core/pollframes.js'
 
 async function makeHandler(registryList = [], ctxExtra = {}) {
   const handler = await registerRoutes({ workspaceRegistry: { list: () => registryList }, ...ctxExtra })
@@ -423,6 +424,56 @@ test('progress: GET /api/progress-remote answers unreachable (keep-last-frame sh
     assert.equal(r.body.remote, true)
     assert.equal(r.body.unreachable, true)
     assert.ok(String(r.body.error).length > 0)
+  } finally {
+    await rm(proj, { recursive: true, force: true })
+  }
+})
+
+test('progress: GET /api/progress-remote serves an in-flight poll frame by callId with zero exec', async () => {
+  const proj = await mkdtemp(path.join(tmpdir(), 'hams-prog-frame-'))
+  try {
+    const run = path.join(proj, 'RawResults', 'Sim0_20261123_batch1')
+    await mkdir(run, { recursive: true })
+    await writeFile(path.join(run, '.batch_job.json'), JSON.stringify({
+      job_id: '779', machine_id: 'node1', remote_root: '/home/op/sim',
+      remote_dir: '/home/op/sim/Sim0_20261123_batch1', scheduler: 'lsf', total_points: 5 }))
+    const ssh = sshTools()
+    const call = await makeHandler([{ id: 'w1', path: proj, sessionIds: ['s1'], title: 'p' }], { tools: ssh.tools })
+    const q = (v) => encodeURIComponent(v)
+    resetRemoteCacheForTest()
+    resetPollFramesForTest()
+    try {
+      // the 0/N seed a poll call publishes at dispatch
+      setPollFrame('call-1', run, { state: 'submitted', job_state: 'submitted', total: 5, completed: 0, succeeded: 0, failed: 0 })
+      ssh.calls.length = 0
+      const seed = await call('/api/progress-remote?runDir=' + q(run) + '&sessionId=s1&callId=call-1')
+      assert.equal(seed.code, 200)
+      assert.equal(seed.body.ok, true)
+      assert.equal(seed.body.remote, true)
+      assert.equal(seed.body.state, 'submitted')
+      assert.equal(seed.body.total, 5)
+      assert.equal(ssh.calls.length, 0, 'a callId hit costs zero exec')
+      // the tool's tick replaced the seed: the next read serves the fresh frame
+      setPollFrame('call-1', run, { state: 'running', job_state: 'running', total: 5, completed: 2, succeeded: 2, failed: 0 })
+      const ticked = await call('/api/progress-remote?runDir=' + q(run) + '&sessionId=s1&callId=call-1')
+      assert.equal(ticked.code, 200)
+      assert.equal(ticked.body.state, 'running')
+      assert.equal(ticked.body.completed, 2)
+      assert.equal(ssh.calls.length, 0, 'a refreshed frame still costs zero exec')
+      // a foreign callId misses → the endpoint's own single poll
+      const miss = await call('/api/progress-remote?runDir=' + q(run) + '&sessionId=s1&callId=call-other')
+      assert.equal(miss.code, 200)
+      assert.equal(miss.body.state, 'running') // from the ssh mock truth
+      assert.equal(ssh.calls.filter((c) => c.name === 'ssh_exec').length, 1)
+      // a run-dir mismatch on the stored entry also misses (stale/foreign guard)
+      resetRemoteCacheForTest()
+      setPollFrame('call-1', path.join(proj, 'RawResults', 'Sim0_20261123_batch2'), { state: 'running' })
+      const mismatch = await call('/api/progress-remote?runDir=' + q(run) + '&sessionId=s1&callId=call-1')
+      assert.equal(mismatch.code, 200)
+      assert.equal(ssh.calls.filter((c) => c.name === 'ssh_exec').length, 2)
+    } finally {
+      resetPollFramesForTest()
+    }
   } finally {
     await rm(proj, { recursive: true, force: true })
   }

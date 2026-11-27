@@ -592,14 +592,20 @@ async function handle(req, res, ctx) {
     // own progress files on the remote host through the dsh-ssh exec funnel.
     // Same workspace fence as the local endpoints; the machine and remote dir
     // are resolved server-side from the run dir's .batch_job.json (written by
-    // batch_submit) — the caller supplies nothing beyond the fenced runDir. A
-    // short single-flight cache (progressRemote.js) keeps one ssh exec per run
-    // dir per ~4 s however many cards poll; failures answer 200 {unreachable}
-    // so the card keeps its last frame instead of going blank.
+    // batch_submit) — the caller supplies nothing beyond the fenced runDir.
+    // While the card's own batch_poll call is in flight, its callId param is
+    // served from that call's published frames (core/pollframes.js via
+    // progressRemote.js) — zero exec; a short single-flight cache keeps one
+    // ssh exec per run dir per ~4 s however many cards poll otherwise;
+    // failures answer 200 {unreachable} so the card keeps its last frame
+    // instead of going blank.
     const fence = progressFence(ctx.workspaceRegistry, url.searchParams)
     if (fence.error) { json(fence.code, { error: fence.error }); return }
     if (!fence.runDir) { json(400, { error: 'runDir is required' }); return }
-    const payload = await progressRemotePayload(ctx, fence.runDir)
+    // callId (optional): the card's own batch_poll call id — a store hit
+    // answers from memory with zero exec (the fast path above).
+    const callId = String(url.searchParams.get('callId') ?? '').trim()
+    const payload = await progressRemotePayload(ctx, fence.runDir, callId)
     json(200, { ok: true, ...payload })
     return
   }

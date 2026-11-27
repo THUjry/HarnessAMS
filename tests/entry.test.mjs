@@ -148,6 +148,10 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   assert.ok(src.includes("API + '/progress-summary"), 'cards must poll the progress-summary endpoint')
   assert.ok(src.includes('normRemoteProg'), 'remote payloads must normalize to the prog shape')
   assert.ok(src.includes('remoteErr'), 'unreachable remotes must surface a note, not a blank card')
+  // The card's remote source carries its own callId: an in-flight call is
+  // served from the tool's published frames; a settled one falls back.
+  assert.ok(src.includes("remote && callId ? '&callId=' + enc(callId) : ''"), 'the remote progress URL must carry the card callId')
+  assert.ok(src.includes('callId: props.callId'), 'the card must pass its callId into the progress hook')
   // A failed frame must not show its losses twice (failed:N AND pending:total):
   // the result view takes the payload's own pending when it carries one.
   assert.ok(src.includes('v: d.pending ?? ('), 'result card prefers the payload pending')
