@@ -177,6 +177,15 @@ test('client half: single tab — two-entry strip (project overview + this sessi
   assert.ok(src.includes('const sidebarOpenState'), 'open-state tracking')
   assert.ok(src.includes('right.openTab(TAB_KIND)'), 'reopen targets the HarnessAMS tab')
   assert.ok(src.includes('overviewMemory'), 'same-project remount cache stays')
+  // The overview branch carries its own subtab pair — the config & overview
+  // view (the settings table + project self-check) and the automation
+  // placeholder; the choice persists like the session sub-view so a host
+  // remount reopens the same sub-page.
+  assert.ok(/id: 'config', labelKey: 'tasks\.viewConfig'/.test(src), 'OVERVIEW_VIEWS must carry the config view')
+  assert.ok(/id: 'automation', labelKey: 'tasks\.viewAutomation'/.test(src), 'OVERVIEW_VIEWS must carry the automation placeholder view')
+  assert.ok(src.includes('hams-overview-view'), 'overview sub-view choice must persist via localStorage')
+  assert.ok(src.includes('useState(readOverviewView)'), 'ProjectOverviewView must restore the persisted view on mount')
+  assert.ok(src.includes('rememberOverviewView'), 'overview view switch must write the persisted choice')
   // The check sub-view keeps its contract (per-session)
   assert.ok(/id: 'check', labelKey: 'tasks\.viewCheck'/.test(src), 'TASK_VIEWS must carry the check view')
   assert.ok(src.includes("API + '/session-config"), 'check sub-view reads through the session-config API')

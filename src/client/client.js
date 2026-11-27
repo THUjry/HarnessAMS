@@ -75,7 +75,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': '套件合计 13 个工具：SmartAnaSim 7（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件＋post_check 按需数据完整性诊断，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析/诊断脚本）＋HarnessAMS 6（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、register_report 挂载已有报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 两个子页：「项目配置与总览」＝项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「自动化」＝占位页（功能待后续提供）；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
         'hosts.ok': 'dsh-ssh：{n} 台主机',
         'hosts.missing': 'dsh-ssh 不可用',
@@ -116,6 +116,9 @@ window.__ModuleLoader__.load({
         'tasks.projectLabel': '项目：',
         'tasks.viewCheck': '参数检查',
         'tasks.viewDashboard': '仪表盘',
+        'tasks.viewConfig': '项目配置与总览',
+        'tasks.viewAutomation': '自动化',
+        'tasks.automationPlaceholder': '占位页——自动化功能尚未提供。',
         'tasks.storeSkipped': 'sessions.json 有 {n} 处不合规内容被跳过',
         'dash.noReports': '（暂无报告）',
         'dash.addTitle': '添加 HTML 报告',
@@ -298,7 +301,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'The suite registers 13 tools in total: SmartAnaSim 7 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, the gen_vsch_import/export pair and the on-demand post_check data-integrity diagnostic — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser/diagnostic scripts) and HarnessAMS 6 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, register_report for mounting an existing report, safe_trash and the harnessams_selfcheck self-check). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS sidebar “Project overview” — two sub-tabs: “Config & overview” — the project-settings table plus project self-check as the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; and “Automation” — a placeholder page (features to come); “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
         'hosts.ok': 'dsh-ssh: {n} host(s)',
         'hosts.missing': 'dsh-ssh not available',
@@ -339,6 +342,9 @@ window.__ModuleLoader__.load({
         'tasks.projectLabel': 'Project: ',
         'tasks.viewCheck': 'Checks',
         'tasks.viewDashboard': 'Dashboard',
+        'tasks.viewConfig': 'Config & overview',
+        'tasks.viewAutomation': 'Automation',
+        'tasks.automationPlaceholder': 'Placeholder page — automation features are not available yet.',
         'tasks.storeSkipped': '{n} invalid entries skipped in sessions.json',
         'dash.noReports': '(no reports)',
         'dash.addTitle': 'Add an HTML report',
@@ -1345,6 +1351,31 @@ window.__ModuleLoader__.load({
       try { localStorage.setItem(TASK_VIEW_KEY, v) } catch { /* private mode */ }
     }
 
+    // The project-overview branch of the same tab carries its own subtab pair
+    // (the session branch's pattern): "Project config & overview" holds the
+    // settings table + the one-click project self-check, "Automation" is a
+    // placeholder for later automation features. Same remount discipline as
+    // the session sub-views: module memory + localStorage keep the choice.
+    const OVERVIEW_VIEWS = [
+      { id: 'config', labelKey: 'tasks.viewConfig' },
+      { id: 'automation', labelKey: 'tasks.viewAutomation' },
+    ]
+    const OVERVIEW_VIEW_KEY = 'hams-overview-view'
+    const isValidOverviewView = (v) => OVERVIEW_VIEWS.some((t) => t.id === v)
+    let overviewViewMemory = null
+    function readOverviewView() {
+      if (overviewViewMemory) return overviewViewMemory
+      try {
+        const v = localStorage.getItem(OVERVIEW_VIEW_KEY)
+        if (isValidOverviewView(v)) { overviewViewMemory = v; return v }
+      } catch { /* private mode */ }
+      return 'config'
+    }
+    function rememberOverviewView(v) {
+      overviewViewMemory = v
+      try { localStorage.setItem(OVERVIEW_VIEW_KEY, v) } catch { /* private mode */ }
+    }
+
     // First-level strip + session config state, PER SESSION (decisions.md
     // D-003, 2026-11-19): each DSH session is a work unit carrying its own
     // config — which view the body shows ('overview' | 'session'), its
@@ -2141,6 +2172,7 @@ window.__ModuleLoader__.load({
       const [project, setProject] = useState(() => overviewMemory.project ?? undefined)
       const [reason, setReason] = useState(null)
       const [checksInfo, setChecksInfo] = useState(() => (overviewMemory.path ? overviewMemory.checksInfo : null))
+      const [view, setView] = useState(readOverviewView)
       const projectPath = project?.path ?? null
 
       useEffect(() => {
@@ -2194,12 +2226,24 @@ window.__ModuleLoader__.load({
       // ONLY scroll container — this view is plain flowing content (flex:none
       // so the column layout never squeezes it), which is what gives the
       // overview its vertical scrollbar however tall the content grows.
+      // Sub navigation rides the same flowing column (the session branch's
+      // subtab strip): "config & overview" keeps the settings table + project
+      // self-check below the project line, "automation" is the placeholder.
       return h('div', { style: { flex: 'none', fontSize: 'var(--dsh-content-font-size, 14px)' } },
         project === undefined && h('div', { className: 'hams-dim' }, tr('tasks.loadingProject')),
         project === null && h('div', { className: 'hams-dim' }, tr('tasks.noProject'), h('br'), null, txt(reason ?? '')),
         project && h('div', { className: 'hams-dim' },
           tr('tasks.projectLabel'), h('b', null, txt(project.title || project.path)), h('br'), null, txt(project.path)),
-        project && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath, facts: project.selfcheck_facts ?? null }),
+        project && h('div', { className: 'hams-subtabs', role: 'tablist', style: { margin: '8px 0 0' } },
+          OVERVIEW_VIEWS.map((v) => h('button', {
+            key: v.id,
+            className: 'hams-subtab' + (view === v.id ? ' active' : ''),
+            role: 'tab',
+            'aria-selected': view === v.id,
+            onClick: () => { rememberOverviewView(v.id); setView(v.id) },
+          }, tr(v.labelKey)))),
+        project && view === 'config' && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath, facts: project.selfcheck_facts ?? null }),
+        project && view === 'automation' && h('div', { className: 'hams-dim', style: { margin: '10px 0 0' } }, tr('tasks.automationPlaceholder')),
       )
     }
 
