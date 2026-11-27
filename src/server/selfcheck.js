@@ -18,7 +18,7 @@
 //                      download + cross-check remotely.
 //
 // The remote chains follow the project's working environment (cluster_env,
-// D-002): out-of-cluster everything crosses dsh-ssh through run._priv.alias;
+// D-001): out-of-cluster everything crosses dsh-ssh through run._priv.alias;
 // in-cluster LSF has NO alias — the batch tools submit locally, and this
 // module's own parse/verify/upload/download become local copies and
 // ctx.shell executions on the shared filesystem (runChannel below).
@@ -93,7 +93,7 @@ const TOTAL_BUDGET_MS = 30 * 60_000
 const POLL_INTERVAL_MS = 5_000
 const POLL_BUDGET_MS = 10 * 60_000
 // The 2 s worker-start gate (2026-11-26 ruling): after a detached ssh submit
-// (D-028) the worker only writes sweep_progress.json once it is actually
+// (D-004) the worker only writes sweep_progress.json once it is actually
 // sweeping, and full batch_poll rounds through that window are heavyweight
 // and progress-blind — the gate probes the file's existence directly every
 // 2 s instead, then hands over to the poll loop.
@@ -316,7 +316,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
   } catch (e) {
     return { error: `workspace_config.json unreadable: ${e?.message ?? e}`, code: 400 }
   }
-  // D-021: reconcile json ← AGENTS.md BEFORE the prefill — a hand-edited block
+  // D-002: reconcile json ← AGENTS.md BEFORE the prefill — a hand-edited block
   // (the agent's natural config-edit route) adopts here so the run submits
   // under the edited values; invalid rows warn into the run record and keep
   // the json values (agent semantics: a run is not a save, nothing blocks).
@@ -326,7 +326,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     if (rec.settings) settings = rec.settings
     if (rec.warnings?.length) reconcileWarnings.push(...rec.warnings)
   } catch { /* keep the settings as read */ }
-  // D-017/D-021 prefill: null pins and python facts heal from the
+  // D-003/D-002 prefill: null pins and python facts heal from the
   // plugin-global memories before anything runs, so the run submits under the
   // paths the AGENTS.md yaml will claim (best-effort — an unreadable memory
   // keeps what was just read)
@@ -344,7 +344,7 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
       return { error: 'run_mode=remote requires remote_root — set it in the Overview settings table '
         + '(or pass settings to the harnessams_selfcheck tool) and confirm', code: 409 }
     }
-    // D-002: in-cluster LSF needs no ssh hop — no machine. Everything else
+    // D-001: in-cluster LSF needs no ssh hop — no machine. Everything else
     // (ssh scheduler, out-of-cluster) targets the configured dsh-ssh alias.
     const needMachine = !inCluster || settings.scheduler === 'ssh'
     if (needMachine) {
@@ -607,7 +607,7 @@ async function orchestrate(run) {
       : 'local mode'
     c2.detail = `env=${settings.cluster_env}, simulator=${sim}, compute local=${settings.compute_script_local}, remote=${settings.compute_script_remote}`
       + (run.scope.scheduler ? `, scheduler=${run.scope.scheduler}` : '')
-      // the toolchain this run really submits with (D-016): the pins, or the
+      // the toolchain this run really submits with (D-006): the pins, or the
       // bare default the batch tools fall back to
       + `, toolchain python=${settings.remote_python ?? (mode === 'remote' ? DEFAULT_REMOTE_PYTHON : 'python')}`
       + `${settings.remote_python ? '' : ' (unpinned)'}`
@@ -783,7 +783,7 @@ async function localChain(run, sim) {
         }
         const prog = await fsp.readFile(path.join(runDir, 'sweep_progress.json'), 'utf8')
           .then((t) => JSON.parse(t)).catch(() => null)
-        // toolchain telemetry (D-016/D-017): the local worker records its own
+        // toolchain telemetry (D-006/D-003): the local worker records its own
         // interpreter + resolved spectre too — the in-cluster pin this run used
         if (prog?.toolchain && !run._priv.toolchainTelemetry) run._priv.toolchainTelemetry = prog.toolchain
         const total = Number(prog?.total_points) || 0
@@ -911,7 +911,7 @@ function remoteDirFor(run, topo, scheduler) {
 // ssh-exec bypass is user-approved for exactly this gate (2026-11-26); the
 // monitoring channel itself stays batch_poll. Out-of-cluster the probe
 // crosses dsh-ssh (execRemote through runChannel — the cancel signal rides
-// it, D-029); in-cluster scheduler=ssh shares the cluster filesystem, so a
+// it, D-004); in-cluster scheduler=ssh shares the cluster filesystem, so a
 // local stat is the same fact with zero traffic. Fails the topology after
 // GATE_CHANNEL_FAILURES consecutive channel-level errors (no exit code /
 // timed out / tool error — exit 1 is "not present yet", not a failure), or
@@ -960,11 +960,11 @@ async function waitForWorkerProgress(run, step, topo, staging) {
 // The remote chains' exec/transfer channel. Exec follows the alias: over
 // dsh-ssh when one is configured (out-of-cluster, or in-cluster scheduler=ssh
 // — the run itself crosses ssh), else the official local ctx.shell seam
-// (in-cluster LSF). Transfers cross ssh ONLY out-of-cluster (D-002): an
+// (in-cluster LSF). Transfers cross ssh ONLY out-of-cluster (D-001): an
 // in-cluster run stages and fetches with plain local copies on the shared
 // filesystem, whatever the scheduler. Same value shapes either way, so the
 // chains below stay channel-agnostic. The run's cancel controller signal
-// rides every call (D-029 discipline): the self-check stop then settles
+// rides every call (D-004 discipline): the self-check stop then settles
 // in-flight remote execs at once (dsh-ssh KILL + close / ctx.shell kill)
 // instead of waiting out their budgets — previously the signal only reached
 // the callTool-invoked batch tools, not these direct channel calls.
@@ -1049,7 +1049,7 @@ async function remoteSpectreChain(run) {
     for (const topo of TOPOS) {
       const staging = path.join(run.runDir, 'remote', topo)
       if (scheduler === 'ssh') {
-        // the worker-start gate: a detached ssh submit (D-028) returns before
+        // the worker-start gate: a detached ssh submit (D-004) returns before
         // the worker sweeps, so wait for the first progress marker with 2 s
         // direct probes, THEN poll — and the poll loop below runs ssh chains
         // to a terminal state exactly like lsf (the old one-round ssh break
@@ -1085,7 +1085,7 @@ async function remoteSpectreChain(run) {
       }
       const prog = await fsp.readFile(path.join(staging, 'sweep_progress.json'), 'utf8')
         .then((t) => JSON.parse(t)).catch(() => null)
-      // toolchain telemetry (D-016/D-017): the worker records the interpreter
+      // toolchain telemetry (D-006/D-003): the worker records the interpreter
       // and spectre the JOB really got — harvest it for the finalize auto-pin
       if (prog?.toolchain && !run._priv.toolchainTelemetry) run._priv.toolchainTelemetry = prog.toolchain
       const fetchedOk = state === 'completed' || (prog?.status === 'completed' && Number(prog.succeeded) === 9)
@@ -1224,7 +1224,7 @@ async function remoteGoldenChain(run) {
   // RN1 — upload the golden run trees + the verify flavors + the standalone
   // psf parser (spectre_psf_parse.py is stdlib-only, so it runs from the batch
   // dir without the whole scripts tree); in-cluster this "upload" is a local
-  // copy on the shared filesystem (D-002)
+  // copy on the shared filesystem (D-001)
   const uploadStep = await timedStep(run, {
     section: 'remote', item: `golden upload (${via})`, settingColumn: 'machine',
   }, async () => {
@@ -1281,7 +1281,7 @@ async function remoteGoldenChain(run) {
 // ---------------------------------------------------------------------------
 
 // A green run pins the toolchain it MEASURED and remembers it per node
-// (2026-11-25, D-016/D-017): the worker's sweep_progress.json telemetry is
+// (2026-11-25, D-006/D-003): the worker's sweep_progress.json telemetry is
 // what the job really ran under — sys.executable and the resolved spectre —
 // never a guess, and it equals an explicit pin anyway (the worker runs under
 // it). Writing it refreshes the settings + the plugin-global node memory, so
@@ -1295,7 +1295,7 @@ export async function autoPinToolchain(run) {
   const patch = {}
   if (tel.python && normalizePin(tel.python, 'remote_python').value) patch.remote_python = tel.python
   if (tel.spectre && normalizePin(tel.spectre, 'remote_spectre_cmd').value) patch.remote_spectre_cmd = tel.spectre
-  // D-021: the numpy tri-state of the interpreter that ran the worker (the
+  // D-008: the numpy tri-state of the interpreter that ran the worker (the
   // worker probes it at startup — yes / fallback / no); it lands alongside
   // the pins it describes
   if (NUMPY_STATES.includes(tel.numpy)) patch.remote_python_numpy = tel.numpy
@@ -1319,7 +1319,7 @@ export async function autoPinToolchain(run) {
   }
 }
 
-// D-021: measure THIS host's python facts once (version + executable + the
+// D-008: measure THIS host's python facts once (version + executable + the
 // numpy tri-state, one probe with the project's staged numfallback asset in
 // scope) and persist them into the settings AND the plugin-global local
 // memory — the finalize sync right after renders the fresh rows, and fresh
@@ -1408,9 +1408,9 @@ function finalize(run) {
   }
   // the auto-pin must land BEFORE the AGENTS.md sync — the yaml then renders
   // with the just-measured pins, not the nulls the run started with.
-  // D-021 order: (1) reconcile json ← AGENTS.md — a hand-edit made DURING the
+  // D-002 order: (1) reconcile json ← AGENTS.md — a hand-edit made DURING the
   // run would otherwise be clobbered by this re-render (non-pin keys keep the
-  // edit; pin keys keep the measurement below, D-016); (2) auto-pin the
+  // edit; pin keys keep the measurement below, D-006); (2) auto-pin the
   // measured toolchain + the remote numpy tri-state; (3) measure and persist
   // the local python facts; (4) re-render.
   void (async () => {

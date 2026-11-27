@@ -1,4 +1,4 @@
-// Shared sweep-report rendering (D-006, 2026-11-21): the report HTML/data-JS
+// Shared sweep-report rendering (D-008, 2026-11-21): the report HTML/data-JS
 // templates and the Node-side chart-spec builder. The same chartSpecs() output
 // feeds BOTH the browser page (the data JS embeds ready-to-plot {data, layout}
 // per chart — the client only calls newPlot and binds interactions) and the
@@ -463,7 +463,7 @@ function buildTable(RD) {
   }
   function cellVal(p, c) {
     if (c.kind === "metric") return { txt: fmtVal(p.metrics ? p.metrics[c.key] : null), cls: "num" };
-    if (c.kind === "param") return { txt: esc(show(p.params ? p.params[c.key] : null)), cls: "" };  // D-006 fix: params live at p.params, not the point root
+    if (c.kind === "param") return { txt: esc(show(p.params ? p.params[c.key] : null)), cls: "" };  // D-004 fix: params live at p.params, not the point root
     if (c.kind === "num") return { txt: num(p[c.key], 2), cls: "num" };
     if (c.key === "index") return { txt: esc(String(p.index)), cls: "num" };
     return { txt: esc(show(p[c.key])), cls: "" };
@@ -566,7 +566,7 @@ if (MANIFEST.rounds.length) { loadRound(MANIFEST.rounds[0].file); }
 </html>
 `
 
-// --- plotly source resolution (D-021: config-driven, session-project ------
+// --- plotly source resolution (D-008: config-driven, session-project ------
 // anchored; the findProjectConfigFrom walk-up is retired) -------------------
 function isFileLoose(p) {
   try { return fs.statSync(p).isFile() } catch { return false }
@@ -587,7 +587,7 @@ function readPlotlyConfig(configRoot) {
 
 // The packaged plotly.min.js (the seed source): this module's ancestors —
 // assets/, src/assets/, installed-sibling layouts. A PACKAGE search, not a
-// .harnessams project walk (that one is retired, D-021).
+// .harnessams project walk (that one is retired, D-008).
 function packagedPlotly() {
   let d = path.resolve(import.meta.dirname ?? '.')
   for (let i = 0; i < 5; i++) {
@@ -605,7 +605,7 @@ function packagedPlotly() {
 }
 
 // Resolve the report's plotly chain (user ruling 2026-11-26, three steps —
-// supersedes the D-021 two-step "seed at generation" flow): `outDir` anchors
+// supersedes the D-008 two-step "seed at generation" flow): `outDir` anchors
 // the relative src of the project-copy step (the report's own directory — the
 // design folder); `configRoot` is the session project root whose
 // workspace.plotly_url names the project copy.
@@ -621,7 +621,7 @@ function packagedPlotly() {
 //   step 3 (in-page fallback): the CDN.
 // An http(s) plotly_url is an expert override used verbatim as the single src
 // (no local file — the PNG exporter skips with its visible reason); a custom
-// LOCAL plotly_url keeps the D-021 behavior (direct relative reference, a
+// LOCAL plotly_url keeps the D-008 behavior (direct relative reference, a
 // sibling copy when outDir sits on another drive) without the route step.
 // Returns { src, localSrc, localFile }: localSrc is the step-1 in-page
 // fallback line's src (null = the line is omitted — the copy may not exist
@@ -653,7 +653,7 @@ export function resolvePlotlySrc(outDir, configRoot) {
     const localSrc = path.isAbsolute(rel) ? null : rel.replace(/\\/g, '/')
     return { src: PLOTLY_ROUTE, localSrc, localFile }
   }
-  // Expert local override (D-021 behavior kept): reference the user's own
+  // Expert local override (D-008 behavior kept): reference the user's own
   // file directly — no route step, no seeding.
   if (!isFileLoose(target)) return { src: PLOTLY_CDN, localSrc: null, localFile: null }
   const rel = path.relative(outDir, target)
@@ -725,7 +725,7 @@ function naturalCompare(a, b) {
 }
 
 // --- report assembly --------------------------------------------------------
-// D-006 layout inside the DESIGN FOLDER (D-021, 2026-11-25: projectDir is the
+// D-008 layout inside the DESIGN FOLDER (D-008, 2026-11-25: projectDir is the
 // design folder — the project root holds only .harnessams, AGENTS.md, and the
 // design folders): report HTML at <design>/ (outName defaults to
 // <design>_report.html), its data JS at <design>/SimResults/<report base

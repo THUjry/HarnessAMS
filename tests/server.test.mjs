@@ -48,12 +48,12 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     assert.deepEqual((await readSessionConfigs(dir)).sessions, {})
     assert.equal(path.basename(sessionConfigsPath(dir)), 'sessions.json')
 
-    // empty tombstone entry (a brand-new session's first write, D-005)
+    // empty tombstone entry (a brand-new session's first write, D-003)
     let w = await writeSessionConfig(dir, sid, { display: 'overview', reports: [], dashboard_selected: null })
     assert.ok(!w.error, w.error)
     assert.deepEqual(w.sessions[sid], { display: 'overview', reports: [], dashboard_selected: null })
 
-    // reports ride in the session entry (legacy task payload, D-005); duplicate
+    // reports ride in the session entry (legacy task payload, D-003); duplicate
     // paths dedupe; dashboard_selected only survives while it points at a report
     const rep = { id: 'r-ab12cd34', name: 'run1', path: path.join(dir, 'run1.html'), added_at: '2026-11-19T00:00:00.000Z' }
     w = await writeSessionConfig(dir, sid, {
@@ -80,7 +80,7 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     w = await writeSessionConfig(dir, sid, { display: 'task-xxxx', reports: [], dashboard_selected: null })
     assert.equal(w.sessions[sid].display, 'overview')
 
-    // versionless store (D-026): a legacy `version` key is ignored either way —
+    // versionless store (D-003): a legacy `version` key is ignored either way —
     // a versioned v2 file loads unchanged, and a task-era tasks.json shape has
     // no sessions map, reading as empty WITH a warning (nothing silently empty)
     const store = path.join(dir, '.harnessams', 'sessions.json')
@@ -96,7 +96,7 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('session-config: D-026 loud skip — bad leaves warn and load partially, unknown fields ride, self-heal on write', async () => {
+test('session-config: D-003 loud skip — bad leaves warn and load partially, unknown fields ride, self-heal on write', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-sessd26-'))
   const sid = 'session-bbbb1111-2222-3332-4444-555555555555'
   const C = 'session-cccc1111-2222-3332-4444-555555555555'
@@ -125,7 +125,7 @@ test('session-config: D-026 loud skip — bad leaves warn and load partially, un
     assert.equal(r.sessions[sid].dashboard_selected, 'r-good0001')
     assert.equal(r.sessions[sid].report_figs, undefined)
     assert.equal(r.sessions[sid].max_points_per_scan, undefined)
-    // unknown fields ride through the read untouched (cross-version, D-026)
+    // unknown fields ride through the read untouched (cross-version, D-003)
     assert.deepEqual(r.sessions[sid].future_field, { nested: true })
     // the junk sessions are skipped — LOUDLY (warnings, never silent)
     assert.ok(!r.sessions['bad key!'])
@@ -137,7 +137,7 @@ test('session-config: D-026 loud skip — bad leaves warn and load partially, un
     assert.match(r.warnings[3], /bad key!.*does not match the session id shape/)
     assert.match(r.warnings[4], /entry is not an object/)
     assert.ok(r.warnings[4].includes(C), 'the skipped key names the non-object session')
-    // self-heal (D-026): the next write rewrites from the lenient read view —
+    // self-heal (D-003): the next write rewrites from the lenient read view —
     // the junk sessions and bad leaves heal off disk, unknown fields survive,
     // and the file comes back VERSIONLESS
     const w = await writeSessionConfig(dir, 'session-dddd1111-2222-3332-4444-555555555555',
@@ -494,7 +494,7 @@ test('session-config: single-session merge-write never clobbers siblings; prune 
     assert.equal(Object.keys(r3.sessions).length, 200)
     assert.ok(!r3.sessions[A]) // oldest dropped
     assert.ok(r3.sessions['session-00000204-2222-3332-4444-555555555555'])
-    // corrupt file degrades to empty, never throws — with a visible warning (D-026)
+    // corrupt file degrades to empty, never throws — with a visible warning (D-003)
     await writeFile(path.join(dir, '.harnessams', 'sessions.json'), '{not json', 'utf8')
     const rc = await readSessionConfigs(dir)
     assert.deepEqual(rc.sessions, {})

@@ -1,5 +1,5 @@
 // Recommended-workflow table for the AGENTS.md project-config block (2026-11-24
-// rework; slimmed 2026-11-25 D-021; pointers dropped 2026-11-26). The block
+// rework; slimmed 2026-11-25 D-002; pointers dropped 2026-11-26). The block
 // carries NO prose any more: the yaml (config + self-check results + the
 // python facts) plus this one .md table — the workflow the model should
 // follow in-session, each row naming the tool and ONLY the action with a
@@ -12,7 +12,7 @@
 // 2026-11-24 incident started (a config value misread as an executable).
 // One branch fork remains: the Analyze row's Tool cell follows cluster_env
 // (python direct on the shared filesystem in-cluster, ssh_exec +
-// ssh_download out-of-cluster). Project organization (D-021): every design
+// ssh_download out-of-cluster). Project organization (D-008): every design
 // lives in its own folder under the project root (root = .harnessams +
 // AGENTS.md + design folders only); the design folder holds the run dirs,
 // RawResults/, SimResults/, Figs/ and the report. English + ASCII by the

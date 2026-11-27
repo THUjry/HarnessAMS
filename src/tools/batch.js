@@ -6,7 +6,7 @@
 // over ssh (nohup + markers + flock; the .worker_started marker verifies it),
 // scheduler=local spawns it on THIS host as a detached background process
 // (batch_poll then reads the run directory's own files). Scheduler semantics
-// follow the project's working environment (cluster_env, D-002): out-of-cluster
+// follow the project's working environment (cluster_env, D-001): out-of-cluster
 // every remote operation crosses dsh-ssh; in-cluster bsub runs on THIS host
 // (the official ctx.shell seam) and file "transfers" are local copies on the
 // shared filesystem — scheduler=ssh still executes over ssh, on any other
@@ -14,14 +14,14 @@
 // worker choice, and the worker tree comes from the workspace
 // sim_scripts_dir (see ../batch.js).
 //
-// Abort contract (D-029): every remote/local channel call here carries the
+// Abort contract (D-004): every remote/local channel call here carries the
 // turn's exec.signal (the session stop button), so an aborted call settles
 // at once — but an ALREADY LAUNCHED worker is deliberately left alone
 // (detached spawn/nohup'd block; markers + flock make re-runs idempotent).
 // An aborted submit therefore means the remote state is uncertain; the tool
 // descriptions tell the model how to re-verify before re-submitting.
 //
-// Cluster toolchain pins (D-016): the project settings name the executables
+// Cluster toolchain pins (D-006): the project settings name the executables
 // this channel launches on the cluster side by ABSOLUTE path —
 // settings.remote_python (the worker interpreter) and settings.remote_spectre_cmd
 // (the spectre executable the bundled worker drives). null = unpinned, the
@@ -52,11 +52,11 @@ import {
 // by design, deep analysis runs on the host that holds it).
 const AUTO_FETCH_FILES = ['sweep_progress.json', 'errlog.txt']
 
-// batch_poll wait_sec cadence (D-008): the gap between re-polls of a blocking
+// batch_poll wait_sec cadence (D-004): the gap between re-polls of a blocking
 // wait. 10 s matches the wait policy's preferred first-backoff step.
 const WAIT_GAP_MS = 10_000
 
-// Abortable gap for the wait loops (D-029): sleeps up to `ms`, but wakes the
+// Abortable gap for the wait loops (D-004): sleeps up to `ms`, but wakes the
 // moment `signal` aborts so the tool call settles at once when the session
 // stop fires mid-wait (an aborted poll is read-only — nothing to clean up;
 // an aborted submit's guidance lives in the tool description).
@@ -70,10 +70,10 @@ function sleepAbortable(ms, signal) {
   })
 }
 
-// The session-level scan-size ceiling (D-019): the calling session's
+// The session-level scan-size ceiling (D-004): the calling session's
 // "Max points per scan" field, defaulting to 100. Fail-open — a missing
 // session entry or an unreadable store never blocks a submit. `projectPath`
-// is the session-resolved project root (D-021: no walk-up from run_dir).
+// is the session-resolved project root (D-008: no walk-up from run_dir).
 const DEFAULT_MAX_POINTS_PER_SCAN = 100
 
 async function maxPointsPerScan(projectPath, sessionId) {
@@ -126,10 +126,10 @@ function underRoot(root, candidate) {
 // (wait_sec for the blocking wait; the session card live-updates off the same
 // files). The worker carries its own global budget, so a forgotten run still
 // terminates by itself. The same toolchain pins as the remote schedulers
-// (D-016) apply here: the pinned interpreter spawns the worker, the pinned
+// (D-006) apply here: the pinned interpreter spawns the worker, the pinned
 // spectre rides as --spectre-cmd for the bundled worker.
 async function submitLocal(args, runDir, settings, projectPath, signal) {
-  // D-029: abort before the spawn cancels the launch; once spawned the
+  // D-004: abort before the spawn cancels the launch; once spawned the
   // worker is a detached orphan by design (same ruling as the ssh nohup
   // launch) — the job file still lands so a later poll can attach.
   if (signal?.aborted) throw new Error('aborted before the local worker was spawned')
@@ -292,13 +292,13 @@ export function batchTools(ctx) {
         + 'submit means the remote state is UNCERTAIN: re-verify before re-submitting (batch_poll once a job '
         + 'file exists, or ssh_exec the run dir for sweep_progress.json / .worker_started / .hams_ssh_done). '
         + 'The project config resolves from the calling session\'s workspace '
-        + 'with the AGENTS.md yaml block overlaid (D-021: hand-edits of that block take effect immediately at '
+        + 'with the AGENTS.md yaml block overlaid (D-002: hand-edits of that block take effect immediately at '
         + 'this read; an invalid row keeps the stored value and warns in the result).',
       parameters: {
         run_dir: { type: 'string', required: true, description: 'Local run directory (holds template and sweep_config.json) — by convention inside the design folder, e.g. <project>/<design>/run1' },
         remote_dir: { type: 'string', description: 'Remote batch directory: absolute, or relative to remote_root. '
           + 'Omit to auto-generate the next Sim<N>_<YYYYMMDD>_batch<M> directory under <remote_root>/RawResults '
-          + '(the D-006 raw-simulation-data convention; mirror the same name locally under <design>/RawResults). '
+          + '(the D-004 raw-simulation-data convention; mirror the same name locally under <design>/RawResults). '
           + 'Unused for scheduler="local"' },
         remote_root: { type: 'string', description: 'Absolute run root that fences remote_dir — a shared-filesystem '
           + 'path in-cluster, the ssh host\'s path out-of-cluster. Omit to use the project\'s configured remote_root '
@@ -314,7 +314,7 @@ export function batchTools(ctx) {
           + 'they resolve to whichever tool python comes first on PATH (the cluster-setup skill harvests and verifies real paths)' },
         remote_scripts_dir: { type: 'string', description: 'Remote scripts root (default: <remote_root>/.harnessams/scripts)' },
         sim_scripts_dir: { type: 'string', description: 'Worker scripts root: an existing directory IS the root (override); any other value is ignored — '
-          + 'the session project\'s workspace.sim_scripts_dir applies (D-021: resolved from the calling session, not from run_dir)' },
+          + 'the session project\'s workspace.sim_scripts_dir applies (D-002: resolved from the calling session, not from run_dir)' },
         files: { type: 'array', items: { type: 'string' }, description: 'Run-dir files to upload (default: top-level regular files)' },
         queue: { type: 'string', description: 'LSF queue (default normal)' },
         scheduler: { type: 'string', enum: ['lsf', 'ssh', 'local'],
@@ -336,12 +336,12 @@ export function batchTools(ctx) {
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
-        // D-029: the turn's abort signal (set by the host before the body
+        // D-004: the turn's abort signal (set by the host before the body
         // runs; fires when the session stop is pressed). It rides EVERY
         // channel call below (exec/upload/download), settling the call at
         // once — an already-launched worker is deliberately left alone.
         const turnSignal = exec?.signal ?? null
-        // D-021 project anchoring: the calling session (or an explicit `project`
+        // D-002 project anchoring: the calling session (or an explicit `project`
         // argument) — NOT a path walk-up from run_dir — decides which project's
         // config this submission resolves. The AGENTS.md yaml block overlays at
         // this READ (reconcile at read AND write, user ruling 2026-11-25): a
@@ -353,7 +353,7 @@ export function batchTools(ctx) {
         if (p.error) throw new Error(p.error)
         const projectPath = p.project.path
         const { settings, warnings: overlayWarnings } = overlaySettingsAt(projectPath)
-        // Session scan-size gate (D-019): reads sweep_config.json and rejects
+        // Session scan-size gate (D-004): reads sweep_config.json and rejects
         // an oversized grid before anything is staged or uploaded. Splits the
         // scan into multiple Sim batches instead of one mega-run.
         const totalScanPoints = totalFromConfig(runDir)
@@ -365,7 +365,7 @@ export function batchTools(ctx) {
               + " or raise the session's Max points per scan field")
           }
         }
-        // Netlist pre-check (D-020): the SmartAnaSim spectre_pre_check tool
+        // Netlist pre-check (D-005): the SmartAnaSim spectre_pre_check tool
         // validates the hand-written run directory before anything is staged —
         // the check families and the check-param chain live there (pure JS, so
         // this path needs no local python). Fail-closed on errors (fix the
@@ -390,7 +390,7 @@ export function batchTools(ctx) {
           }
         }
         const scheduler = args.scheduler === 'ssh' ? 'ssh' : args.scheduler === 'local' ? 'local' : 'lsf'
-        // Channel matrix (D-002): the project's cluster_env picks the semantics.
+        // Channel matrix (D-001): the project's cluster_env picks the semantics.
         // Out-of-cluster every remote operation crosses dsh-ssh; in-cluster
         // bsub runs on THIS host (the official ctx.shell seam) and "transfers"
         // are local copies on the shared filesystem — scheduler=ssh still
@@ -405,7 +405,7 @@ export function batchTools(ctx) {
           local.warnings = [...preCheckWarnings, ...(local.warnings || [])]
           return local
         }
-        // Toolchain pins (D-016): resolved and validated BEFORE anything is
+        // Toolchain pins (D-006): resolved and validated BEFORE anything is
         // staged — a bare remote_python fails here, not after the uploads.
         const remotePython = resolvePython(args.remote_python, settings, DEFAULT_REMOTE_PYTHON)
         if (args.lsf_node != null && scheduler !== 'lsf') {
@@ -430,7 +430,7 @@ export function batchTools(ctx) {
         }
         const channel = {
           alias: target.alias,
-          // D-029: turnSignal rides every call — exec-shaped calls get the
+          // D-004: turnSignal rides every call — exec-shaped calls get the
           // dsh-ssh KILL+close path (or the ctx.shell kill in-cluster) plus
           // the callTool race; transfers get the race (sftp has no abort
           // path — the orphaned upload is harmless, re-staging is idempotent).
@@ -459,7 +459,7 @@ export function batchTools(ctx) {
           remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir)
         } else {
           // Auto Sim<N>_<YYYYMMDD>_batch<M> under <remote_root>/RawResults
-          // (D-006, 2026-11-21): list once and pick the next free name per the
+          // (D-004, 2026-11-21): list once and pick the next free name per the
           // convention. The root itself is probed strictly; a missing
           // RawResults/ subdir is fine (empty list → Sim0_..._batch1, uploads
           // create it); the point_meta probe below still guards collisions.
@@ -543,7 +543,7 @@ export function batchTools(ctx) {
         const queue = args.queue || 'normal'
         const jobName = args.job_name || `hams-${path.basename(runDir)}`
         if (scheduler === 'ssh') {
-          // Detached launch (the unified submit contract, D-028): staging is
+          // Detached launch (the unified submit contract, D-004): staging is
           // shared above; this branch launches the guarded worker in the
           // BACKGROUND over ssh, verifies startup, records the job file, and
           // returns a NON-TERMINAL state — monitoring is batch_poll's job
@@ -553,7 +553,7 @@ export function batchTools(ctx) {
           // .worker_started marker); the worker's own global budget is the
           // only run-level deadline. An aborted call settles here at once
           // (turnSignal rides the channel) while an already-launched worker
-          // is deliberately left alone (D-029) — re-submitting is safe
+          // is deliberately left alone (D-004) — re-submitting is safe
           // (markers + flock).
           const command = buildSshCommand({
             remoteDir,
@@ -701,7 +701,7 @@ export function batchTools(ctx) {
         + 'run directory\'s own files, no ssh involved — a worker that died reads as failed and carries its stderr '
         + 'tail. An in-cluster LSF submission polls locally (bjobs on this host); everything else polls over ssh. '
         + 'Pass wait_sec for a bounded blocking wait — the in-flight call is the '
-        + 'window where the session progress card live-updates. Polling discipline (D-021, moved here from the '
+        + 'window where the session progress card live-updates. Polling discipline (D-002, moved here from the '
         + 'AGENTS.md workflow table): poll, never blind-sleep — re-check after each bounded wait, back off '
         + '10 s -> 20 s -> 40 s with the ETA computed from completed over total; while a progress card is up, '
         + 'refresh it at least every 5 s. ABORT BEHAVIOR: polling is read-only, so the session stop settles a '
@@ -730,11 +730,11 @@ export function batchTools(ctx) {
       },
       async execute(args, exec) {
         const runDir = resolveDir(args.run_dir)
-        // D-029: the turn's abort signal — rides every channel call and wakes
+        // D-004: the turn's abort signal — rides every channel call and wakes
         // the wait_sec gaps, so the session stop settles a blocking poll at
         // once (polling is read-only: an aborted poll leaves nothing behind).
         const turnSignal = exec?.signal ?? null
-        // D-021 anchoring: the calling session's project (or an explicit
+        // D-002 anchoring: the calling session's project (or an explicit
         // `project` argument) — no walk-up from run_dir; a subagent caller
         // resolves to its topmost user-visible ancestor (src/subagent.js). The
         // AGENTS.md yaml overlay applies to the cluster_env fallback below;
@@ -752,7 +752,7 @@ export function batchTools(ctx) {
           + 'or pass job_id')
         if (!/^[\w.-]+$/.test(jobId)) throw new Error(`invalid job_id ${JSON.stringify(jobId)} (word/dot/dash only — it is joined into local paths)`)
         let scheduler = args.scheduler || job?.scheduler || 'lsf'
-        // wait_sec (D-008): 0 keeps the single-snapshot contract; a positive
+        // wait_sec (D-004): 0 keeps the single-snapshot contract; a positive
         // value re-polls every WAIT_GAP_MS until a terminal state or the
         // deadline, returning the LAST payload (shape unchanged). The blocking
         // call is the window where the session card live-updates (the remote
@@ -788,7 +788,7 @@ export function batchTools(ctx) {
         // (no machine in the job file) polls locally — bjobs and the progress
         // files live on this host's shared filesystem; everything else polls
         // over ssh on the job's machine. cluster_env falls back to the
-        // session-project settings (AGENTS.md-overlaid, D-021).
+        // session-project settings (AGENTS.md-overlaid, D-002).
         const inCluster = (job?.cluster_env ?? settings.cluster_env) === 'in-cluster'
         const sshExec = scheduler === 'ssh' || !inCluster
         let target
@@ -803,7 +803,7 @@ export function batchTools(ctx) {
           target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
         }
         const channel = {
-          // D-029: turnSignal rides the poll execs and the terminal fetch —
+          // D-004: turnSignal rides the poll execs and the terminal fetch —
           // read-only calls, so an abort settles at once and leaves nothing.
           exec: sshExec
             ? (cmd, opts) => execRemote(ctx, target.alias, cmd, { ...opts, signal: turnSignal })
@@ -833,7 +833,7 @@ export function batchTools(ctx) {
         // is absent (errlog.txt only exists on a failed run — the green-run
         // norm), and that nonzero exit used to skip the whole fetch, so
         // sweep_progress.json never landed locally on a clean run (found
-        // 2026-11-25 while verifying the D-017 telemetry harvest; the
+        // 2026-11-25 while verifying the D-003 telemetry harvest; the
         // trailing true keeps the exit code 0, stdout still lists only what
         // exists).
         const fetched = []

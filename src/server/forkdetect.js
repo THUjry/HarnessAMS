@@ -1,4 +1,4 @@
-// Fork detection (2026-11-19, decisions.md D-005): decides whether a DSH session
+// Fork detection (2026-11-19, decisions.md D-003): decides whether a DSH session
 // was forked from another one, WITHOUT chasing the branch point. rc.3 ordinary
 // forks deliberately carry no parentSession in headers or list rows; the only
 // durable signal is the inherited cut marker the fork seed writes into the

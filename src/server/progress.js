@@ -56,13 +56,13 @@ export function summarizeProject(projectDir) {
       addBatch(round, /^Round/.test(round) ? path.join(sweepDir, round, 'top') : path.join(sweepDir, round))
     }
   }
-  // Sim convention at the project root and under RawResults/ (D-006, 2026-11-21:
+  // Sim convention at the project root and under RawResults/ (D-004, 2026-11-21:
   // raw sim data defaults to <project>/RawResults — the remote batch default and
   // the local fetch-back landing; after the sweep/ entries; a same-named dir
   // under several bases counts once — seen-set dedup)
   if (statDir(root)?.isDirectory()) {
     const seen = new Set(batches.map((b) => b.round))
-    for (const base of [path.join(root, 'RawResults'), root]) { // RawResults first: the D-006 canonical sighting wins a same-name dedup
+    for (const base of [path.join(root, 'RawResults'), root]) { // RawResults first: the D-004 canonical sighting wins a same-name dedup
       if (!statDir(base)?.isDirectory()) continue
       const sims = fs.readdirSync(base, { withFileTypes: true })
         .filter((e) => e.isDirectory() && /^Sim\d+_\d{8}_batch\d+$/.test(e.name))

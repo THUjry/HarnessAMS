@@ -1,6 +1,6 @@
 // The add-report picking surface, unified (2026-11-26): every way the
 // dashboard's "add report" flow can point at a report HTML lives here.
-//   pickDirectory(ctx) — the host-borrowed FOLDER chooser (D-027 shape,
+//   pickDirectory(ctx) — the host-borrowed FOLDER chooser (D-010 shape,
 //     moved from server/pickdir.js): the DSH host composes a
 //     'directoryPicker' service on every web instance (the same OS dialog
 //     the host's own add-workspace flow uses), consumed read-only through
@@ -18,7 +18,7 @@
 //     dialog take the foreground even though a background host spawned it;
 //     exit 0 = chosen path on stdout, exit 2 = cancel); linux falls to
 //     zenity/kdialog (mirroring the host's own arms). Direct
-//     node:child_process spawn, never ctx.shell — the open-local D-023
+//     node:child_process spawn, never ctx.shell — the open-local D-008
 //     lesson: the sandboxed runner refuses launcher shapes on hosts whose
 //     workspace ACLs differ.
 //   browseDir(target, fallback) — the self-made one-level listing behind
@@ -33,7 +33,7 @@ import { fileURLToPath } from 'node:url'
 const PICK_TIMEOUT_MS = 600_000
 
 // ---------------------------------------------------------------------------
-// Host-borrowed folder chooser (D-027 shape, moved from server/pickdir.js)
+// Host-borrowed folder chooser (D-010 shape, moved from server/pickdir.js)
 // ---------------------------------------------------------------------------
 
 // Resolve the optional host directory-picker service, or null. Never throws.

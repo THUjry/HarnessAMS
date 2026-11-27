@@ -1,7 +1,7 @@
 // workflowTable (server/selfcheckWorkflow.js) — the recommended-workflow table
 // rendered into the AGENTS.md project-config block on values builds. The
 // 2026-11-24 rework replaced the five prose self-check branches with ONE
-// table; the 2026-11-25 D-021 dedup slimmed it to purpose rows; the
+// table; the 2026-11-25 D-002 dedup slimmed it to purpose rows; the
 // 2026-11-26 ruling dropped the POINTER CLAUSES too ("documented in the
 // batch_submit description" & co.): the tool descriptions are already in the
 // model's context, so each row is now the action + a minimal fill hint and

@@ -31,7 +31,7 @@ export async function runPython(scriptRel, args, timeoutMs = 900_000, options = 
   // options.env MERGES into the child env (a full replacement would drop PATH
   // and PYTHONUTF8) — the same shape as the SmartAnaSim copy. options.python
   // swaps the interpreter (the self-check's in-cluster chain runs under the
-  // project's remote_python pin — D-016); the host's bare python by default.
+  // project's remote_python pin — D-006); the host's bare python by default.
   const { env: extraEnv, python = 'python', ...rest } = options
   return execFileAsync(python, [abs, ...args], {
     timeout: timeoutMs,

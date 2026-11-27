@@ -1,4 +1,4 @@
-// In-cluster local channel primitives (D-002: two working environments, one
+// In-cluster local channel primitives (D-001: two working environments, one
 // shared cluster filesystem). When the DSH host itself is a cluster node,
 // bsub/bjobs run on THIS host and file "transfers" are plain local copies
 // between two paths on the same filesystem — nothing crosses ssh. Command

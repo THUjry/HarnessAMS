@@ -5,7 +5,7 @@
 // Out-of-cluster both paths upload one run directory plus the suite's worker
 // scripts over dsh-ssh; in-cluster the uploads are local copies on the shared
 // filesystem and in-cluster LSF submits locally (the channel matrix lives in
-// tools/batch.js, the environment ruling in docs/decisions.md D-002). Both
+// tools/batch.js, the environment ruling in docs/decisions.md D-001). Both
 // paths record the same job file for batch_poll.
 //
 // This layer knows nothing about a simulator: it uploads a run directory plus
@@ -18,7 +18,7 @@
 // NOT — they ship with the SmartAnaSim plugin. The upload tree / worker lookup
 // root is the project's workspace_config.json workspace.sim_scripts_dir
 // (normally the SmartAnaSim scripts/ directory; the project root comes from the
-// calling session or an explicit project argument — D-021, no path walk-up), so
+// calling session or an explicit project argument — D-002, no path walk-up), so
 // cross-package npm resolution is never required (dev-mount loads plugins by
 // absolute path). HARNESSAMS_SIM_SCRIPTS_DIR overrides discovery (tests, custom
 // layouts). The tree uploads as a unit with its relative layout so any worker
@@ -29,7 +29,7 @@ import { resolveWorkspacePathsAt } from './server/settings.js'
 import { shq } from './remote.js'
 
 // Worker scripts root (see the header comment). `projectRoot` is the
-// session-resolved project root (D-021: no ancestor walk-up from a run
+// session-resolved project root (D-002: no ancestor walk-up from a run
 // directory — the caller anchored the project through resolveProjectTool).
 // Throws with guidance when no usable root exists — a wrong root would upload
 // a partial tree whose remote imports break, so failing early beats a
@@ -91,7 +91,7 @@ export function pluginAssets(root = simScriptsDir()) {
 // Worker scripts root for one submit call. The tool's `sim_scripts_dir`
 // argument is the documented root OVERRIDE: when it names an existing
 // directory, that directory IS the root (a custom worker tree, a test
-// fixture). Any other value is ignored (D-021: no walk-up — the session
+// fixture). Any other value is ignored (D-002: no walk-up — the session
 // project's workspace.sim_scripts_dir applies). (2026-11-23: the local
 // scheduler handed a custom root silently started the stock worker instead.)
 export function submitScriptsRoot(simScriptsDirArg, projectRoot) {
@@ -127,7 +127,7 @@ export function resolveRemoteDir(remoteRoot, remoteDir) {
 }
 
 // Bare interpreter defaults — what a worker runs under while the project has
-// no toolchain pin (D-016: settings.remote_python / remote_spectre_cmd hold
+// no toolchain pin (D-006: settings.remote_python / remote_spectre_cmd hold
 // absolute paths; the pins sit between a per-call argument and these
 // constants). The retired harnessams.json remote_python / remote_node /
 // remote_scripts_dir keys are gone.

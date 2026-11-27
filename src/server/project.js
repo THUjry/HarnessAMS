@@ -2,9 +2,9 @@
 // ctx.workspaceRegistry (a project is nothing more than a DSH workspace, i.e. a
 // local folder; HarnessAMS keeps no workspace concept of its own), and the
 // per-session config store at <workspace>/.harnessams/sessions.json. The task
-// concept was retired (2026-11-19, decisions.md D-005): each DSH session IS the
+// concept was retired (2026-11-19, decisions.md D-003): each DSH session IS the
 // work unit and carries its own dashboard reports + confirmed check params.
-// The store is VERSIONLESS (D-026): cross-version compatibility is per-field
+// The store is VERSIONLESS (D-003): cross-version compatibility is per-field
 // validation, not a generation gate — unknown fields ride through reads and
 // writes untouched, invalid leaves are SKIPPED with warnings on the read side
 // (a next write self-heals them off disk), and the legacy tasks.json file is
@@ -47,7 +47,7 @@ const MAX_REPORTS = 32
 const MAX_REPORT_PATH = 400
 export const SESSION_ID_RE = /^[\w-]{1,128}$/
 
-// Tool-facing project resolution (D-021 shared helper, extracted from the
+// Tool-facing project resolution (D-008 shared helper, extracted from the
 // harnessams_selfcheck tool so batch_submit / batch_poll / safe_trash /
 // gen_sweep_report anchor the same way): an explicit `project` argument must
 // name a registered DSH workspace; otherwise the calling session's mapping
@@ -80,10 +80,10 @@ export function resolveProjectTool(registry, sessionId, projectArg) {
 // HTML files picked anywhere on disk via the add-report browser, or registered by
 // the report tool. Paths are normalized to absolute here; duplicates by
 // path are dropped within a session. STRICT mode (the write path) rejects the
-// whole state on the first bad entry ({error}, D-022 PUT contract); LENIENT
+// whole state on the first bad entry ({error}, D-009 PUT contract); LENIENT
 // mode (the read path) skips just that entry with a warning. Unknown entry
 // fields ride through untouched in BOTH modes — the read-write roundtrip never
-// drops future-format fields (D-026 cross-version mechanism).
+// drops future-format fields (D-003 cross-version mechanism).
 const REPORT_KNOWN = new Set(['id', 'name', 'path', 'added_at'])
 
 function reportEntryError(r) {
@@ -137,7 +137,7 @@ function normalizeReports(raw, { lenient = false } = {}) {
 
 // Validate one session's config state — the WRITE-path contract: returns
 // { state } or { error }; a known-field violation rejects the write (the
-// D-022 PUT 400 face). The read path goes through the same core in lenient
+// D-009 PUT 400 face). The read path goes through the same core in lenient
 // mode instead (see normalizeSessionState). The check_params object is
 // validated with the same rules as the retired project-level writer
 // (checkparams.js); it is stored only when confirmed. report_figs is the
@@ -155,7 +155,7 @@ const SESSION_KNOWN = new Set(['display', 'reports', 'dashboard_selected', 'repo
 // LENIENT mode (the read path): invalid LEAVES are dropped with warnings —
 // one bad report entry or a stale-shape check_params no longer hides the
 // session's other data. Unknown fields ride through both modes untouched
-// (D-026). Returns { state, warnings } — warnings is [] in strict mode.
+// (D-003). Returns { state, warnings } — warnings is [] in strict mode.
 function normalizeSessionState(state, { lenient = false } = {}) {
   if (state == null) return { state: null }
   if (typeof state !== 'object' || Array.isArray(state)) {
@@ -189,7 +189,7 @@ function normalizeSessionState(state, { lenient = false } = {}) {
   }
   const report_figs = state.report_figs === true
   // the session's "Max points per scan" option (the batch_submit point-count
-  // gate, D-019): positive integer; absent means the built-in default (100)
+  // gate, D-004): positive integer; absent means the built-in default (100)
   if (state.max_points_per_scan != null
       && !(Number.isInteger(state.max_points_per_scan) && state.max_points_per_scan > 0)) {
     if (!lenient) return { warnings: ['max_points_per_scan must be a positive integer'] }
@@ -215,7 +215,7 @@ export function sessionConfigsPath(workspacePath) {
   return path.join(workspacePath, STORE_DIR, SESSIONS_FILE)
 }
 
-// Read the per-session config store — LENIENT (D-026). A missing file is the
+// Read the per-session config store — LENIENT (D-003). A missing file is the
 // first-run normal (silent); anything unreadable/unparsable reads as empty
 // WITH a warning; a legacy `version` key is ignored either way (the store is
 // versionless — the task-era shape has no sessions map and reads as empty);
@@ -258,7 +258,7 @@ export async function readSessionConfigs(workspacePath) {
 
 // Read-modify-write of ONE session's entry (single UI writer, but a stale
 // full-file PUT from an old tab would clobber sibling sessions — merge
-// instead). The file is written VERSIONLESS ({ sessions } only, D-026); the
+// instead). The file is written VERSIONLESS ({ sessions } only, D-003); the
 // merge base is the lenient read view, so a skipped entry self-heals off disk
 // here and unknown fields survive the roundtrip.
 export async function writeSessionConfig(workspacePath, sessionId, state) {

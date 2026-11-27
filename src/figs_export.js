@@ -1,4 +1,4 @@
-// Headless per-chart PNG export (D-006, 2026-11-21). Renders the SAME chart
+// Headless per-chart PNG export (D-008, 2026-11-21). Renders the SAME chart
 // specs the report page embeds (report_render.chartSpecs) inside a jsdom
 // window with the bundled plotly.min.js, exports each as SVG via
 // Plotly.toImage, then rasterizes with @resvg/resvg-js. Spike-verified
