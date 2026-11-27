@@ -9,6 +9,8 @@
 // writes untouched, invalid leaves are SKIPPED with warnings on the read side
 // (a next write self-heals them off disk), and the legacy tasks.json file is
 // simply never read (a store without a sessions map reads as empty).
+// (covered by tests/server.test.mjs, tests/report_inject.test.mjs,
+// tests/subagent.test.mjs — the anchoring policy lives in src/subagent.js)
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import fs from 'node:fs'
@@ -85,6 +87,8 @@ export function resolveProjectTool(registry, sessionId, projectArg) {
 // mode (the read path) skips just that entry with a warning. Unknown entry
 // fields ride through untouched in BOTH modes — the read-write roundtrip never
 // drops future-format fields (D-003 cross-version mechanism).
+// (covered by tests/server.test.mjs + tests/checkparams.test.mjs — the
+// session-config write/read faces)
 const REPORT_KNOWN = new Set(['id', 'name', 'path', 'added_at'])
 
 function reportEntryError(r) {

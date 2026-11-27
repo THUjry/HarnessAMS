@@ -25,6 +25,7 @@
 //     the fallback dialog (moved from server/dashboard.js).
 // All three resolve { path } / { canceled: true } / { error, code } shapes
 // for the routes to translate; none of them ever throws.
+// (covered by tests/dashboard.test.mjs — the picker groups)
 import { spawn } from 'node:child_process'
 import fsp from 'node:fs/promises'
 import path from 'node:path'

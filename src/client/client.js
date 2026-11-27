@@ -899,7 +899,7 @@ window.__ModuleLoader__.load({
       useEffect(() => {
         // API already ends with /api — the endpoints hang right off it. sessionId
         // is the workspace-fence key (server: sessionProject mapping + path
-        // containment, review D-3), provided to the card by the slot register
+        // containment), provided to the card by the slot register
         // inject hook; without it the endpoints answer 400, so skip the fetch.
         if (!sessionId) return
         const enc = encodeURIComponent
@@ -3166,8 +3166,7 @@ window.__ModuleLoader__.load({
             // The toolview owner carries no sessionId (rc.5 host client: owner =
             // {callId, toolName, ...call, openFile, cwd, home, ...}); the
             // register-inject hook is the sanctioned way to add it (official
-            // precedent: ask_user_question). The progress endpoints fence on it
-            // (review D-3).
+            // precedent: ask_user_question). The progress endpoints fence on it.
             inject: (sessionId) => ({ sessionId }) }, SimToolCard)
         }
       })

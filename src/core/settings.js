@@ -23,6 +23,7 @@
 // resolves the workspace section's relative keys against a GIVEN root.
 // Per-session check params are NOT here (D-003: sessions.json carries the
 // confirmed table; checkparams.js reads the project fallback file).
+// (covered by tests/selfcheck.test.mjs, tests/server.test.mjs, tests/agentsmd.test.mjs)
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
@@ -285,6 +286,7 @@ export function resolveWorkspacePathsAt(projectRoot) {
 // characters, no "..". A bare name is refused with guidance: it resolves
 // through whatever PATH the startup chain left behind. Returns
 // { value, error } — value is null whenever error is set.
+// (covered by tests/selfcheck.test.mjs — pin validation and partial-write merge)
 
 export const PIN_KEYS = ['remote_python', 'remote_spectre_cmd']
 

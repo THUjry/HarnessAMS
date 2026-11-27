@@ -3,8 +3,8 @@
 // (/api/progress) and the cross-batch project summary (/api/progress-summary).
 // Pure file reads — the sweep worker rewrites sweep_progress.json every ~30 s
 // and drops one NN/point_meta.json per finished point; nothing here starts or
-// stops a simulation. Paths are fenced (progressFence below, review D-3
-// 2026-11-21): the card passes its sessionId (added to the toolview owner via
+// stops a simulation. Paths are fenced (progressFence below): the card passes
+// its sessionId (added to the toolview owner via
 // the slot register-inject hook), which must resolve to a registered
 // workspace, and every caller-supplied path must stay inside it.
 //
@@ -105,7 +105,7 @@ export function progressSummaryPayload({ runDir, projectDir }) {
   return summarizeProject(root)
 }
 
-// Workspace fence for the two progress endpoints (review D-3, 2026-11-21).
+// Workspace fence for the two progress endpoints (covered by tests/progress.test.mjs).
 // Anchor: the sessionId. The toolview slot owner carries no sessionId (rc.5
 // host client: owner = {callId, toolName, ...call, openFile, cwd, home, ...}),
 // so the cards register with `inject: (sessionId) => ({ sessionId })` — the

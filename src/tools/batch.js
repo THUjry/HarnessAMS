@@ -20,6 +20,8 @@
 // (detached spawn/nohup'd block; markers + flock make re-runs idempotent).
 // An aborted submit therefore means the remote state is uncertain; the tool
 // descriptions tell the model how to re-verify before re-submitting.
+// (covered by tests/batch.test.mjs — the scheduler matrix, wait_sec and abort
+// groups)
 //
 // Cluster toolchain pins (D-006): the project settings name the executables
 // this channel launches on the cluster side by ABSOLUTE path —
@@ -390,6 +392,8 @@ export function batchTools(ctx) {
         // this path needs no local python). Fail-closed on errors (fix the
         // netlist, or consciously re-submit with no_pre_check: true), fail-open
         // when the tool is not registered, warnings ride along into the result.
+        // (covered by tests/batch.test.mjs — the pre-check gate group; the engine
+        // itself by tests/precheck.test.mjs in the SmartAnaSim repo)
         const preCheckWarnings = [...overlayWarnings]
         if (args.no_pre_check !== true) {
           if (!ctx.tools?.get?.('spectre_pre_check')) {

@@ -295,6 +295,7 @@ export async function resolveMachine(ctx, machineId, remoteRoot) {
 // kill, plus the callTool race; sftp has no abort path, so the orphaned
 // transfer is harmless — re-staging is idempotent). Consumers: the batch
 // submit/poll tool paths, the self-check's remote chains, /api/progress-remote.
+// (covered by tests/batch.test.mjs + tests/selfcheck.test.mjs — the matrix cells)
 export function buildChannel(ctx, { alias, inCluster, signal = null } = {}) {
   return {
     exec: alias

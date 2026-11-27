@@ -27,10 +27,34 @@ src/                     dsh-harnessams — console plugin package:
                          assets/ (plotly.min.js + THIRD_PARTY_NOTICES),
                          scripts/ (project self-check compute twins under selfcheck/)
 install_suite/           dsh-harnessams-suite — aggregate bundle (pure patch package)
-tests/                   unit tests (bare node --test, from the repo root)
+tests/                   unit tests (bare node --test, from the repo root; see the Test map below)
 docs/                    plugin index, compatibility matrix
 CHANGELOG.md / SECURITY.md / PUBLISH.md
 ```
+
+## Test map
+
+Every functional area maps to its test files (file-level; the suites run with bare `node --test` from the repo root):
+
+| Functional area | Tests |
+|---|---|
+| `batch_submit` / `batch_poll` — scheduler matrix, submit contract, netlist pre-check gate, wait_sec polling, abort contract, toolchain pin resolution, auto-naming | `tests/batch.test.mjs` |
+| `harnessams_selfcheck` — settings validation and the single write face, orchestration flows, golden dataset, telemetry/auto-pin, routes | `tests/selfcheck.test.mjs` |
+| AGENTS.md project-config block (template, values sync, reconcile) | `tests/agentsmd.test.mjs` |
+| recommended-workflow table | `tests/selfcheckWorkflow.test.mjs` |
+| `gen_sweep_report` / `register_report` — rendering, registration, PNG gate, plotly chain, subagent lineage | `tests/report_inject.test.mjs` |
+| `safe_trash` — round-trip, fences, purge, entry-as-item layout restore | `tests/trash.test.mjs` |
+| per-project config + check-params chain + per-session store | `tests/server.test.mjs`, `tests/checkparams.test.mjs` |
+| dashboard/report browsing, pickers, open-local, report-stat routes | `tests/dashboard.test.mjs` |
+| progress ladder, project summaries, `/api/progress*` endpoints | `tests/progress.test.mjs` |
+| remote directory browser (`/api/remote-browse`) | `tests/remotebrowse.test.mjs` |
+| fork detection | `tests/forkdetect.test.mjs` |
+| diagnosis-session handoff | `tests/diagnose.test.mjs` |
+| subagent identity policy + cross-repo mirror guard | `tests/subagent.test.mjs` (the same policy is mirrored in the SmartAnaSim repo) |
+| plugin entry, tool schemas, system-prompt sections, packaging, client static contracts | `tests/entry.test.mjs` |
+| bundled-skill registration and resources | `tests/skills.test.mjs` |
+| `src/lib` leaf primitives (io, paths, remotepath) | `tests/lib.test.mjs` |
+| first-run guide and vendored assets | `tests/guide.test.mjs` |
 
 ## The three-tier UI (DSH Web)
 

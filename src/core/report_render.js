@@ -14,6 +14,7 @@
 // matching (two label sources drifted apart and silently killed highlighting);
 // a DOM hit-test fallback covers hosts where plotly_click never fires; the
 // manifest is newest-first (natural id order).
+// (covered by tests/report_inject.test.mjs)
 import fs from 'node:fs'
 import path from 'node:path'
 import { readJsonBom } from '../lib/io.js'

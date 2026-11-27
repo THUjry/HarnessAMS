@@ -566,7 +566,7 @@ async function handle(req, res, ctx) {
   }
   if (route === '/api/progress') {
     // Session tool cards (tool.call.toolview): live single-run progress while a
-    // local sweep blocks its tool call. Read-only and workspace-fenced (D-3):
+    // local sweep blocks its tool call. Read-only and workspace-fenced:
     // the card passes its sessionId (added to the toolview owner via the slot
     // register-inject hook) plus the run dir from the tool arguments it already
     // shows; progressFence resolves the session to its registered workspace and
