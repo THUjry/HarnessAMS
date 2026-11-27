@@ -57,6 +57,7 @@ window.__ModuleLoader__.load({
         'common.sectionFailed': '此区块加载失败：',
         'common.expand': '展开',
         'common.collapse': '收起',
+        'common.close': '关闭',
         'console.title': 'HarnessAMS 控制台',
         'console.infoFailed': 'info 读取失败：{msg}',
         'console.config': '项目配置＝各工作区自己的 .harnessams/workspace_config.json（原家族 harnessams.json 已退役）',
@@ -75,7 +76,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': '套件合计 13 个工具：SmartAnaSim 7（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件＋post_check 按需数据完整性诊断，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析/诊断脚本）＋HarnessAMS 6（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、register_report 挂载已有报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 两个子页：「项目配置与总览」＝项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「自动化」＝占位页（功能待后续提供）；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 两个子页：「项目配置与总览」＝项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「自动化」＝自动化任务列表（config_automation 工具增/改/删、run_automation 为 agent 调试触发面；行内「运行」＝手工触发，在项目 machine_id 上顺序执行命令 .txt、结果弹窗回显）；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
         'hosts.ok': 'dsh-ssh：{n} 台主机',
         'hosts.missing': 'dsh-ssh 不可用',
@@ -118,7 +119,27 @@ window.__ModuleLoader__.load({
         'tasks.viewDashboard': '仪表盘',
         'tasks.viewConfig': '项目配置与总览',
         'tasks.viewAutomation': '自动化',
-        'tasks.automationPlaceholder': '占位页——自动化功能尚未提供。',
+        'auto.colName': '任务名称',
+        'auto.colCreated': '创建时间',
+        'auto.colUpdated': '更新时间',
+        'auto.sortHint': '点击按此列排序/切换方向',
+        'auto.empty': '尚无自动化任务——用 config_automation 工具添加（配置可直接让 agent 做）。',
+        'auto.noDesc': '（无描述）',
+        'auto.filesLabel': '命令文件（按执行顺序）：',
+        'auto.noFiles': '（未引用命令文件）',
+        'auto.run': '运行',
+        'auto.stop': '中止',
+        'auto.runFailed': '运行失败：{msg}',
+        'auto.noMachine': '未配置 machine_id——运行前先在「项目配置与总览」的设置表选 dsh-ssh 主机别名。',
+        'auto.storeSkipped': 'automation.json 有 {n} 处不合规内容被跳过',
+        'auto.resultTitle': '自动化运行结果：{name}',
+        'auto.resultDone': '全部命令成功',
+        'auto.resultFailed': '存在失败命令',
+        'auto.resultAborted': '已中止（远端结果不确定）',
+        'auto.resultTime': '{start} → {end}',
+        'auto.exitCode': '退出码 {code}',
+        'auto.duration': '{ms} ms',
+        'auto.timedOut': '超时',
         'tasks.storeSkipped': 'sessions.json 有 {n} 处不合规内容被跳过',
         'dash.noReports': '（暂无报告）',
         'dash.addTitle': '添加 HTML 报告',
@@ -286,6 +307,7 @@ window.__ModuleLoader__.load({
         'common.sectionFailed': 'This section failed: ',
         'common.expand': 'Show more',
         'common.collapse': 'Show less',
+        'common.close': 'Close',
         'console.title': 'HarnessAMS Console',
         'console.infoFailed': 'info failed: {msg}',
         'console.config': 'Project config = each workspace\'s own .harnessams/workspace_config.json (the family harnessams.json is retired)',
@@ -304,7 +326,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'The suite registers 13 tools in total: SmartAnaSim 7 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, the gen_vsch_import/export pair and the on-demand post_check data-integrity diagnostic — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser/diagnostic scripts) and HarnessAMS 6 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, register_report for mounting an existing report, safe_trash and the harnessams_selfcheck self-check). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS sidebar “Project overview” — two sub-tabs: “Config & overview” — the project-settings table plus project self-check as the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; and “Automation” — a placeholder page (features to come); “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS sidebar “Project overview” — two sub-tabs: “Config & overview” — the project-settings table plus project self-check as the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; and “Automation” — the automation task list (the config_automation tool is the CRUD face, run_automation the agent/debug trigger; the row\'s Run button is the manual trigger — the referenced .txt commands execute sequentially on the project\'s machine_id, result echoed in a dialog); “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
         'hosts.ok': 'dsh-ssh: {n} host(s)',
         'hosts.missing': 'dsh-ssh not available',
@@ -347,7 +369,27 @@ window.__ModuleLoader__.load({
         'tasks.viewDashboard': 'Dashboard',
         'tasks.viewConfig': 'Config & overview',
         'tasks.viewAutomation': 'Automation',
-        'tasks.automationPlaceholder': 'Placeholder page — automation features are not available yet.',
+        'auto.colName': 'Task name',
+        'auto.colCreated': 'Created',
+        'auto.colUpdated': 'Updated',
+        'auto.sortHint': 'Click to sort by this column / flip direction',
+        'auto.empty': 'No automation yet — add one with the config_automation tool (the configuration can be delegated to the agent).',
+        'auto.noDesc': '(no description)',
+        'auto.filesLabel': 'Command files (in run order):',
+        'auto.noFiles': '(no command files referenced)',
+        'auto.run': 'Run',
+        'auto.stop': 'Abort',
+        'auto.runFailed': 'run failed: {msg}',
+        'auto.noMachine': 'machine_id is not configured — pick a dsh-ssh host alias in the Config & overview settings table before running.',
+        'auto.storeSkipped': '{n} invalid entries skipped in automation.json',
+        'auto.resultTitle': 'Automation result: {name}',
+        'auto.resultDone': 'all commands passed',
+        'auto.resultFailed': 'some commands failed',
+        'auto.resultAborted': 'aborted (remote outcome uncertain)',
+        'auto.resultTime': '{start} -> {end}',
+        'auto.exitCode': 'exit {code}',
+        'auto.duration': '{ms} ms',
+        'auto.timedOut': 'timed out',
         'tasks.storeSkipped': '{n} invalid entries skipped in sessions.json',
         'dash.noReports': '(no reports)',
         'dash.addTitle': 'Add an HTML report',
@@ -2172,6 +2214,168 @@ window.__ModuleLoader__.load({
             d.status === 'done' ? tr('selfchk.diagDone', { id: d.sessionId ?? '' }) : tr('selfchk.diagFail', { err: d.error ?? '' })))))
     }
 
+    // ---------- tier 3: the Automation sub-tab list ----------
+    // The phase-2 automation surface: the project's automation.json tasks,
+    // sortable per column, click-to-expand detail rows (description + one .txt
+    // reference per line — the shared command library), and the left run
+    // button that flips to Abort while its POST is in flight. The run is the
+    // MANUAL, agent-free trigger: POST /api/automation/run executes the
+    // registered commands sequentially on the project's machine_id and
+    // returns the whole result; this dialog only ECHOES it (post-run behavior
+    // is the reserved seam — nothing acts on the result yet). A plain flowing
+    // table: no scroll container of its own (the parent .hams-body scrolls
+    // however tall the list grows), width stays inside the pane.
+    const AUTOMATION_COLS = [
+      { id: 'name', labelKey: 'auto.colName' },
+      { id: 'created_at', labelKey: 'auto.colCreated' },
+      { id: 'updated_at', labelKey: 'auto.colUpdated' },
+    ]
+
+    function AutomationList({ sessionId, projectPath }) {
+      const [list, setList] = useState(null) // null = loading; { automations, warnings, machine_id }
+      const [loadErr, setLoadErr] = useState(null)
+      const [error, setError] = useState(null) // run failure line
+      const [sort, setSort] = useState({ field: 'created_at', dir: 'desc' })
+      const [expanded, setExpanded] = useState(null) // key of the expanded row
+      const [running, setRunning] = useState({}) // key -> true while its run POST is in flight
+      const [result, setResult] = useState(null) // finished run -> the echo dialog
+      const runRefs = useRef({}) // key -> AbortController of the in-flight run
+
+      const refetch = useCallback(() => {
+        if (!sessionId) return Promise.resolve()
+        return fetchJson(API + '/automation?sessionId=' + encodeURIComponent(sessionId))
+          .then((r) => {
+            setList((prev) => (JSON.stringify(prev) === JSON.stringify(r) ? prev : r))
+            setLoadErr(null)
+          })
+          .catch((e) => { setLoadErr(String(e.message ?? e)) })
+      }, [sessionId])
+
+      // list poll (config edits land through the agent's config_automation —
+      // an external write this view must follow): 5 s while visible, catch-up
+      // on return, JSON-compare swap to avoid re-render churn
+      useEffect(() => {
+        if (!sessionId || !projectPath) return
+        const timer = setInterval(() => { if (!document.hidden) void refetch() }, 5_000)
+        const onVisible = () => { if (!document.hidden) void refetch() }
+        document.addEventListener('visibilitychange', onVisible)
+        void refetch()
+        return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
+      }, [sessionId, projectPath, refetch])
+
+      // The run button's two lives: idle -> POST the run (optimistic running
+      // row); in flight -> Abort (the fetch's AbortController — the server
+      // aborts the channel best-effort and the remote command may orphan).
+      const startRun = (a) => {
+        const ac = new AbortController()
+        runRefs.current[a.key] = ac
+        setRunning((prev) => ({ ...prev, [a.key]: true }))
+        setError(null)
+        fetchJson(API + '/automation/run', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, key: a.key }),
+          signal: ac.signal,
+        })
+          .then((r) => { setResult(r); void refetch() })
+          .catch((e) => {
+            // a user abort is silent (the row just returns to idle); real
+            // failures show inline
+            if (!ac.signal.aborted) setError(txt(tr('auto.runFailed', { msg: String(e.message ?? e) })))
+          })
+          .finally(() => {
+            delete runRefs.current[a.key]
+            setRunning((prev) => { const n = { ...prev }; delete n[a.key]; return n })
+          })
+      }
+
+      const rows = [...(list?.automations ?? [])].sort((a, b) => {
+        const mul = sort.dir === 'asc' ? 1 : -1
+        if (sort.field === 'name') return mul * String(a.name ?? '').localeCompare(String(b.name ?? ''))
+        const av = String(a[sort.field] ?? '')
+        const bv = String(b[sort.field] ?? '')
+        return mul * (av < bv ? -1 : av > bv ? 1 : 0) // ISO stamps sort chronologically as strings
+      })
+
+      if (!sessionId || !projectPath) return null
+      return h('div', null,
+        loadErr && h('div', { className: 'hams-err' }, txt(loadErr)),
+        list?.warnings?.length > 0 && h('div', { className: 'hams-warn hams-storewarn' },
+          txt(tr('auto.storeSkipped', { n: list.warnings.length })),
+          h(ClampText, { text: list.warnings.join('\n') })),
+        list?.machine_id == null && h('div', { className: 'hams-dim', style: { margin: '4px 0' } }, tr('auto.noMachine')),
+        error && h('div', { className: 'hams-err' }, txt(error)),
+        list === null && !loadErr && h('div', { className: 'hams-dim' }, tr('common.loading')),
+        list !== null && h('table', { className: 'hams-table', style: { margin: '0 0 8px' } },
+          h('thead', null, h('tr', null,
+            h('th', { style: { width: '58px' } }, ''),
+            AUTOMATION_COLS.map((c) => h('th', {
+              key: c.id,
+              onClick: () => setSort((prev) => (prev.field === c.id
+                ? { field: c.id, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
+                : { field: c.id, dir: 'asc' })),
+              title: tr('auto.sortHint'),
+            }, tr(c.labelKey) + (sort.field === c.id ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''))))),
+          h('tbody', null,
+            rows.length === 0 && h('tr', null, h('td', { colSpan: 4, className: 'hams-dim' }, tr('auto.empty'))),
+            rows.flatMap((a) => {
+              const isRunning = !!running[a.key]
+              return [
+                h('tr', {
+                  key: a.key,
+                  onClick: () => setExpanded((prev) => (prev === a.key ? null : a.key)),
+                },
+                  h('td', null,
+                    h('button', {
+                      className: 'hams-btn hams-btn-sm',
+                      onClick: (e) => {
+                        e.stopPropagation() // the row click toggles the detail; the button acts
+                        if (isRunning) runRefs.current[a.key]?.abort()
+                        else startRun(a)
+                      },
+                    }, tr(isRunning ? 'auto.stop' : 'auto.run'))),
+                  h('td', null, txt(a.name)),
+                  h('td', { className: 'hams-dim' }, fmtLocalTime(a.created_at)),
+                  h('td', { className: 'hams-dim' }, fmtLocalTime(a.updated_at))),
+                expanded === a.key && h('tr', { key: a.key + ':detail' },
+                  h('td', { colSpan: 4 },
+                    h('div', { className: 'hams-dim' }, txt(a.description || tr('auto.noDesc'))),
+                    h('div', { className: 'hams-dim', style: { margin: '4px 0 0' } },
+                      h('span', { style: { fontWeight: 600 } }, tr('auto.filesLabel')),
+                      (a.files ?? []).length === 0 && txt(tr('auto.noFiles')),
+                      (a.files ?? []).map((f) => h('div', { key: f }, txt(f)))))),
+              ]
+            }))),
+        result && h('div', {
+          className: 'hams-dialog-backdrop',
+          onClick: (e) => { if (e.target === e.currentTarget) setResult(null) },
+        },
+          h('div', { className: 'hams-dialog hams-browse-dialog' },
+            h('h3', null, tr('auto.resultTitle', { name: result.name })),
+            h('div', {
+              className: result.status === 'done' ? 'hams-good' : result.status === 'aborted' ? 'hams-warn' : 'hams-bad',
+              style: { fontWeight: 600 },
+            }, tr(result.status === 'done' ? 'auto.resultDone'
+              : result.status === 'aborted' ? 'auto.resultAborted' : 'auto.resultFailed')
+              + ' — ' + txt(result.machine ?? '')),
+            h('div', { className: 'hams-dim' },
+              tr('auto.resultTime', { start: fmtLocalTime(result.started_at), end: fmtLocalTime(result.finished_at) })),
+            h('div', { className: 'hams-field' },
+              (result.results ?? []).map((r) => h('div', { key: r.file, style: { margin: '6px 0' } },
+                h('div', null,
+                  h('b', null, txt(r.file)), ' ',
+                  h('span', { className: r.ok ? 'hams-good' : 'hams-bad' }, r.ok ? '✓' : '✗'),
+                  r.timedOut && txt(' ' + tr('auto.timedOut')),
+                  r.exitCode != null && txt(' ' + tr('auto.exitCode', { code: r.exitCode })),
+                  r.duration_ms != null && txt(' · ' + tr('auto.duration', { ms: r.duration_ms }))),
+                (r.stdout || r.stderr || r.error) && h(ClampText, {
+                  text: [r.error, r.stdout, r.stderr ? '[stderr]\n' + r.stderr : ''].filter(Boolean).join('\n'),
+                })))),
+            h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
+              h('button', { className: 'hams-btn', onClick: () => setResult(null) }, tr('common.close'))))),
+      )
+    }
+
     // ---------- tier 3: project overview (first-level view inside the task tab) ----------
     // Project-level surfaces only (the settings/self-check block is the single
     // entry since the health-check panel retired): nothing here depends on a
@@ -2255,7 +2459,7 @@ window.__ModuleLoader__.load({
             onClick: () => { rememberOverviewView(v.id); setView(v.id) },
           }, tr(v.labelKey)))),
         project && view === 'config' && sessionId && h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath, facts: project.selfcheck_facts ?? null }),
-        project && view === 'automation' && h('div', { className: 'hams-dim', style: { margin: '10px 0 0' } }, tr('tasks.automationPlaceholder')),
+        project && view === 'automation' && h(AutomationList, { sessionId, projectPath }),
       )
     }
 

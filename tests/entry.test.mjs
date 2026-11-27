@@ -30,8 +30,9 @@ test('apply registers the /harnessams prefix route and the model tools', async (
   assert.equal(typeof routes[0].handler, 'function')
   assert.deepEqual(registered.sort(), [
     'batch_poll', 'batch_submit',
-    'gen_sweep_report', 'harnessams_selfcheck',
-    'register_report', 'safe_trash',
+    'config_automation', 'gen_sweep_report',
+    'harnessams_selfcheck', 'register_report',
+    'run_automation', 'safe_trash',
   ])
 })
 
@@ -81,7 +82,7 @@ test('apply injects both system prompt sections (fail-open)', async () => {
 
 test('every tool compiles to an object-rooted JSON Schema with typed properties', () => {
   const defs = toolDefinitions()
-  assert.equal(defs.length, 6)
+  assert.equal(defs.length, 8)
   for (const def of defs) {
     const tool = makeTool(def)
     assert.equal(tool.parameters.type, 'object', `${def.name} parameters root`)
@@ -190,6 +191,13 @@ test('client half: single tab — two-entry strip (project overview + this sessi
   assert.ok(src.includes('hams-overview-view'), 'overview sub-view choice must persist via localStorage')
   assert.ok(src.includes('useState(readOverviewView)'), 'ProjectOverviewView must restore the persisted view on mount')
   assert.ok(src.includes('rememberOverviewView'), 'overview view switch must write the persisted choice')
+  // The automation sub-view carries the interactive list: the component, its
+  // two endpoints, and the column copy domain (zh/en symmetry is the dict
+  // key-set test's business)
+  assert.ok(src.includes('function AutomationList'), 'automation list component')
+  assert.ok(src.includes("API + '/automation?sessionId='"), 'the list reads GET /api/automation')
+  assert.ok(src.includes("API + '/automation/run'"), 'runs go through POST /api/automation/run')
+  assert.ok(src.includes("'auto.colName'"), 'automation column copy key')
   // The check sub-view keeps its contract (per-session)
   assert.ok(/id: 'check', labelKey: 'tasks\.viewCheck'/.test(src), 'TASK_VIEWS must carry the check view')
   assert.ok(src.includes("API + '/session-config"), 'check sub-view reads through the session-config API')

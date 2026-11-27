@@ -38,8 +38,11 @@
 // (batch_submit with its local/ssh/lsf schedulers, semantics set by the
 // project's cluster_env — D-001 — + batch_poll with the
 // terminal auto-fetch; worker scripts come from the project's
-// workspace.sim_scripts_dir) and the simulator-agnostic report/ops tools
-// (gen_sweep_report / safe_trash).
+// workspace.sim_scripts_dir), the simulator-agnostic report/ops tools
+// (gen_sweep_report / safe_trash) and the automation pair (config_automation
+// — task CRUD over the shared .txt command library at .harnessams/automation/
+// + the automation.json task list; run_automation — the agent debug run face;
+// the manual run route POST /api/automation/run is the same runner, agent-free).
 // The session tool cards read two extra read-only endpoints (/api/progress and
 // /api/progress-summary, server/progress.js) to draw the simulation progress
 // cards inside the conversation — no execution surface, pure file reads.
@@ -66,6 +69,8 @@ import { batchTools } from './tools/batch.js'
 import { genReportTools } from './tools/gen_report.js'
 import { selfcheckTools, runSelfcheckAction } from './tools/selfcheck.js'
 import { safeTrashTool } from './tools/trash.js'
+import { automationTools } from './tools/automation.js'
+import { readAutomations, runAutomation } from './core/automation.js'
 import { registerSkills } from './skills.js'
 
 export const name = 'dsh-harnessams'
@@ -99,11 +104,12 @@ export const REMOTE_WAIT_POLICY = 'HarnessAMS execution safety rules: if the sta
 export const MODEL_SOURCE_DISCIPLINE = 'HarnessAMS model-source discipline: never read files under PDK or model-library directories (no browsing, no grepping, no listing to discover model names or sections). The only sanctioned source of model includes, sections and simulator setup is the include lines already present in simulation logs the user provides (the input.scs of a run_dir, or artifacts of past runs) — reuse them verbatim. For a process that has never been run in this workspace, ask the user for the run_dir/log of one minimal no-parameter simulation first and learn the setup from it; afterwards prefer learning from past projects over re-deriving. When unsure which section or include applies, stop and ask the user instead of inspecting PDK trees.'
 
 export function toolDefinitions(ctx = {}) {
-  return [...selfcheckTools(ctx), ...batchTools(ctx), ...genReportTools(ctx), safeTrashTool(ctx)]
+  return [...selfcheckTools(ctx), ...batchTools(ctx), ...genReportTools(ctx), safeTrashTool(ctx), ...automationTools(ctx)]
 }
 // Current tool surface: harnessams_selfcheck (self-check + project config),
 // batch_submit (local/ssh/lsf, per cluster_env) / batch_poll (monitor + terminal
-// auto-fetch), gen_sweep_report (pure JS report renderer), safe_trash.
+// auto-fetch), gen_sweep_report (pure JS report renderer), safe_trash,
+// config_automation + run_automation (the automation pair).
 
 export function apply(ctx) {
   ctx.effect(() => {
@@ -250,6 +256,38 @@ async function handle(req, res, ctx) {
       })
       if (r.error) { json(r.code ?? 400, { error: r.error }); return }
       json(200, r)
+      return
+    }
+    if (req.method === 'POST' && route === '/api/automation/run') {
+      // The sidebar Automation list's run button (body { sessionId, key }) —
+      // the MANUAL, agent-free trigger of the phase-2 automation feature: the
+      // same stateless runner the run_automation tool calls (core/automation.js
+      // runAutomation — sequential ssh_exec on the project's machine_id, the
+      // whole result returns with this call). Same-origin guard like the other
+      // untokened POSTs with remote side effects (remote-browse/mkdir); a
+      // client disconnect mid-run aborts the in-flight channel (KILL + close
+      // best-effort, the remote command may orphan — the aborted response is
+      // discarded, the client-side cancel is what the user sees).
+      const guard = sameOriginError(req)
+      if (guard) { json(403, { error: guard }); return }
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const sessionId = body?.sessionId
+      if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
+      const key = body?.key
+      if (!key || typeof key !== 'string') { json(400, { error: 'missing key (the automation index key)' }); return }
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      const ac = new AbortController()
+      const onClose = () => { if (!res.writableEnded) ac.abort() }
+      res.on?.('close', onClose) // optional: plain-object test responses have no emitter
+      try {
+        const r = await runAutomation(ctx, { project, key, signal: ac.signal })
+        if (r.error) { json(r.code ?? 400, { error: r.error }); return }
+        json(200, r)
+      } finally {
+        res.off?.('close', onClose)
+      }
       return
     }
     if (req.method === 'POST' && route === '/api/project-init') {
@@ -416,7 +454,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, selfcheck_fresh_min: r.value })
       return
     }
-    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir, POST /api/pick-directory, POST /api/pick-file)' })
+    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/automation/run, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir, POST /api/pick-directory, POST /api/pick-file)' })
     return
   }
 
@@ -462,6 +500,23 @@ async function handle(req, res, ctx) {
     let settings
     try { ({ settings } = await readSettings(project.path)) } catch (e) { json(500, { error: `workspace_config.json unreadable: ${e.message}` }); return }
     json(200, { ok: true, settings })
+    return
+  }
+  if (route === '/api/automation') {
+    // The sidebar Automation list (phase-2): the project's automation.json
+    // task list (lenient read — warnings ride along) plus the machine_id the
+    // runs would target (the settings table's dsh-ssh alias; null = runs
+    // refuse with a clear error until it is configured). Read-only.
+    const sessionId = url.searchParams.get('sessionId')
+    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+    const store = await readAutomations(project.path)
+    let machine_id = null
+    try {
+      const { settings } = await readSettings(project.path)
+      machine_id = settings.machine_id
+    } catch { machine_id = null }
+    json(200, { ok: true, automations: store.automations, warnings: store.warnings, machine_id })
     return
   }
   if (route === '/api/check-params') {
