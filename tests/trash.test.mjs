@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { listTrash, purgeEntry, restoreEntry, trashPaths } from '../src/trash.js'
+import { listTrash, purgeEntry, restoreEntry, trashPaths } from '../src/tools/trash.js'
 
 const sandbox = () => fs.mkdtempSync(path.join(tmpdir(), 'hams-trash-'))
 

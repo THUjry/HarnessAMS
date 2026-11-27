@@ -25,8 +25,8 @@
 // and its shared modules resolve remotely.
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveWorkspacePathsAt } from './server/settings.js'
-import { shq } from './remote.js'
+import { resolveWorkspacePathsAt } from './settings.js'
+import { shq } from '../channel/remote.js'
 
 // Worker scripts root (see the header comment). `projectRoot` is the
 // session-resolved project root (D-021: no ancestor walk-up from a run

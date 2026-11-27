@@ -12,8 +12,8 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { ensureAgentsMdTemplate, latestSelfcheckRun, parseFacts, syncAgentsMd, agentsMdPath } from '../src/server/agentsmd.js'
-import { writeSettings } from '../src/server/settings.js'
+import { ensureAgentsMdTemplate, latestSelfcheckRun, parseFacts, syncAgentsMd, agentsMdPath } from '../src/core/agentsmd.js'
+import { writeSettings } from '../src/core/settings.js'
 import { registerRoutes, callPost, callPut, clientSrc, assertDictKeys } from './helpers.mjs'
 
 // D-017: isolate the plugin-global store — the save_agentsmd action heals pins

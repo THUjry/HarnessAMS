@@ -20,10 +20,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { resolveDir } from '../py.js'
-import { readJsonBom, chartSpecs, curveMids, genReportFromSpec } from '../report_render.js'
-import { exportFigs } from '../figs_export.js'
-import { resolveProjectTool } from '../server/project.js'
+import { resolveDir } from '../channel/py.js'
+import { readJsonBom, chartSpecs, curveMids, genReportFromSpec } from '../core/report_render.js'
+import { exportFigs } from '../core/figs_export.js'
+import { resolveProjectTool } from '../core/project.js'
 import { effectiveSessionId } from '../subagent.js'
 
 // --- report registration target: the calling session's HarnessAMS dashboard.
@@ -78,7 +78,7 @@ export function sessionsStoreAt(projectRoot) {
 // carries the store's read-side skip notices (D-026) so tool results can
 // surface them.
 export async function registerReportIntoSession(storeDir, sessionId, reportPath, { name } = {}) {
-  const { readSessionConfigs, writeSessionConfig } = await import('../server/project.js')
+  const { readSessionConfigs, writeSessionConfig } = await import('../core/project.js')
   const workspacePath = path.dirname(path.resolve(storeDir))
   const abs = path.resolve(reportPath)
   const store = await readSessionConfigs(workspacePath)
@@ -108,7 +108,7 @@ export async function registerReportIntoSession(storeDir, sessionId, reportPath,
 // the dashboard), not in the project settings. No session entry, no store or
 // a flag that is not exactly true all mean off.
 export async function sessionReportFigs(storeDir, sessionId) {
-  const { readSessionConfigs } = await import('../server/project.js')
+  const { readSessionConfigs } = await import('../core/project.js')
   const store = await readSessionConfigs(path.dirname(path.resolve(storeDir)))
   return store.sessions[sessionId]?.report_figs === true
 }

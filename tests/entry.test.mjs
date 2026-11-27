@@ -97,7 +97,7 @@ test('every tool compiles to an object-rooted JSON Schema with typed properties'
 
 test('packaging contract: client half declared and whitelisted', async () => {
   const pkg = JSON.parse(await readFile(new URL('../src/package.json', import.meta.url), 'utf8'))
-  assert.equal(pkg.exports['./client'], './client.js', 'client export must point at client.js')
+  assert.equal(pkg.exports['./client'], './client/client.js', 'client export must point at client/client.js')
   assert.equal(pkg.dsh?.client?.platform, 'web', 'dsh.client.platform must be web')
   assert.ok(Array.isArray(pkg.dsh?.client?.inject) && pkg.dsh.client.inject.length > 0,
     'dsh.client.inject must list the client module dependencies')
@@ -105,8 +105,7 @@ test('packaging contract: client half declared and whitelisted', async () => {
     assert.ok(pkg.peerDependencies?.[dep], `peer dependency missing for client inject: ${dep}`)
     assert.ok(pkg.devDependencies?.[dep], `dev dependency missing for client inject: ${dep}`)
   }
-  for (const f of ['index.js', 'client.js', 'server/', 'tools/', 'scripts/', 'selfcheck/', 'cordis.patch.yml', 'assets/',
-    'report_render.js', 'figs_export.js']) {
+  for (const f of ['index.js', 'client/', 'server/', 'tools/', 'lib/', 'channel/', 'core/', 'scripts/', 'selfcheck/', 'cordis.patch.yml', 'assets/']) {
     assert.ok(pkg.files.includes(f), `files whitelist must include ${f}`)
   }
   // the headless PNG pipeline's runtime deps (all prebuilt, zero install scripts)
@@ -118,8 +117,8 @@ test('packaging contract: client half declared and whitelisted', async () => {
 })
 
 test('client half: syntax valid and registers the three tiers', async () => {
-  execFileSync(process.execPath, ['--check', new URL('../src/client.js', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')])
-  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  execFileSync(process.execPath, ['--check', new URL('../src/client/client.js', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1')])
+  const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   assert.ok(src.includes("window.__ModuleLoader__.load"), 'must register as a classic script')
   assert.ok(src.includes("exports.apply = apply"), 'must export apply for the loader')
   for (const slot of ["'main'", "'sidebar.panellist'", "'sidebar.right.pane.tab'",
@@ -140,7 +139,7 @@ test('client half: syntax valid and registers the three tiers', async () => {
 })
 
 test('client half: simulation tool cards keyed by exact wire tool names', async () => {
-  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   assert.ok(src.includes("slots.inject('tool.call.toolview'"), 'must inject the tool card slot')
   // The endpoints hang off the /harnessams/api prefix (API constant) — pin the
   // composed forms so an '/api/api/…' double-prefix regression cannot come back.
@@ -166,7 +165,7 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
 })
 
 test('client half: single tab — two-entry strip (project overview + this session)', async () => {
-  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   // ONE tab remains, and its first-level strip is exactly TWO entries since the
   // task retirement (D-005, 2026-11-19) — the project overview (default) and
   // the current session's own capsule.
@@ -187,7 +186,7 @@ test('client half: single tab — two-entry strip (project overview + this sessi
 })
 
 test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow, 8-line clamp, per-session selection', async () => {
-  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   // ONE scroll container: the task tab's outer .hams-body; the overview is
   // plain flowing content (the old nested .hams-body + height:100% chain is
   // what starved the overview of its vertical scrollbar)
@@ -232,7 +231,7 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
 })
 
 test('client half: fork adopt awaits session persistence before mounting an inherited report (D-006 fix)', async () => {
-  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   // The 2026-11-21 fork bug: adoptWith setConfig'd a config whose dashboard_
   // selected mounts the /dash iframe while the fork's sessions.json entry was
   // still in flight (fire-and-forget PUT, swallowed errors) — the iframe 404'd
@@ -247,7 +246,7 @@ test('client half: fork adopt awaits session persistence before mounting an inhe
 })
 
 test('client half: zh/en dictionaries keep identical key sets', async () => {
-  const src = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+  const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   const blockKeys = (name) => {
     const start = src.indexOf(name + ': {')
     assert.ok(start >= 0, `dict block ${name} must exist`)

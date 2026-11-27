@@ -9,7 +9,7 @@ import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { zstdCompressSync } from 'node:zlib'
-import { isForkSession } from '../src/server/forkdetect.js'
+import { isForkSession } from '../src/core/forkdetect.js'
 
 const ev = (type, extra = {}) => JSON.stringify({ type, seq: extra.seq ?? 0, time: 1795092632947, ...extra })
 

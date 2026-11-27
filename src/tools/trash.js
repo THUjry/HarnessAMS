@@ -6,9 +6,9 @@
 // (an earlier trash layout still found in some workspaces) restore as-is.
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveWorkspacePathsAt } from './server/settings.js'
-import { resolveProjectTool } from './server/project.js'
-import { effectiveSessionId } from './subagent.js'
+import { resolveWorkspacePathsAt } from '../core/settings.js'
+import { resolveProjectTool } from '../core/project.js'
+import { effectiveSessionId } from '../subagent.js'
 
 // Trash root: the owning project's workspace_config.json workspace.trash_dir
 // (default .harnessams/trash under the project root). `projectRoot` is the

@@ -10,7 +10,7 @@
 // 2026-11-26: the listing carries each directory's mtime (the picker's age
 // column) and the browser gained a create side — remoteMkdir, fenced to one
 // validated printable-ASCII segment under the currently listed directory.
-import { execRemote, shq, resolveMachine, listMachines } from '../remote.js'
+import { execRemote, shq, resolveMachine, listMachines } from '../channel/remote.js'
 
 const MAX_ENTRIES = 200
 

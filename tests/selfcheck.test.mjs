@@ -29,12 +29,12 @@ import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { apply, toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
-import { defaultSettings, readSettings, readConfig, validateSettings, writeSettings, configPath, healFromGlobalMemory, initProjectStorage, declarePlotlyUrl, defaultSimScriptsDir } from '../src/server/settings.js'
-import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR, autoPinToolchain, healProjectScriptsAt } from '../src/server/selfcheck.js'
-import { getNodePins, getLocalFacts, readGlobalStore, setFreshMin, updateNodePins, updateLocalFacts } from '../src/server/globalstore.js'
-import { reconcileSettings, overlaySettingsAt } from '../src/server/reconcile.js'
-import { agentsMdPath, syncAgentsMd } from '../src/server/agentsmd.js'
-import { writeSessionConfig } from '../src/server/project.js'
+import { defaultSettings, readSettings, readConfig, validateSettings, writeSettings, configPath, healFromGlobalMemory, initProjectStorage, declarePlotlyUrl, defaultSimScriptsDir } from '../src/core/settings.js'
+import { startSelfcheck, stopSelfcheck, getSelfcheck, buildSelfcheckPrompt, GOLDEN_DIR, autoPinToolchain, healProjectScriptsAt } from '../src/core/selfcheck.js'
+import { getNodePins, getLocalFacts, readGlobalStore, setFreshMin, updateNodePins, updateLocalFacts } from '../src/core/globalstore.js'
+import { reconcileSettings, overlaySettingsAt } from '../src/core/reconcile.js'
+import { agentsMdPath, syncAgentsMd } from '../src/core/agentsmd.js'
+import { writeSessionConfig } from '../src/core/project.js'
 import { runSelfcheckAction } from '../src/tools/selfcheck.js'
 import { verifyRun, siValue } from '../src/scripts/selfcheck/selfcheck_verify.mjs'
 import { callRoute, getReq, clientSrc, assertDictKeys } from './helpers.mjs'
@@ -1654,7 +1654,7 @@ test('buildSelfcheckPrompt: english body, artifacts pointer, answer-language lin
 // ---------------------------------------------------------------------------
 
 test('persist serialization: status file stays valid JSON through a run and matches the final verdict', async () => {
-  const serverSrc = await fsp.readFile(path.join(REPO, 'src', 'server', 'selfcheck.js'), 'utf8')
+  const serverSrc = await fsp.readFile(path.join(REPO, 'src', 'core', 'selfcheck.js'), 'utf8')
   assert.ok(serverSrc.includes('run._persistChain'), 'persists must serialize through a per-run chain')
   const f = await startFlow({ settings: { simulator: 'none' } })
   try {

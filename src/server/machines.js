@@ -5,7 +5,7 @@
 // map anymore (2026-11-19 D-004): it is the project's settings.remote_root —
 // consumers that need a root pass it explicitly; the machine projections here
 // are pure registry facts.
-import { listMachines } from '../remote.js'
+import { listMachines } from '../channel/remote.js'
 
 // List the configured hosts (single channel; never throws).
 export async function fetchMachines(tools) {

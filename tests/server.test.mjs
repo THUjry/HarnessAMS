@@ -7,14 +7,14 @@ import { mkdtemp, mkdir, writeFile, readFile, rm, statfs } from 'node:fs/promise
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { batchOf, firstCall } from './helpers.mjs'
-import { sessionProject, readSessionConfigs, writeSessionConfig, sessionConfigsPath } from '../src/server/project.js'
+import { sessionProject, readSessionConfigs, writeSessionConfig, sessionConfigsPath } from '../src/core/project.js'
 import { assetsStatus } from '../src/server/assets.js'
 import { fetchMachines, checkableMachines, remoteMachinesStatus } from '../src/server/machines.js'
 import {
   callTool, execRemote, uploadFile, downloadFile, resolveMachine, listMachines,
   resultText, resultValue, attributeSshError,
-} from '../src/remote.js'
-import { runLocalChecks, localEnvFacts } from '../src/server/checks.js'
+} from '../src/channel/remote.js'
+import { runLocalChecks, localEnvFacts } from '../src/core/checks.js'
 
 test('project: sessionProject maps over the workspace registry', async () => {
   const registry = {

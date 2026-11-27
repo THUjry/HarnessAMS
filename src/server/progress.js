@@ -14,12 +14,12 @@
 // the progress/aggregate block.
 import fs from 'node:fs'
 import path from 'node:path'
-import { sessionProject } from './project.js'
-import { readRunProgress, projectRootOf } from '../progress_files.js'
+import { sessionProject } from '../core/project.js'
+import { readRunProgress, projectRootOf } from '../core/progress_files.js'
 
 // The single-run ladder readers live in ../progress_files.js (shared with the
 // batch tools' local poll branch); re-exported here for the existing consumers.
-export { readRunProgress, projectRootOf } from '../progress_files.js'
+export { readRunProgress, projectRootOf } from '../core/progress_files.js'
 
 const MAX_BATCHES = 64
 

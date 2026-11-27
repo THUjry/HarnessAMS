@@ -2,7 +2,7 @@
 // templates and the Node-side chart-spec builder. The same chartSpecs() output
 // feeds BOTH the browser page (the data JS embeds ready-to-plot {data, layout}
 // per chart — the client only calls newPlot and binds interactions) and the
-// headless PNG exporter (src/figs_export.js), so a figure and its PNG cannot
+// headless PNG exporter (src/core/figs_export.js), so a figure and its PNG cannot
 // drift apart. Visual language follows the verified AttST0p5dB_ch.html
 // dashboard: #f9f9f7 page, #fcfcfb cards, legend-less curve charts with the
 // table-swatch color mapping, selection dims other curves (width 4 vs 1,

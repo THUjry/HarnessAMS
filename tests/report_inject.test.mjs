@@ -268,7 +268,7 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
 // the default target afterwards carries present:true (the route then declares
 // plotly_url in workspace_config.json); refusal paths omit the flag.
 test('seedProjectPlotly: copy-if-missing, size-refresh, no-op and override semantics', async () => {
-  const { seedProjectPlotly } = await import('../src/report_render.js')
+  const { seedProjectPlotly } = await import('../src/core/report_render.js')
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-seed-'))
   try {
     const copy = path.join(ws, '.harnessams', 'assets', 'plotly.min.js')
@@ -389,7 +389,7 @@ test('gen_sweep_report: PNG export fails open — no charts or a broken renderer
 
     // renderer-level failure (missing plotly file) surfaces in figs_note,
     // never as a thrown error — exercised directly against exportFigs
-    const { exportFigs } = await import('../src/figs_export.js')
+    const { exportFigs } = await import('../src/core/figs_export.js')
     const out = await exportFigs({
       rounds: [{ round: 'r1', charts: [{ id: 'c', title: 't', slug: 't', data: [{ x: [1], y: [1] }], layout: {} }] }],
       plotlyFile: path.join(ws, 'definitely-missing-plotly.min.js'),
@@ -414,7 +414,7 @@ test('gen_sweep_report: the PNG gate is the CALLING session\'s option — per se
 
     // validateSessionState (the store's single gate): non-boolean refused, false
     // and absent both drop the key (stored only while on)
-    const { validateSessionState, writeSessionConfig, readSessionConfigs } = await import('../src/server/project.js')
+    const { validateSessionState, writeSessionConfig, readSessionConfigs } = await import('../src/core/project.js')
     assert.match(validateSessionState({ display: 'session', reports: [], report_figs: 'on' }).error, /report_figs must be a boolean/)
     assert.ok(!('report_figs' in validateSessionState({ display: 'session', reports: [], report_figs: false }).state))
     assert.ok(!('report_figs' in validateSessionState({ display: 'session', reports: [] }).state))

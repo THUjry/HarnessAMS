@@ -31,13 +31,13 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { readJsonIfExists, resolveDir } from '../py.js'
-import { callTool, downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../remote.js'
-import { execLocal, localCopy } from '../localchannel.js'
-import { readRunProgress, totalFromConfig } from '../progress_files.js'
-import { normalizePin } from '../server/settings.js'
-import { overlaySettingsAt } from '../server/reconcile.js'
-import { resolveProjectTool } from '../server/project.js'
+import { readJsonIfExists, resolveDir } from '../channel/py.js'
+import { callTool, downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../channel/remote.js'
+import { execLocal, localCopy } from '../channel/localchannel.js'
+import { readRunProgress, totalFromConfig } from '../core/progress_files.js'
+import { normalizePin } from '../core/settings.js'
+import { overlaySettingsAt } from '../core/reconcile.js'
+import { resolveProjectTool } from '../core/project.js'
 import { effectiveSessionId } from '../subagent.js'
 import {
   DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildSshCommand, buildSubmitCommand,
@@ -45,7 +45,7 @@ import {
   defaultRemoteScriptsDir, nextSimDir, parseJobId, parsePollOutput, pluginAssets, pluginScripts,
   pollCommand, postSubmitCommand, readJob, remoteJoin,
   resolveRemoteDir, sanitizeRel, submitScriptsRoot, templateUploadPlan, writeJob,
-} from '../batch.js'
+} from '../core/batch.js'
 
 // The fixed light-result set a terminal poll pulls straight down (2026-11-23:
 // poll absorbed fetch — no includes, no archive; raw psf/sp data stays remote
@@ -80,7 +80,7 @@ async function maxPointsPerScan(projectPath, sessionId) {
   try {
     if (!sessionId) return DEFAULT_MAX_POINTS_PER_SCAN
     if (!projectPath) return DEFAULT_MAX_POINTS_PER_SCAN
-    const { readSessionConfigs } = await import('../server/project.js')
+    const { readSessionConfigs } = await import('../core/project.js')
     const store = await readSessionConfigs(projectPath)
     const v = store.sessions?.[sessionId]?.max_points_per_scan
     return Number.isInteger(v) && v > 0 ? v : DEFAULT_MAX_POINTS_PER_SCAN

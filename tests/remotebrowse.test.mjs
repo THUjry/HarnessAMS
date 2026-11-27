@@ -11,7 +11,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { remoteBrowse, remoteMkdir, parseListing, remoteParent, validateDirName } from '../src/server/remotebrowse.js'
-import { writeSettings } from '../src/server/settings.js'
+import { writeSettings } from '../src/core/settings.js'
 import { registerRoutes, callGet, callPost, callRoute, batchOf } from './helpers.mjs'
 
 test('remotebrowse: parseListing reads find TSV lines and ls fallback lines', () => {

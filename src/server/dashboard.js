@@ -6,10 +6,10 @@
 // request through the workspace registry's session stores (the route carries
 // no secrets: just opaque session/report ids). The add-report picking surface
 // (host folder chooser, native file dialog, one-level listing) lives in
-// src/picker.js since 2026-11-26.
+// src/channel/picker.js since 2026-11-26.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { readSessionConfigs } from './project.js'
+import { readSessionConfigs } from '../core/project.js'
 
 // Reports load scripts next to themselves (gen_sweep_report emits
 // data/Round<N>.js); a wrong MIME silently kills them, so types are by

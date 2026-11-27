@@ -5,7 +5,7 @@
 // repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { sanitizeFailed, createDiagnosisSession } from '../src/server/diagnose.js'
+import { sanitizeFailed, createDiagnosisSession } from '../src/core/diagnose.js'
 
 test('diagnose: sanitizeFailed caps entries and text, drops unknown fields', () => {
   const big = 'x'.repeat(5000)

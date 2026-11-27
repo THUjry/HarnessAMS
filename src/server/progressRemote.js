@@ -18,9 +18,9 @@
 // blank — the D-008 rule: a visible card at every moment, placeholder never.
 import path from 'node:path'
 import { readRunProgress } from './progress.js'
-import { readJob, pollCommand, parsePollOutput, resolveRemoteDir } from '../batch.js'
-import { resolveMachine, execRemote } from '../remote.js'
-import { execLocal } from '../localchannel.js'
+import { readJob, pollCommand, parsePollOutput, resolveRemoteDir } from '../core/batch.js'
+import { resolveMachine, execRemote } from '../channel/remote.js'
+import { execLocal } from '../channel/localchannel.js'
 
 const CACHE_TTL_MS = 4_000
 const CACHE_MAX = 64

@@ -45,27 +45,27 @@
 // cards inside the conversation — no execution surface, pure file reads.
 import fsp from 'node:fs/promises'
 import os from 'node:os'
-import { sessionProject, readSessionConfigs, writeSessionConfig } from './server/project.js'
-import { isForkSession } from './server/forkdetect.js'
+import { sessionProject, readSessionConfigs, writeSessionConfig } from './core/project.js'
+import { isForkSession } from './core/forkdetect.js'
 import { remoteMachinesStatus, fetchMachines, checkableMachines } from './server/machines.js'
-import { initProjectStorage, healFromGlobalMemory, readSettings, declarePlotlyUrl } from './server/settings.js'
-import { reconcileSettings } from './server/reconcile.js'
-import { parseFacts } from './server/agentsmd.js'
-import { getFreshMin, setFreshMin } from './server/globalstore.js'
-import { readCheckParams } from './server/checkparams.js'
+import { initProjectStorage, healFromGlobalMemory, readSettings, declarePlotlyUrl } from './core/settings.js'
+import { reconcileSettings } from './core/reconcile.js'
+import { parseFacts } from './core/agentsmd.js'
+import { getFreshMin, setFreshMin } from './core/globalstore.js'
+import { readCheckParams } from './core/checkparams.js'
 import { remoteBrowse, remoteMkdir } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile } from './server/dashboard.js'
-import { resolveOpenableFile, openWithDefaultApp } from './server/openlocal.js'
-import { pickDirectory, pickFile, browseDir } from './picker.js'
-import { seedProjectPlotly } from './report_render.js'
+import { resolveOpenableFile, openWithDefaultApp } from './channel/openlocal.js'
+import { pickDirectory, pickFile, browseDir } from './channel/picker.js'
+import { seedProjectPlotly } from './core/report_render.js'
 import { progressPayload, progressSummaryPayload, progressFence } from './server/progress.js'
 import { progressRemotePayload } from './server/progressRemote.js'
 import { registerTools } from './tool.js'
 import { batchTools } from './tools/batch.js'
 import { genReportTools } from './tools/gen_report.js'
 import { selfcheckTools, runSelfcheckAction } from './tools/selfcheck.js'
-import { safeTrashTool } from './trash.js'
+import { safeTrashTool } from './tools/trash.js'
 import { registerSkills } from './skills.js'
 
 export const name = 'dsh-harnessams'
@@ -282,7 +282,7 @@ async function handle(req, res, ctx) {
       // viewing path for reports (body { sessionId, path }). This is the FIRST
       // route that can trigger an OS process, so it carries its own fence:
       // viewable-extension whitelist + existing regular file + quoting-safe
-      // characters (server/openlocal.js), plus the shared same-origin guard
+      // characters (channel/openlocal.js), plus the shared same-origin guard
       // (sameOriginError — untokened POST routes only accept same-origin
       // fetches). The window opens on the DSH host's desktop — in-cluster/
       // headless hosts may have no default handler and the spawn error

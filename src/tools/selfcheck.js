@@ -19,14 +19,14 @@
 // (5) supplements still-null fields from the global memory (after the memory
 // update, so an explicit null clear sticks), and (6) re-syncs the AGENTS.md
 // block so UI = json = AGENTS.md after every write.
-import { resolveProjectTool } from '../server/project.js'
+import { resolveProjectTool } from '../core/project.js'
 import { effectiveSessionId } from '../subagent.js'
-import { healFromGlobalMemory, validateSettings, writeSettings, PIN_KEYS } from '../server/settings.js'
-import { reconcileSettings } from '../server/reconcile.js'
-import { localEnvFacts, runLocalChecks } from '../server/checks.js'
-import { syncAgentsMd } from '../server/agentsmd.js'
-import { updateNodePins } from '../server/globalstore.js'
-import { startSelfcheck, getSelfcheck, stopSelfcheck } from '../server/selfcheck.js'
+import { healFromGlobalMemory, validateSettings, writeSettings, PIN_KEYS } from '../core/settings.js'
+import { reconcileSettings } from '../core/reconcile.js'
+import { localEnvFacts, runLocalChecks } from '../core/checks.js'
+import { syncAgentsMd } from '../core/agentsmd.js'
+import { updateNodePins } from '../core/globalstore.js'
+import { startSelfcheck, getSelfcheck, stopSelfcheck } from '../core/selfcheck.js'
 
 // Shared action runner: the tool def (agent-facing, resolves session/project
 // itself) and the /api/tool route (button-facing, project already resolved from

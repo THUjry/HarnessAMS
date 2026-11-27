@@ -77,7 +77,7 @@ let clientSource = null
 export async function clientSrc() {
   if (clientSource === null) {
     const { readFile } = await import('node:fs/promises')
-    clientSource = await readFile(new URL('../src/client.js', import.meta.url), 'utf8')
+    clientSource = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   }
   return clientSource
 }

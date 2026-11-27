@@ -9,10 +9,10 @@ import { mkdtemp, rm, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { registerRoutes, callGet } from './helpers.mjs'
-import { writeSessionConfig } from '../src/server/project.js'
+import { writeSessionConfig } from '../src/core/project.js'
 import {
   defaultCheckParams, validateCheckParams, readCheckParams, checkParamsPath,
-} from '../src/server/checkparams.js'
+} from '../src/core/checkparams.js'
 
 test('checkparams: defaults on missing file, per-key fallback on a corrupted one', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-chk-'))

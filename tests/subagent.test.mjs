@@ -12,7 +12,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { effectiveSessionId, inheritsSessionState } from '../src/subagent.js'
-import { resolveProjectTool } from '../src/server/project.js'
+import { resolveProjectTool } from '../src/core/project.js'
 
 const REPO = path.join(path.dirname(fileURLToPath(import.meta.url)), '..')
 

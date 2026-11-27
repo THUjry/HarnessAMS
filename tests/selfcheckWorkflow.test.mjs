@@ -12,7 +12,7 @@
 // language ruling; one line per table row.
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { workflowTable } from '../src/server/selfcheckWorkflow.js'
+import { workflowTable } from '../src/core/selfcheckWorkflow.js'
 
 const S = (over = {}) => ({
   cluster_env: 'out-of-cluster', run_mode: 'local', scheduler: 'lsf', simulator: 'spectre',

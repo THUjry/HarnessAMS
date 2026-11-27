@@ -12,9 +12,10 @@ import path from 'node:path'
 
 const execFileAsync = promisify(execFile)
 
-// Package root is this file's own directory (src/ IS the npm package root in
-// this plugin, unlike SmartAnaSim whose package root sits above src/).
-export const PKG_ROOT = path.dirname(fileURLToPath(import.meta.url))
+// Package root is this file's directory's parent (src/ IS the npm package root
+// in this plugin, unlike SmartAnaSim whose package root sits above src/; this
+// module lives one level down, in channel/).
+export const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 export const SCRIPTS_DIR = path.join(PKG_ROOT, 'scripts')
 
 export function scriptPath(relPath) {
