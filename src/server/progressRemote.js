@@ -17,10 +17,10 @@
 // (HTTP 200) so the card keeps its last frame plus a dim note instead of going
 // blank — the D-008 rule: a visible card at every moment, placeholder never.
 import path from 'node:path'
-import { readRunProgress } from './progress.js'
-import { readJob, pollCommand, parsePollOutput, resolveRemoteDir } from '../core/batch.js'
-import { resolveMachine, execRemote } from '../channel/remote.js'
-import { execLocal } from '../channel/localchannel.js'
+import { readRunProgress } from '../core/progress_files.js'
+import { readJob, pollCommand, parsePollOutput } from '../core/batch.js'
+import { resolveRemoteDir } from '../lib/remotepath.js'
+import { resolveMachine, buildChannel } from '../channel/remote.js'
 
 const CACHE_TTL_MS = 4_000
 const CACHE_MAX = 64
@@ -34,16 +34,17 @@ async function pollRemoteJob(ctx, runDir, job) {
     const scheduler = job.scheduler === 'ssh' ? 'ssh' : 'lsf'
     const jobId = String(job.job_id ?? '')
     if (!/^[\w.-]+$/.test(jobId)) throw new Error(`job file has no usable job_id (${jobId || 'none'})`)
-    // In-cluster LSF (no machine recorded): poll through the local shell seam.
-    let exec
+    // In-cluster LSF (no machine recorded): poll through the local shell seam
+    // (the channel matrix builder — alias null selects the local path).
     let remoteRoot = job.remote_root
-    if (scheduler === 'lsf' && job.cluster_env === 'in-cluster' && !job.machine_id) {
-      exec = (cmd, opts) => execLocal(ctx, cmd, opts)
-    } else {
+    let alias = null
+    if (!(scheduler === 'lsf' && job.cluster_env === 'in-cluster' && !job.machine_id)) {
       const target = await resolveMachine(ctx, job.machine_id, job.remote_root)
       remoteRoot = target.remoteRoot
-      exec = (cmd, opts) => execRemote(ctx, target.alias, cmd, opts)
+      alias = target.alias
     }
+    const channel = buildChannel(ctx, { alias, inCluster: job.cluster_env === 'in-cluster' })
+    const exec = channel.exec
     const remoteDir = resolveRemoteDir(remoteRoot, job.remote_dir)
     const r = await exec(pollCommand({ remoteDir, jobId, scheduler }), { timeoutMs: POLL_TIMEOUT_MS })
     if (!r.ok) {

@@ -22,7 +22,8 @@
 // atomic, idempotent, and small.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import os from 'node:os'
+import { atomicWrite } from '../lib/io.js'
+import { dshHome } from '../lib/paths.js'
 
 const DEFAULT_FRESH_MIN = 30
 
@@ -36,8 +37,7 @@ const numpyState = (v) => (typeof v === 'string' && NUMPY_STATES.includes(v) ? v
 function storePath() {
   const env = process.env.HARNESSAMS_GLOBAL_STORE
   if (env) return path.resolve(env)
-  const dshHome = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
-  return path.join(dshHome, 'harnessams.json')
+  return path.join(dshHome(), 'harnessams.json')
 }
 
 function emptyStore() {
@@ -47,9 +47,7 @@ function emptyStore() {
 async function writeStore(store) {
   const p = storePath()
   await fsp.mkdir(path.dirname(p), { recursive: true })
-  const tmp = p + '.tmp'
-  await fsp.writeFile(tmp, JSON.stringify(store, null, 2) + '\n', 'utf8')
-  await fsp.rename(tmp, p)
+  await atomicWrite(p, JSON.stringify(store, null, 2) + '\n')
 }
 
 export async function readGlobalStore() {

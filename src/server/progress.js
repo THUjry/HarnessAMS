@@ -17,9 +17,9 @@ import path from 'node:path'
 import { sessionProject } from '../core/project.js'
 import { readRunProgress, projectRootOf } from '../core/progress_files.js'
 
-// The single-run ladder readers live in ../progress_files.js (shared with the
-// batch tools' local poll branch); re-exported here for the existing consumers.
-export { readRunProgress, projectRootOf } from '../core/progress_files.js'
+// The single-run ladder readers live in ../core/progress_files.js — the
+// single implementation, shared with the batch tools' local poll branch and
+// the remote poll card (consumers import it there directly).
 
 const MAX_BATCHES = 64
 

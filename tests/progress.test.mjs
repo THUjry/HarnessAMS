@@ -11,7 +11,8 @@ import path from 'node:path'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { registerRoutes, callGet } from './helpers.mjs'
-import { projectRootOf, readRunProgress, summarizeProject } from '../src/server/progress.js'
+import { projectRootOf, readRunProgress } from '../src/core/progress_files.js'
+import { summarizeProject } from '../src/server/progress.js'
 import { resetRemoteCacheForTest } from '../src/server/progressRemote.js'
 
 async function makeHandler(registryList = [], ctxExtra = {}) {

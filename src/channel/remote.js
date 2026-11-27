@@ -42,6 +42,7 @@
 //     error shapes get a "suspected MaxSessions" annotation (visible-and-
 //     attributable ruling, 2026-11-13: no waiting, no semaphore).
 import crypto from 'node:crypto'
+import { execLocal, localCopy } from './localchannel.js'
 
 // Extract the text payload of a ToolExecutionResult: value may be the raw
 // string or a {text} object; content is a ContentBlock[] of {type:'text'}.
@@ -251,10 +252,24 @@ export async function downloadFile(ctx, machine, remotePath, localPath, { signal
   }
 }
 
+// The registry lookup shared by every machine-id resolution (resolveMachine
+// here, the remote browser's no-root bootstrap, the self-check start): list
+// the dsh-ssh registry once and find the alias by id or name, throwing the
+// shared error shapes (verbatim strings — callers and tests match on them).
+export async function lookupMachine(ctx, machineId) {
+  const list = await listMachines(ctx)
+  if (!list.ok) throw new Error(`dsh-ssh hosts unavailable: ${list.reason}`)
+  const machine = list.machines.find((m) => m.id === machineId || m.name === machineId)
+  if (!machine) {
+    throw new Error(`no such dsh-ssh host: ${machineId} (known: ${list.machines.map((m) => m.id).join(', ')})`)
+  }
+  return machine
+}
+
 // Resolve an alias (machine_id) + the project's remote root to
 // { machine, alias, remoteRoot }: the machine must exist in the dsh-ssh host
 // registry and the root must be an absolute remote path — it fences every
-// remote_dir (resolveRemoteDir in batch.js). Callers pass the project's
+// remote_dir (resolveRemoteDir in lib/remotepath.js). Callers pass the project's
 // settings.remote_root (or a per-call remote_root argument).
 export async function resolveMachine(ctx, machineId, remoteRoot) {
   if (!machineId) {
@@ -266,11 +281,30 @@ export async function resolveMachine(ctx, machineId, remoteRoot) {
     throw new Error(`remote_root is required for host ${machineId} (an absolute remote path — the `
       + 'project\'s configured remote_root, shown in the AGENTS.md config block)')
   }
-  const list = await listMachines(ctx)
-  if (!list.ok) throw new Error(`dsh-ssh hosts unavailable: ${list.reason}`)
-  const machine = list.machines.find((m) => m.id === machineId || m.name === machineId)
-  if (!machine) {
-    throw new Error(`no such dsh-ssh host: ${machineId} (known: ${list.machines.map((m) => m.id).join(', ')})`)
-  }
+  const machine = await lookupMachine(ctx, machineId)
   return { machine, alias: machine.id, remoteRoot: root }
+}
+
+// The channel matrix (D-002) as ONE builder — the single implementation of
+// the exec/transfer selection. Exec follows the alias: over dsh-ssh when a
+// host is targeted, else the official local ctx.shell seam (in-cluster LSF,
+// no machine in the job file). Transfers cross ssh ONLY out-of-cluster — an
+// in-cluster run stages and fetches with plain local copies on the shared
+// filesystem, whatever the scheduler. The D-029 abort signal rides every
+// call (exec-shaped calls get the dsh-ssh KILL+close path or the ctx.shell
+// kill, plus the callTool race; sftp has no abort path, so the orphaned
+// transfer is harmless — re-staging is idempotent). Consumers: the batch
+// submit/poll tool paths, the self-check's remote chains, /api/progress-remote.
+export function buildChannel(ctx, { alias, inCluster, signal = null } = {}) {
+  return {
+    exec: alias
+      ? (cmd, opts) => execRemote(ctx, alias, cmd, { ...opts, signal })
+      : (cmd, opts) => execLocal(ctx, cmd, { ...opts, signal }),
+    upload: !inCluster && alias
+      ? (localPath, remotePath) => uploadFile(ctx, alias, localPath, remotePath, { signal })
+      : localCopy,
+    download: !inCluster && alias
+      ? (remotePath, localPath) => downloadFile(ctx, alias, remotePath, localPath, { signal })
+      : localCopy,
+  }
 }

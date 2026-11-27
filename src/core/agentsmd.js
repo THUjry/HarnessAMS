@@ -26,6 +26,8 @@ import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { workflowTable } from './selfcheckWorkflow.js'
+import { atomicWrite } from '../lib/io.js'
+import { defaultRemoteScriptsDir } from '../lib/remotepath.js'
 
 const BEGIN = '<!-- hams-config:begin (HarnessAMS plugin-managed block; the harnessams_selfcheck tool overwrites it — keep edits outside the markers) -->'
 const END = '<!-- hams-config:end -->'
@@ -92,7 +94,9 @@ function yamlLines({ syncedAt, workspaceRoot, settings, env, run }) {
   row('remote_python_numpy', s.remote_python_numpy ?? null)
   if (s.remote_root) {
     row('remote_root', s.remote_root)
-    row('remote_scripts_dir', `${String(s.remote_root).replace(/\/+$/, '')}/.harnessams/scripts`)
+    // the same convention lib/remotepath.js defaultRemoteScriptsDir encodes
+    // (the batch channel's default remote scripts root)
+    row('remote_scripts_dir', defaultRemoteScriptsDir(s.remote_root))
   }
   row('local_node_version', env?.node?.version)
   row('local_node_path', env?.node?.path)
@@ -136,12 +140,6 @@ function spliceSection(existing, section) {
   }
   const body = String(existing ?? '')
   return body.trim() ? section + '\n\n' + body : section + '\n'
-}
-
-async function atomicWrite(file, text) {
-  const tmp = file + '.tmp'
-  await fsp.writeFile(tmp, text, 'utf8')
-  await fsp.rename(tmp, file)
 }
 
 // Idempotent first-fill template: only writes when the file or the marked

@@ -15,6 +15,7 @@ import fs from 'node:fs'
 import { randomUUID } from 'node:crypto'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
 import { validateCheckParams } from './checkparams.js'
+import { atomicWrite } from '../lib/io.js'
 
 // Resolve the workspace (project) a session belongs to. The registry's sessionIds
 // projection is canonical-cwd based; the return value mirrors the DSH workspace record,
@@ -278,9 +279,8 @@ export async function writeSessionConfig(workspacePath, sessionId, state) {
     // .harnessams creation moment: lay down the AGENTS.md config-table template
     // (empty table + first-fill instruction; idempotent, never throws).
     if (fresh) await ensureAgentsMdTemplate(workspacePath)
-    const tmp = sessionConfigsPath(workspacePath) + '.tmp'
-    await fsp.writeFile(tmp, JSON.stringify({ sessions: Object.fromEntries(entries) }, null, 2) + '\n', 'utf8')
-    await fsp.rename(tmp, sessionConfigsPath(workspacePath))
+    await atomicWrite(sessionConfigsPath(workspacePath),
+      JSON.stringify({ sessions: Object.fromEntries(entries) }, null, 2) + '\n')
   } catch (e) {
     return { error: 'sessions.json write failed: ' + String(e?.message ?? e) }
   }

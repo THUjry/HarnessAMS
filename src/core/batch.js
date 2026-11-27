@@ -25,46 +25,36 @@
 // and its shared modules resolve remotely.
 import fs from 'node:fs'
 import path from 'node:path'
-import { resolveWorkspacePathsAt } from './settings.js'
+import { resolveScriptsSource } from './settings.js'
+import { listPyTree, listAssets } from './scriptStage.js'
 import { shq } from '../channel/remote.js'
+import { normalizeRemoteRoot, sanitizeRel } from '../lib/remotepath.js'
+import { atomicWriteSync } from '../lib/io.js'
 
 // Worker scripts root (see the header comment). `projectRoot` is the
 // session-resolved project root (D-021: no ancestor walk-up from a run
 // directory — the caller anchored the project through resolveProjectTool).
-// Throws with guidance when no usable root exists — a wrong root would upload
-// a partial tree whose remote imports break, so failing early beats a
-// confusing remote traceback.
+// Resolution core is settings.resolveScriptsSource (the single
+// implementation, shared with the lazy healer); this side adds the existence
+// check + guidance — a wrong root would upload a partial tree whose remote
+// imports break, so failing early beats a confusing remote traceback.
 export function simScriptsDir(projectRoot = process.cwd()) {
-  const override = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
-  if (override) {
-    const abs = path.resolve(override)
-    if (!fs.existsSync(abs) || !fs.statSync(abs).isDirectory()) {
-      throw new Error(`HARNESSAMS_SIM_SCRIPTS_DIR is not a directory: ${override}`)
-    }
-    return abs
-  }
-  const { sim_scripts_dir: dir } = resolveWorkspacePathsAt(projectRoot)
+  const dir = resolveScriptsSource(projectRoot)
   if (fs.existsSync(dir) && fs.statSync(dir).isDirectory()) return path.resolve(dir)
-  throw new Error(`no worker scripts root: ${dir} does not exist — fix the worker scripts root in the `
-    + 'project settings table (the Overview settings UI or the harnessams_selfcheck settings argument) '
-    + 'or set HARNESSAMS_SIM_SCRIPTS_DIR')
+  const override = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
+  throw new Error(override
+    ? `HARNESSAMS_SIM_SCRIPTS_DIR is not a directory: ${override}`
+    : `no worker scripts root: ${dir} does not exist — fix the worker scripts root in the `
+      + 'project settings table (the Overview settings UI or the harnessams_selfcheck settings argument) '
+      + 'or set HARNESSAMS_SIM_SCRIPTS_DIR')
 }
 
 // Every Python script under the worker scripts root (relative POSIX paths).
 // Uploaded as a unit so any worker and its shared modules resolve remotely.
+// The tree walk is scriptStage's listPyTree — the single implementation (the
+// lazy healer stages the same tree).
 export function pluginScripts(root = simScriptsDir()) {
-  const out = []
-  const walk = (dir, prefix) => {
-    for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (ent.name === '__pycache__') continue
-      const rel = prefix ? prefix + '/' + ent.name : ent.name
-      const abs = path.join(dir, ent.name)
-      if (ent.isDirectory()) walk(abs, rel)
-      else if (ent.name.endsWith('.py')) out.push({ rel, local: abs })
-    }
-  }
-  walk(root, '')
-  return out.sort((a, b) => a.rel.localeCompare(b.rel))
+  return listPyTree(root)
 }
 
 // The sibling assets bucket: snp_common.py resolves its pure-stdlib fallback
@@ -74,18 +64,9 @@ export function pluginScripts(root = simScriptsDir()) {
 // (.harnessams/scripts + .harnessams/assets) resolve through this one probe,
 // so the upload carries the fallback the remote host needs when numpy is
 // missing (2026-11-24: the live incident had to patch it in by hand).
+// The listing is scriptStage's listAssets — the single implementation.
 export function pluginAssets(root = simScriptsDir()) {
-  const dir = path.join(path.resolve(root), '..', 'assets')
-  let entries
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true })
-  } catch {
-    return []
-  }
-  return entries
-    .filter((e) => e.isFile() && e.name.endsWith('.py'))
-    .map((e) => ({ rel: e.name, local: path.join(dir, e.name) }))
-    .sort((a, b) => a.rel.localeCompare(b.rel))
+  return listAssets(root).files
 }
 
 // Worker scripts root for one submit call. The tool's `sim_scripts_dir`
@@ -105,27 +86,6 @@ export function submitScriptsRoot(simScriptsDirArg, projectRoot) {
   return simScriptsDir(projectRoot)
 }
 
-export function remoteJoin(...parts) {
-  return path.posix.join(...parts)
-}
-
-export function normalizeRemoteRoot(root) {
-  const r = path.posix.normalize(String(root ?? '').replace(/\\/g, '/'))
-  if (!r || r === '.' || !r.startsWith('/')) throw new Error(`remotePath must be absolute: ${root}`)
-  return r.replace(/\/+$/, '') || '/'
-}
-
-export function resolveRemoteDir(remoteRoot, remoteDir) {
-  const root = normalizeRemoteRoot(remoteRoot)
-  if (!remoteDir || typeof remoteDir !== 'string') throw new Error('remote_dir is required')
-  const raw = remoteDir.replace(/\\/g, '/')
-  const candidate = raw.startsWith('/') ? path.posix.normalize(raw) : path.posix.join(root, raw)
-  if (candidate !== root && !candidate.startsWith(root + '/')) {
-    throw new Error(`remote_dir escapes the remote workspace (${root}): ${remoteDir}`)
-  }
-  return candidate
-}
-
 // Bare interpreter defaults — what a worker runs under while the project has
 // no toolchain pin (D-016: settings.remote_python / remote_spectre_cmd hold
 // absolute paths; the pins sit between a per-call argument and these
@@ -133,19 +93,6 @@ export function resolveRemoteDir(remoteRoot, remoteDir) {
 // remote_scripts_dir keys are gone.
 export const DEFAULT_REMOTE_PYTHON = 'python3'
 export const DEFAULT_REMOTE_NODE = 'node'
-
-export function defaultRemoteScriptsDir(remoteRoot) {
-  return remoteJoin(remoteRoot, '.harnessams', 'scripts')
-}
-
-export function sanitizeRel(rel) {
-  const normalized = path.posix.normalize(String(rel ?? '').replace(/\\/g, '/'))
-  if (!normalized || normalized === '.' || normalized.startsWith('/')
-      || normalized === '..' || normalized.startsWith('../')) {
-    throw new Error(`unsafe relative path: ${rel}`)
-  }
-  return normalized
-}
 
 export function collectRunFiles(runDir, files) {
   if (Array.isArray(files) && files.length) {
@@ -424,8 +371,5 @@ export function readJob(runDir) {
 }
 
 export function writeJob(runDir, job) {
-  const finalPath = jobFile(runDir)
-  const tmp = finalPath + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(job, null, 2) + '\n', 'utf-8')
-  fs.renameSync(tmp, finalPath)
+  atomicWriteSync(jobFile(runDir), JSON.stringify(job, null, 2) + '\n')
 }

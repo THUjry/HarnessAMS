@@ -14,11 +14,10 @@ export async function fetchMachines(tools) {
   return r
 }
 
-// Machines for the settings table's dropdown: the full host registry (picking
-// a host is picking its alias; the remote root is a separate per-project
-// setting, not a machine fact).
-export function checkableMachines(machineList) {
-  return (machineList ?? []).map((m) => ({
+// The registry projection shared by both consumers (the settings-table
+// dropdown and the tier-1 machine card): pure facts, the same seven fields.
+function projectMachine(m) {
+  return {
     id: m.id,
     name: m.name,
     host: m.host,
@@ -26,7 +25,14 @@ export function checkableMachines(machineList) {
     username: m.username,
     auth: m.auth,
     keyReady: m.keyReady,
-  }))
+  }
+}
+
+// Machines for the settings table's dropdown: the full host registry (picking
+// a host is picking its alias; the remote root is a separate per-project
+// setting, not a machine fact).
+export function checkableMachines(machineList) {
+  return (machineList ?? []).map(projectMachine)
 }
 
 // Aggregate for the tier-1 machine card: the full host list — pure registry
@@ -39,14 +45,6 @@ export async function remoteMachinesStatus(tools) {
   return {
     installed: true,
     source: channel.source,
-    machines: channel.machines.map((m) => ({
-      id: m.id,
-      name: m.name,
-      host: m.host,
-      port: m.port,
-      username: m.username,
-      auth: m.auth,
-      keyReady: m.keyReady,
-    })),
+    machines: channel.machines.map(projectMachine),
   }
 }

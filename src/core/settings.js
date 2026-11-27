@@ -28,8 +28,9 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
 import { getNodePins, getLocalFacts } from './globalstore.js'
+import { PKG_ROOT } from '../lib/paths.js'
+import { atomicWrite, parseJsonBom } from '../lib/io.js'
 
-const PKG_ROOT = path.resolve(import.meta.dirname ?? '.', '..') // src/
 const STORE_DIR = '.harnessams'
 const CONFIG_FILE = 'workspace_config.json'
 
@@ -214,7 +215,7 @@ function parseConfig(raw) {
 export async function readConfig(workspacePath) {
   let raw = null
   try {
-    raw = JSON.parse(await fsp.readFile(configPath(workspacePath), 'utf8'))
+    raw = parseJsonBom(await fsp.readFile(configPath(workspacePath), 'utf8'))
   } catch (e) {
     if (e.code !== 'ENOENT') throw e
   }
@@ -224,7 +225,7 @@ export async function readConfig(workspacePath) {
 export function readConfigSync(workspacePath) {
   let raw = null
   try {
-    raw = JSON.parse(fs.readFileSync(configPath(workspacePath), 'utf8'))
+    raw = parseJsonBom(fs.readFileSync(configPath(workspacePath), 'utf8'))
   } catch (e) {
     if (e.code !== 'ENOENT') throw e
   }
@@ -429,9 +430,7 @@ export async function initProjectStorage(workspacePath, { settings } = {}) {
     await ensureAgentsMdTemplate(workspacePath, { settings: settings ?? cur.config.settings })
   }
   if (configMissing) {
-    const tmp = finalPath + '.tmp'
-    await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings: cur.config.settings }, null, 2) + '\n', 'utf8')
-    await fsp.rename(tmp, finalPath)
+    await atomicWrite(finalPath, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings: cur.config.settings }, null, 2) + '\n')
   }
   return { fresh }
 }
@@ -451,9 +450,7 @@ export async function writeSettings(workspacePath, settings) {
   if (fresh) await initProjectStorage(workspacePath, { settings })
   const cur = await readConfig(workspacePath)
   await fsp.mkdir(dir, { recursive: true })
-  const tmp = finalPath + '.tmp'
-  await fsp.writeFile(tmp, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings }, null, 2) + '\n', 'utf8')
-  await fsp.rename(tmp, finalPath)
+  await atomicWrite(finalPath, JSON.stringify({ version: 1, workspace: cur.config.workspace, settings }, null, 2) + '\n')
   return settings
 }
 
@@ -471,7 +468,7 @@ export async function declarePlotlyUrl(workspacePath) {
   const file = configPath(workspacePath)
   let raw = null
   try {
-    raw = JSON.parse(await fsp.readFile(file, 'utf8'))
+    raw = parseJsonBom(await fsp.readFile(file, 'utf8'))
   } catch (e) {
     if (e.code !== 'ENOENT') throw e
   }
@@ -486,9 +483,7 @@ export async function declarePlotlyUrl(workspacePath) {
   out.workspace = { ...(wsIn ?? {}), plotly_url: DEFAULT_PLOTLY_URL }
   if (out.settings === undefined) out.settings = {}
   await fsp.mkdir(path.dirname(file), { recursive: true })
-  const tmp = file + '.tmp'
-  await fsp.writeFile(tmp, JSON.stringify(out, null, 2) + '\n', 'utf8')
-  await fsp.rename(tmp, file)
+  await atomicWrite(file, JSON.stringify(out, null, 2) + '\n')
   return { added: true, path: file }
 }
 

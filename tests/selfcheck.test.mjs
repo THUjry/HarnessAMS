@@ -1565,7 +1565,14 @@ test('flow: a green remote run auto-pins the measured toolchain and remembers th
     const pinned = (await readSettings(f.projectPath)).settings
     assert.equal(pinned.remote_python, PIN_PY)
     assert.equal(pinned.remote_spectre_cmd, PIN_SPECTRE)
-    const mem = await getNodePins('node1')
+    // the node memory lands AFTER the toolchain_pinned flag flips (the
+    // finalize tail's own order) — poll it, same discipline as the flag
+    let mem = null
+    for (let i = 0; i < 50 && !mem; i++) {
+      mem = await getNodePins('node1')
+      if (!mem) await new Promise((res) => setTimeout(res, 100))
+    }
+    assert.ok(mem, 'the node memory must land at finalize')
     assert.equal(mem.remote_python, PIN_PY)
     assert.equal(mem.remote_spectre_cmd, PIN_SPECTRE)
     // the yaml sync is the tail's tail — it lands after the pins; poll for it

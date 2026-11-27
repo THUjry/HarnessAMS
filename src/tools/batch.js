@@ -31,9 +31,10 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
-import { readJsonIfExists, resolveDir } from '../channel/py.js'
-import { callTool, downloadFile, execRemote, resolveMachine, shq, uploadFile } from '../channel/remote.js'
-import { execLocal, localCopy } from '../channel/localchannel.js'
+import { resolveDir } from '../channel/py.js'
+import { callTool, resolveMachine, shq, buildChannel } from '../channel/remote.js'
+import { readJsonTolerant } from '../lib/io.js'
+import { defaultRemoteScriptsDir, remoteJoin, resolveRemoteDir, sanitizeRel } from '../lib/remotepath.js'
 import { readRunProgress, totalFromConfig } from '../core/progress_files.js'
 import { normalizePin } from '../core/settings.js'
 import { overlaySettingsAt } from '../core/reconcile.js'
@@ -42,9 +43,9 @@ import { effectiveSessionId } from '../subagent.js'
 import {
   DEFAULT_REMOTE_PYTHON, TERMINAL_POLL_STATES, buildSshCommand, buildSubmitCommand,
   classifyBjobsState, collectRunFiles,
-  defaultRemoteScriptsDir, nextSimDir, parseJobId, parsePollOutput, pluginAssets, pluginScripts,
-  pollCommand, postSubmitCommand, readJob, remoteJoin,
-  resolveRemoteDir, sanitizeRel, submitScriptsRoot, templateUploadPlan, writeJob,
+  nextSimDir, parseJobId, parsePollOutput, pluginAssets, pluginScripts,
+  pollCommand, postSubmitCommand, readJob,
+  submitScriptsRoot, templateUploadPlan, writeJob,
 } from '../core/batch.js'
 
 // The fixed light-result set a terminal poll pulls straight down (2026-11-23:
@@ -68,6 +69,24 @@ function sleepAbortable(ms, signal) {
     const onAbort = () => { clearTimeout(t); resolve() }
     signal.addEventListener('abort', onAbort, { once: true })
   })
+}
+
+// The wait_sec loop shared by the local and remote poll branches (D-008):
+// re-tick every WAIT_GAP_MS until a terminal state or the deadline, the LAST
+// frame winning; a D-029 abort wakes the gaps at once (polling is read-only —
+// nothing to clean up). `waitSec` 0 keeps the single-snapshot contract.
+async function pollUntilTerminal({ waitSec, signal, isTerminal, tick }) {
+  const deadline = Date.now() + waitSec * 1000
+  let frame
+  for (;;) {
+    frame = await tick()
+    if (!waitSec || isTerminal(frame)) break
+    const remain = deadline - Date.now()
+    if (remain <= 0) break
+    await sleepAbortable(Math.min(WAIT_GAP_MS, remain), signal)
+    if (signal?.aborted) break
+  }
+  return frame
 }
 
 // The session-level scan-size ceiling (D-019): the calling session's
@@ -428,22 +447,11 @@ export function batchTools(ctx) {
         } else {
           target = await resolveMachine(ctx, args.machine_id || settings.machine_id, remoteRootArg)
         }
-        const channel = {
-          alias: target.alias,
-          // D-029: turnSignal rides every call — exec-shaped calls get the
-          // dsh-ssh KILL+close path (or the ctx.shell kill in-cluster) plus
-          // the callTool race; transfers get the race (sftp has no abort
-          // path — the orphaned upload is harmless, re-staging is idempotent).
-          exec: sshExec
-            ? (command, opts) => execRemote(ctx, target.alias, command, { ...opts, signal: turnSignal })
-            : (command, opts) => execLocal(ctx, command, { ...opts, signal: turnSignal }),
-          upload: !inCluster
-            ? (localPath, remotePath) => uploadFile(ctx, target.alias, localPath, remotePath, { signal: turnSignal })
-            : localCopy,
-          download: !inCluster
-            ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath, { signal: turnSignal })
-            : localCopy,
-        }
+        // D-029: turnSignal rides every channel call — exec-shaped calls get
+        // the dsh-ssh KILL+close path (or the ctx.shell kill in-cluster) plus
+        // the callTool race; transfers get the race (sftp has no abort path —
+        // the orphaned upload is harmless, re-staging is idempotent).
+        const channel = buildChannel(ctx, { alias: target.alias, inCluster, signal: turnSignal })
         if (sshExec && Array.isArray(target.machine?.proxyJump) && target.machine.proxyJump.length === 0) {
           // 2026-11-26 ruling: a dsh-ssh entry without ProxyJump (the second
           // hop) still runs — DIRECT, never blocked — but the submit result
@@ -511,7 +519,7 @@ export function batchTools(ctx) {
             + '(pass overwrite=true only if replacing that batch is intended)')
         }
 
-        const sweepConfig = readJsonIfExists(path.join(runDir, 'sweep_config.json'))
+        const sweepConfig = readJsonTolerant(path.join(runDir, 'sweep_config.json'))
         const files = templateUploadPlan(runDir,
           collectRunFiles(runDir, args.files), sweepConfig)
 
@@ -758,20 +766,15 @@ export function batchTools(ctx) {
         // call is the window where the session card live-updates (the remote
         // progress source polls at 5 s client-side).
         const waitSec = Math.max(0, Math.min(Number(args.wait_sec) || 0, 600))
-        const deadline = Date.now() + waitSec * 1000
         if (scheduler === 'local') {
           // Local submission: the run directory IS the truth — read the shared
           // ladder (sweep_progress.json -> .worker_started -> .batch_job.json
           // -> sweep_config.json), same wait loop, no ssh.
-          let frame
-          for (;;) {
-            frame = localPollFrame(runDir)
-            if (!waitSec || TERMINAL_POLL_STATES.has(frame.state)) break
-            const remain = deadline - Date.now()
-            if (remain <= 0) break
-            await sleepAbortable(Math.min(WAIT_GAP_MS, remain), turnSignal)
-            if (turnSignal?.aborted) break
-          }
+          const frame = await pollUntilTerminal({
+            waitSec, signal: turnSignal,
+            isTerminal: (f) => TERMINAL_POLL_STATES.has(f.state),
+            tick: () => localPollFrame(runDir),
+          })
           return {
             ok: true,
             job_id: jobId,
@@ -802,31 +805,22 @@ export function batchTools(ctx) {
           const machineId = args.machine_id || job?.machine_id || undefined
           target = await resolveMachine(ctx, machineId, args.remote_root || job?.remote_root)
         }
-        const channel = {
-          // D-029: turnSignal rides the poll execs and the terminal fetch —
-          // read-only calls, so an abort settles at once and leaves nothing.
-          exec: sshExec
-            ? (cmd, opts) => execRemote(ctx, target.alias, cmd, { ...opts, signal: turnSignal })
-            : (cmd, opts) => execLocal(ctx, cmd, { ...opts, signal: turnSignal }),
-          download: !inCluster
-            ? (remotePath, localPath) => downloadFile(ctx, target.alias, remotePath, localPath, { signal: turnSignal })
-            : localCopy,
-        }
+        // D-029: turnSignal rides the poll execs and the terminal fetch —
+        // read-only calls, so an abort settles at once and leaves nothing.
+        const channel = buildChannel(ctx, { alias: target.alias, inCluster, signal: turnSignal })
         const remoteDir = resolveRemoteDir(target.remoteRoot, args.remote_dir || job?.remote_dir)
         const command = pollCommand({ remoteDir, jobId, scheduler })
-        let parsed
         let stdout = ''
-        for (;;) {
-          const r = await channel.exec(command, { timeoutMs: 30_000 })
-          if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
-          parsed = parsePollOutput(r.stdout, { total: job?.total_points })
-          stdout = r.stdout || ''
-          if (!waitSec || TERMINAL_POLL_STATES.has(parsed.state)) break
-          const remain = deadline - Date.now()
-          if (remain <= 0) break
-          await sleepAbortable(Math.min(WAIT_GAP_MS, remain), turnSignal)
-          if (turnSignal?.aborted) break
-        }
+        const parsed = await pollUntilTerminal({
+          waitSec, signal: turnSignal,
+          isTerminal: (p) => TERMINAL_POLL_STATES.has(p.state),
+          tick: async () => {
+            const r = await channel.exec(command, { timeoutMs: 30_000 })
+            if (!r.ok) throw new Error(`poll failed: ${(r.stderr || r.stdout || r.text).slice(0, 800)}`)
+            stdout = r.stdout || ''
+            return parsePollOutput(r.stdout, { total: job?.total_points })
+          },
+        })
         // Terminal state: absorb the old fetch — pull the light result files
         // straight down per file (existence probed once, no archive). The
         // probe must tolerate MISSING files: ls exits 2 when any listed name

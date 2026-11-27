@@ -183,6 +183,17 @@ function sameOriginError(req) {
   return null
 }
 
+// The dsh-ssh remote-browse family's error -> status mapping (shared by the
+// mkdir and listing routes): the funnel's thrown shapes map onto 503/404, the
+// module's own name/dir validation prefixes onto 400, anything else 502.
+function remoteErrorStatus(msg) {
+  if (/^name |^dir /.test(msg)) return 400
+  if (/dsh-ssh hosts unavailable/.test(msg)) return 503
+  if (/no such dsh-ssh host/.test(msg)) return 404
+  if (/remote_root is required/.test(msg)) return 409
+  return 502
+}
+
 async function handle(req, res, ctx) {
   const url = new URL(req.url ?? '/', 'http://127.0.0.1')
   const route = url.pathname.replace(/^\/harnessams/, '') || '/'
@@ -343,11 +354,7 @@ async function handle(req, res, ctx) {
         json(200, { ok: true, path: r.path })
       } catch (e) {
         const msg = String(e?.message ?? e)
-        const code = /^name |^dir /.test(msg) ? 400
-          : /dsh-ssh hosts unavailable/.test(msg) ? 503
-          : /no such dsh-ssh host/.test(msg) ? 404
-          : 502
-        json(code, { error: msg })
+        json(remoteErrorStatus(msg), { error: msg })
       }
       return
     }
@@ -505,12 +512,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, ...r })
     } catch (e) {
       const msg = String(e?.message ?? e)
-      const code = /dsh-ssh hosts unavailable/.test(msg) ? 503
-        : /no such dsh-ssh host/.test(msg) ? 404
-        : /remote_root is required/.test(msg) ? 409
-        : /^dir /.test(msg) ? 400
-        : 502
-      json(code, { error: msg })
+      json(remoteErrorStatus(msg), { error: msg })
     }
     return
   }

@@ -48,14 +48,13 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
-import { fileURLToPath } from 'node:url'
 import { runPython } from '../channel/py.js'
-import { callTool, execRemote, uploadFile, downloadFile, shq } from '../channel/remote.js'
-import { execLocal, localCopy } from '../channel/localchannel.js'
-import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, remoteJoin, resolveRemoteDir, simScriptsDir } from './batch.js'
+import { callTool, shq, buildChannel, lookupMachine } from '../channel/remote.js'
+import { DEFAULT_REMOTE_NODE, DEFAULT_REMOTE_PYTHON, readJob, simScriptsDir } from './batch.js'
+import { remoteJoin, resolveRemoteDir } from '../lib/remotepath.js'
+import { execFileAsync, atomicWrite } from '../lib/io.js'
+import { PKG_ROOT } from '../lib/paths.js'
 import { healFromGlobalMemory, readSettings, resolveScriptsSource, defaultSimScriptsDir, validateSettings, writeSettings, PIN_KEYS, normalizePin, NUMPY_STATES } from './settings.js'
 import { reconcileSettings } from './reconcile.js'
 import { updateNodePins, updateLocalFacts } from './globalstore.js'
@@ -63,10 +62,7 @@ import { localEnvFacts } from './checks.js'
 import { ensureProjectScripts, genSelfcheckRcPath, isProjectLocalScriptsRoot } from './scriptStage.js'
 import { syncAgentsMd } from './agentsmd.js'
 import { sanitizeFailed, createDiagnosisSession } from './diagnose.js'
-import { fetchMachines } from '../server/machines.js'
 
-const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..') // src/
-const execFileAsync = promisify(execFile)
 export const SELFCHECK_ASSETS = path.join(PKG_ROOT, 'selfcheck')
 export const GOLDEN_DIR = path.join(SELFCHECK_ASSETS, 'golden')
 export const VERIFY_ASSETS = [
@@ -152,9 +148,7 @@ function runView(run) {
 
 async function doPersist(run) {
   try {
-    const tmp = path.join(run.runDir, 'selfcheck_run.json.tmp')
-    await fsp.writeFile(tmp, JSON.stringify(runView(run), null, 2) + '\n', 'utf8')
-    await fsp.rename(tmp, path.join(run.runDir, 'selfcheck_run.json'))
+    await atomicWrite(path.join(run.runDir, 'selfcheck_run.json'), JSON.stringify(runView(run), null, 2) + '\n')
   } catch { /* the in-memory copy keeps the API alive; disk is durability only */ }
 }
 
@@ -346,13 +340,17 @@ export async function startSelfcheck(ctx, { sessionId, project, lang }) {
     }
     // D-002: in-cluster LSF needs no ssh hop — no machine. Everything else
     // (ssh scheduler, out-of-cluster) targets the configured dsh-ssh alias.
+    // The registry lookup is the shared lookupMachine (channel/remote.js);
+    // its thrown error shapes map onto this start result's status codes.
     const needMachine = !inCluster || settings.scheduler === 'ssh'
     if (needMachine) {
-      const list = await fetchMachines(ctx.tools)
-      if (!list.ok) return { error: `dsh-ssh hosts unavailable: ${list.reason}`, code: 503 }
-      machine = list.machines.find((m) => m.id === settings.machine_id || m.name === settings.machine_id) || null
-      if (!machine) return { error: `no such dsh-ssh host: ${settings.machine_id}`, code: 404 }
-      alias = machine.id
+      try {
+        machine = await lookupMachine(ctx, settings.machine_id)
+        alias = machine.id
+      } catch (e) {
+        const msg = String(e?.message ?? e)
+        return { error: msg, code: msg.startsWith('dsh-ssh hosts unavailable') ? 503 : 404 }
+      }
     }
     try {
       remoteBase = resolveRemoteDir(settings.remote_root, settings.selfcheck_remote_dir)
@@ -744,6 +742,33 @@ function skipRestForUnprepared(run, mode, sim, reason) {
   }
 }
 
+// The batch_poll wait loop shared by the local and remote chains: poll every
+// POLL_INTERVAL_MS until a terminal state, the poll budget runs out or the
+// poll itself errors; the step row shows live counts (persisted for the
+// sidebar's refresh) and a user stop lands within one poll interval.
+async function pollBatchToTerminal(run, ctx, { runDir, machineId, label, stepRef }) {
+  const budget = Date.now() + POLL_BUDGET_MS
+  let state = null
+  let last = null
+  while (Date.now() < budget) {
+    checkCancelled(run)
+    const args = { run_dir: runDir, project: run._priv.project.path }
+    if (machineId) args.machine_id = machineId
+    last = await callTool(ctx, 'batch_poll', args,
+      { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
+    const parsed = extractStateJson(last.text)
+    state = parsed?.state ?? null
+    if (stepRef) {
+      stepRef.result = `${label}: ${state ?? 'unknown'}`
+        + (parsed?.completed != null ? ` (${parsed.completed}/${parsed?.total ?? '?'})` : '')
+      void persistRun(run)
+    }
+    if (state === 'completed' || state === 'failed' || last.isError) break
+    await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
+  }
+  return { state, last }
+}
+
 // ---------------------------------------------------------------------------
 // Local chains
 // ---------------------------------------------------------------------------
@@ -764,23 +789,7 @@ async function localChain(run, sim) {
         }
         // poll the local ladder until the worker settles (cancellation lands
         // within one poll interval; live progress updates the step row)
-        let state = null
-        let last = null
-        const budget = Date.now() + POLL_BUDGET_MS
-        while (Date.now() < budget) {
-          checkCancelled(run)
-          last = await callTool(ctx, 'batch_poll', { run_dir: runDir, project: run._priv.project.path },
-            { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
-          const parsed = extractStateJson(last.text)
-          state = parsed?.state ?? null
-          if (stepRef) {
-            stepRef.result = `local ${topo}: ${state ?? 'unknown'}`
-              + (parsed?.completed != null ? ` (${parsed.completed}/${parsed?.total ?? '?'})` : '')
-            void persistRun(run)
-          }
-          if (state === 'completed' || state === 'failed' || last.isError) break
-          await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
-        }
+        const { state, last } = await pollBatchToTerminal(run, ctx, { runDir, label: `local ${topo}`, stepRef })
         const prog = await fsp.readFile(path.join(runDir, 'sweep_progress.json'), 'utf8')
           .then((t) => JSON.parse(t)).catch(() => null)
         // toolchain telemetry (D-016/D-017): the local worker records its own
@@ -957,34 +966,22 @@ async function waitForWorkerProgress(run, step, topo, staging) {
   return { ok: false, detail: `${topo}: the worker never wrote a progress marker under ${dir} within ${Math.round(POLL_BUDGET_MS / 60_000)} min — inspect the run dir directly (tail ssh_worker.log / errlog.txt; the gate watches sweep_progress.json and .hams_ssh_done)` }
 }
 
-// The remote chains' exec/transfer channel. Exec follows the alias: over
-// dsh-ssh when one is configured (out-of-cluster, or in-cluster scheduler=ssh
-// — the run itself crosses ssh), else the official local ctx.shell seam
-// (in-cluster LSF). Transfers cross ssh ONLY out-of-cluster (D-002): an
-// in-cluster run stages and fetches with plain local copies on the shared
-// filesystem, whatever the scheduler. Same value shapes either way, so the
-// chains below stay channel-agnostic. The run's cancel controller signal
-// rides every call (D-029 discipline): the self-check stop then settles
-// in-flight remote execs at once (dsh-ssh KILL + close / ctx.shell kill)
-// instead of waiting out their budgets — previously the signal only reached
-// the callTool-invoked batch tools, not these direct channel calls.
+// The remote chains' exec/transfer channel — the shared channel matrix
+// builder (channel/remote.js buildChannel): exec follows the alias (over
+// dsh-ssh when one is configured, else the official local ctx.shell seam),
+// transfers cross ssh only out-of-cluster (D-002). The run's cancel
+// controller signal rides every call (D-029 discipline): the self-check stop
+// then settles in-flight remote execs at once (dsh-ssh KILL + close /
+// ctx.shell kill) instead of waiting out their budgets — previously the
+// signal only reached the callTool-invoked batch tools, not these direct
+// channel calls.
 function runChannel(run, { withSignal = true } = {}) {
   const { ctx, alias, inCluster } = run._priv
   // Cancel cleanup (killSubmittedLsfJobs) runs AFTER the controller aborted —
   // carrying the dead signal there would abort the bkill before dispatch, so
   // that path opts out (withSignal: false): cleanup must outlive the cancel.
   const signal = withSignal ? (run._priv.cancel?.controller?.signal ?? null) : null
-  return {
-    exec: alias
-      ? (cmd, opts) => execRemote(ctx, alias, cmd, { ...opts, signal })
-      : (cmd, opts) => execLocal(ctx, cmd, { ...opts, signal }),
-    upload: !inCluster && alias
-      ? (localPath, remotePath) => uploadFile(ctx, alias, localPath, remotePath, { signal })
-      : localCopy,
-    download: !inCluster && alias
-      ? (remotePath, localPath) => downloadFile(ctx, alias, remotePath, localPath, { signal })
-      : localCopy,
-  }
+  return buildChannel(ctx, { alias, inCluster, signal })
 }
 
 async function remoteSpectreChain(run) {
@@ -1063,26 +1060,10 @@ async function remoteSpectreChain(run) {
           continue
         }
       }
-      const budget = Date.now() + POLL_BUDGET_MS
-      let state = null
-      let last = null
-      while (Date.now() < budget) {
-        checkCancelled(run) // user stop lands within one poll interval (5 s)
-        const r = await callTool(ctx, 'batch_poll', { run_dir: staging, machine_id: settings.machine_id, project: run._priv.project.path },
-          { timeoutMs: 60_000, signal: run._priv.cancel.controller.signal })
-        last = r
-        const parsed = extractStateJson(r.text)
-        state = parsed?.state ?? null
-        // live progress: the step row the sidebar polls every 3 s shows the
-        // latest counts instead of sitting silent through the whole wait
-        if (step) {
-          step.result = `polling ${topo}: ${state ?? 'unknown'}`
-            + (parsed?.completed != null ? ` (${parsed.completed}/${parsed?.total ?? '?'})` : '')
-          void persistRun(run)
-        }
-        if (state === 'completed' || state === 'failed' || r.isError) break
-        await new Promise((res) => setTimeout(res, POLL_INTERVAL_MS))
-      }
+      // poll to a terminal state exactly like the local chain (the shared
+      // loop: live counts on the step row, a user stop within one interval)
+      const { state, last } = await pollBatchToTerminal(run, ctx,
+        { runDir: staging, machineId: settings.machine_id, label: `polling ${topo}`, stepRef: step })
       const prog = await fsp.readFile(path.join(staging, 'sweep_progress.json'), 'utf8')
         .then((t) => JSON.parse(t)).catch(() => null)
       // toolchain telemetry (D-016/D-017): the worker records the interpreter

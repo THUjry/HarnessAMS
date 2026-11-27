@@ -6,11 +6,8 @@
 import fsp from 'node:fs/promises'
 import path from 'node:path'
 import os from 'node:os'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { resolveScriptsSource } from './settings.js'
-
-const execFileAsync = promisify(execFile)
+import { execFileAsync } from '../lib/io.js'
 
 // One python probe: version + absolute executable + the numpy tri-state in a
 // single call (sys.executable is the interpreter's own path — no PATH

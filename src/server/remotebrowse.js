@@ -10,7 +10,7 @@
 // 2026-11-26: the listing carries each directory's mtime (the picker's age
 // column) and the browser gained a create side — remoteMkdir, fenced to one
 // validated printable-ASCII segment under the currently listed directory.
-import { execRemote, shq, resolveMachine, listMachines } from '../channel/remote.js'
+import { execRemote, shq, resolveMachine, lookupMachine } from '../channel/remote.js'
 
 const MAX_ENTRIES = 200
 
@@ -62,13 +62,10 @@ export function validateDirName(name) {
 
 // Resolve a machineId to an alias through the dsh-ssh registry alone — used
 // by the no-root bootstrap and by remoteMkdir, both of which know their
-// target path explicitly and need no root fence.
+// target path explicitly and need no root fence. The shared registry lookup
+// (channel/remote.js lookupMachine) throws the same error shapes everywhere.
 async function aliasFromRegistry(ctx, machineId) {
-  const list = await listMachines(ctx)
-  if (!list.ok) throw new Error(`dsh-ssh hosts unavailable: ${list.reason}`)
-  const machine = list.machines.find((m) => m.id === machineId || m.name === machineId)
-  if (!machine) throw new Error(`no such dsh-ssh host: ${machineId} (known: ${list.machines.map((m) => m.id).join(', ') || 'none'})`)
-  return machine.id
+  return (await lookupMachine(ctx, machineId)).id
 }
 
 // Shared dir validation for both halves of the browser: absolute, no "..",

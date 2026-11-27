@@ -23,7 +23,8 @@ import path from 'node:path'
 import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { syncAgentsMd } from '../src/core/agentsmd.js'
-import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginAssets, pluginScripts, resolveRemoteDir, sanitizeRel, simScriptsDir } from '../src/core/batch.js'
+import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginAssets, pluginScripts, simScriptsDir } from '../src/core/batch.js'
+import { resolveRemoteDir, sanitizeRel } from '../src/lib/remotepath.js'
 import { callTool } from '../src/channel/remote.js'
 
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR

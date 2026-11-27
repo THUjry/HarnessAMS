@@ -9,6 +9,7 @@ import path from 'node:path'
 import { resolveWorkspacePathsAt } from '../core/settings.js'
 import { resolveProjectTool } from '../core/project.js'
 import { effectiveSessionId } from '../subagent.js'
+import { atomicWriteSync } from '../lib/io.js'
 
 // Trash root: the owning project's workspace_config.json workspace.trash_dir
 // (default .harnessams/trash under the project root). `projectRoot` is the
@@ -34,13 +35,6 @@ function movePath(src, dst) {
     fs.cpSync(src, dst, { recursive: true, errorOnExist: true })
     fs.rmSync(src, { recursive: true, force: true })
   }
-}
-
-function writeMetaAtomic(entryDir, meta) {
-  const final = path.join(entryDir, '.trash_meta.json')
-  const tmp = final + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(meta, null, 2) + '\n', 'utf8')
-  fs.renameSync(tmp, final)
 }
 
 function treeSize(p) {
@@ -105,7 +99,7 @@ export function trashPaths(paths, opts = {}) {
     fs.mkdirSync(entry)
     try {
       movePath(abs, path.join(entry, base))
-      writeMetaAtomic(entry, { original_path: abs, trashed_at: stamp })
+      atomicWriteSync(path.join(entry, '.trash_meta.json'), JSON.stringify({ original_path: abs, trashed_at: stamp }, null, 2) + '\n')
     } catch (e) {
       try { fs.rmSync(entry, { recursive: true, force: true }) } catch { /* best effort */ }
       throw e

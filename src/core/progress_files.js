@@ -5,17 +5,7 @@
 // Pure file reads — nothing here starts or stops a simulation.
 import fs from 'node:fs'
 import path from 'node:path'
-
-// Tolerant JSON read: strip a UTF-8 BOM before parsing. The worker writes these
-// files atomically without a BOM, but hand-copied fixtures may carry one.
-function readJsonTolerant(file) {
-  try {
-    const text = fs.readFileSync(file, 'utf8')
-    return JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text)
-  } catch {
-    return null
-  }
-}
+import { readJsonTolerant } from '../lib/io.js'
 
 // Planned point count from sweep_config.json — the same cross-product rule as
 // the worker's combination generator (zip takes the first list's length).

@@ -13,6 +13,7 @@
 // files are ignored on read.
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { parseJsonBom } from '../lib/io.js'
 
 const PARAMS_DIR = '.harnessams'
 const PARAMS_FILE = 'check_params.json'
@@ -62,11 +63,12 @@ function applyLayer(params, raw) {
 }
 
 // Read + normalize. A missing file is the defaults, not an error (same contract
-// as readSettings); an off-spec file falls back per-key.
+// as readSettings); an off-spec file falls back per-key. BOM-tolerant (a
+// zh-CN Windows hand-edit must not brick the fallback chain).
 export async function readCheckParams(workspacePath) {
   let raw = null
   try {
-    raw = JSON.parse(await fsp.readFile(checkParamsPath(workspacePath), 'utf8'))
+    raw = parseJsonBom(await fsp.readFile(checkParamsPath(workspacePath), 'utf8'))
   } catch (e) {
     if (e.code !== 'ENOENT') throw e
   }

@@ -23,8 +23,8 @@
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
 import path from 'node:path'
+import { PKG_ROOT } from '../lib/paths.js'
 
-const PKG_ROOT = path.resolve(import.meta.dirname ?? '.', '..') // src/
 export const GEN_SELFCHECK_RC = 'gen_selfcheck_rc.py'
 const GEN_SRC = path.join(PKG_ROOT, 'selfcheck', 'script', 'analysis', GEN_SELFCHECK_RC)
 
@@ -35,7 +35,9 @@ export function genSelfcheckRcPath() {
   return GEN_SRC
 }
 
-function listPyTree(root) {
+// The python tree walk — the single implementation (the batch channel's
+// pluginScripts uploads the same tree this module stages).
+export function listPyTree(root) {
   const out = []
   const walk = (dir, prefix) => {
     for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -50,7 +52,9 @@ function listPyTree(root) {
   return out.sort((a, b) => a.rel.localeCompare(b.rel))
 }
 
-function listAssets(srcRoot) {
+// The sibling assets listing — the single implementation (the batch channel's
+// pluginAssets uploads the same bucket this module stages).
+export function listAssets(srcRoot) {
   // sibling assets/ of the scripts root (see the header comment)
   const dir = path.join(path.resolve(srcRoot), '..', 'assets')
   let entries

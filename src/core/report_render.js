@@ -16,6 +16,7 @@
 // manifest is newest-first (natural id order).
 import fs from 'node:fs'
 import path from 'node:path'
+import { readJsonBom } from '../lib/io.js'
 
 const PLOTLY_CDN = 'https://cdn.plot.ly/plotly-3.0.1.min.js'
 // The plugin server's own route to the SAME packaged copy (whitelist lookup,
@@ -25,10 +26,8 @@ const PLOTLY_CDN = 'https://cdn.plot.ly/plotly-3.0.1.min.js'
 // copying; from a file:// document it simply fails and the chain moves on.
 const PLOTLY_ROUTE = '/harnessams/assets/plotly.min.js'
 
-// JSON read tolerating a UTF-8 BOM (zh-CN Windows editors add them).
-export function readJsonBom(file) {
-  return JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''))
-}
+// JSON reads tolerating a UTF-8 BOM come from lib/io.js (the single
+// implementation — gen_report's fail-loud spec reads use the same helper).
 
 // Server-side HTML text escaping: names go into <title>/<h1> text and the
 // inline MANIFEST — escaping HTML specials (quotes included) means they can
@@ -604,6 +603,31 @@ function packagedPlotly() {
   return null
 }
 
+// The plotly layout at a KNOWN project root — the cfg -> target -> seed
+// derivation shared by resolvePlotlySrc and seedProjectPlotly (the single
+// implementation): the project's default copy target, the plotly_url target
+// (an http(s) expert override or a custom local one), and the seed source
+// (plotly_asset expert override, else the packaged copy). Pure derivation —
+// no I/O side effects. Null when the config root is absent.
+function plotlyLayout(configRoot) {
+  if (!configRoot) return null
+  const cfg = readPlotlyConfig(configRoot)
+  const url = cfg?.plotly_url
+  const projectCopy = path.join(configRoot, '.harnessams', 'assets', 'plotly.min.js')
+  let target = projectCopy
+  if (url) {
+    const norm = url.replace(/\\/g, '/')
+    target = path.isAbsolute(norm) ? norm : path.resolve(configRoot, norm)
+  }
+  let seed = null
+  if (cfg?.plotly_asset) {
+    const a = cfg.plotly_asset.replace(/\\/g, '/')
+    seed = path.isAbsolute(a) ? a : path.resolve(configRoot, a)
+  }
+  if (!seed || !isFileLoose(seed)) seed = packagedPlotly()
+  return { cfg, url, projectCopy, target, isDefault: path.resolve(target) === path.resolve(projectCopy), seed }
+}
+
 // Resolve the report's plotly chain (user ruling 2026-11-26, three steps —
 // supersedes the D-021 two-step "seed at generation" flow): `outDir` anchors
 // the relative src of the project-copy step (the report's own directory — the
@@ -628,26 +652,15 @@ function packagedPlotly() {
 // yet, the chain handles that); localFile is a local plotly.min.js for the
 // PNG exporter (an existing project copy, else the packaged copy).
 export function resolvePlotlySrc(outDir, configRoot) {
-  const cfg = readPlotlyConfig(configRoot)
-  const url = cfg?.plotly_url
+  const layout = plotlyLayout(configRoot)
+  const url = layout?.url
   if (url && /^https?:\/\//i.test(url)) return { src: url, localSrc: null, localFile: null }
-  if (!configRoot) return { src: PLOTLY_ROUTE, localSrc: null, localFile: null }
-  const projectCopy = path.join(configRoot, '.harnessams', 'assets', 'plotly.min.js')
-  let target = projectCopy
-  if (url) {
-    const norm = url.replace(/\\/g, '/')
-    target = path.isAbsolute(norm) ? norm : path.resolve(configRoot, norm)
-  }
-  if (path.resolve(target) === path.resolve(projectCopy)) {
+  if (!layout) return { src: PLOTLY_ROUTE, localSrc: null, localFile: null }
+  const { projectCopy, target, isDefault, seed } = layout
+  if (isDefault) {
     // DEFAULT target: the route serves the packaged copy (step 2, the src);
     // the project copy (step 1) may not exist yet — it is seeded on demand by
     // the open-outside-sidebar path. No I/O side effects here.
-    let seed = null
-    if (cfg?.plotly_asset) {
-      const a = cfg.plotly_asset.replace(/\\/g, '/')
-      seed = path.isAbsolute(a) ? a : path.resolve(configRoot, a)
-    }
-    if (!seed || !isFileLoose(seed)) seed = packagedPlotly()
     const localFile = [projectCopy, seed].find(isFileLoose) ?? null
     const rel = path.relative(outDir, projectCopy)
     const localSrc = path.isAbsolute(rel) ? null : rel.replace(/\\/g, '/')
@@ -677,23 +690,11 @@ export function resolvePlotlySrc(outDir, configRoot) {
 // route then declares plotly_url in workspace_config.json); refusal paths
 // omit the flag.
 export function seedProjectPlotly(configRoot) {
-  if (!configRoot) return { seeded: false, reason: 'no project root' }
-  const cfg = readPlotlyConfig(configRoot)
-  const url = cfg?.plotly_url
+  const layout = plotlyLayout(configRoot)
+  if (!layout) return { seeded: false, reason: 'no project root' }
+  const { url, target, isDefault, seed } = layout
   if (url && /^https?:\/\//i.test(url)) return { seeded: false, reason: 'plotly_url is an http(s) source' }
-  const projectCopy = path.join(configRoot, '.harnessams', 'assets', 'plotly.min.js')
-  let target = projectCopy
-  if (url) {
-    const norm = url.replace(/\\/g, '/')
-    target = path.isAbsolute(norm) ? norm : path.resolve(configRoot, norm)
-  }
-  if (path.resolve(target) !== path.resolve(projectCopy)) return { seeded: false, reason: 'custom plotly_url target' }
-  let seed = null
-  if (cfg?.plotly_asset) {
-    const a = cfg.plotly_asset.replace(/\\/g, '/')
-    seed = path.isAbsolute(a) ? a : path.resolve(configRoot, a)
-  }
-  if (!seed || !isFileLoose(seed)) seed = packagedPlotly()
+  if (!isDefault) return { seeded: false, reason: 'custom plotly_url target' }
   if (isFileLoose(target)) {
     // the copy already exists: a size match is a no-op, a mismatch refreshes
     // (plotly version bump); present: true either way — the route declares it

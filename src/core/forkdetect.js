@@ -14,8 +14,8 @@
 // flow — a session that cannot be proven forked simply starts empty.
 import fs from 'node:fs'
 import path from 'node:path'
-import os from 'node:os'
 import { zstdDecompressSync } from 'node:zlib'
+import { dshHome as resolveDshHome } from '../lib/paths.js'
 
 const SID_RE = /^[\w-]{1,128}$/
 
@@ -38,7 +38,7 @@ function sessionLogPath(dshHome, sessionId) {
 // called at most once per session (while it has no sessions.json entry yet).
 export function isForkSession(sessionId, dshHome) {
   if (typeof sessionId !== 'string' || !SID_RE.test(sessionId)) return false
-  const home = dshHome || process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
+  const home = dshHome || resolveDshHome()
   const log = sessionLogPath(home, sessionId)
   if (!log) return false
   let text

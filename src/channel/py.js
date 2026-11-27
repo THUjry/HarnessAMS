@@ -4,18 +4,13 @@
 // pipeline is pure JS (tools/gen_report.js) and trash is a JS module
 // (trash.js). The simulator workers live in the SmartAnaSim package (see
 // batch.js for the upload root).
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
-import { fileURLToPath } from 'node:url'
 import fs from 'node:fs'
 import path from 'node:path'
+import { PKG_ROOT } from '../lib/paths.js'
+import { execFileAsync } from '../lib/io.js'
 
-const execFileAsync = promisify(execFile)
-
-// Package root is this file's directory's parent (src/ IS the npm package root
-// in this plugin, unlike SmartAnaSim whose package root sits above src/; this
-// module lives one level down, in channel/).
-export const PKG_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
+// Package root is the lib/paths.js PKG_ROOT (src/ IS the npm package root in
+// this plugin, unlike SmartAnaSim whose package root sits above src/).
 export const SCRIPTS_DIR = path.join(PKG_ROOT, 'scripts')
 
 export function scriptPath(relPath) {
@@ -45,14 +40,6 @@ export async function runPython(scriptRel, args, timeoutMs = 900_000, options = 
     env: { ...process.env, PYTHONUTF8: '1', ...extraEnv },
     ...rest,
   })
-}
-
-export function readJsonIfExists(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'))
-  } catch {
-    return null
-  }
 }
 
 export function resolveDir(dir) {
