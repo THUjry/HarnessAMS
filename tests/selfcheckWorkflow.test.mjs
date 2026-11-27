@@ -36,52 +36,37 @@ test('workflowTable: five rows, three columns, header shape', () => {
   assert.ok(t.includes('| gen_sweep_report |'))
 })
 
-test('workflowTable: the Write row is the hand-written netlist itself, no contract pointers', () => {
+test('workflowTable: row contents', () => {
   const t = workflowTable(S())
+  // Write: the write action itself — no netlist-contract pointer, no pre-check redundancy clause
   const write = t.split('\n').find((l) => l.startsWith('| Write |'))
   assert.match(write, /create the design folder \(<project>\/<design>, e\.g\. Pi12dB/)
   assert.match(write, /the project root holds only \.harnessams, AGENTS\.md, and design folders/)
   assert.match(write, /template\*\.scs \+ sweep_config\.json/)
-  // 2026-11-26: guidance the model context already carries is NOT repeated —
-  // no netlist-contract pointer, no pre-check redundancy clause
   assert.ok(!write.includes('per the netlist contract'), 'no contract pointer')
   assert.ok(!write.includes('batch_submit runs the same gate'), 'no pre-check redundancy clause')
-})
-
-test('workflowTable: the Submit row is the action + fill hint only (no description pointers)', () => {
-  const t = workflowTable(S())
+  // Submit: the action + fill hint only — no description pointer, never a repeated yaml value
   const submit = t.split('\n').find((l) => l.startsWith('| Submit |'))
   assert.match(submit, /omit machine_id \/ remote_root \/ remote_python \(they resolve from this config\)/)
-  // the 2026-11-26 deletion: the verbose pointer sentence is gone
   assert.ok(!submit.includes('documented in the batch_submit description'), 'pointer sentence dropped')
-  // the table never repeats a yaml value
   const PIN = '/opt/tools/python3/bin/python3'
   const pinned = workflowTable(S({ run_mode: 'remote', remote_python: PIN }))
   assert.ok(!pinned.includes(PIN), 'the table never repeats a pin value')
-})
-
-test('workflowTable: the Monitor row carries the action, not the cadence', () => {
-  const t = workflowTable(S())
+  // Monitor: the action, not the cadence
   const monitor = t.split('\n').find((l) => l.startsWith('| Monitor |'))
   assert.match(monitor, /bounded wait_sec/)
   assert.match(monitor, /terminal states auto-fetch the light results/)
   assert.ok(!monitor.includes('cadence'), 'no cadence pointer')
   assert.ok(!monitor.includes('blind-sleep'), 'no cadence rule restated')
-})
-
-test('workflowTable: the Analyze row keeps the one cluster_env fork (Tool cell), no recipe pointer', () => {
-  const outC = workflowTable(S())
+  // Analyze: the one cluster_env fork (Tool cell), no recipe pointer
   const inC = workflowTable(S({ cluster_env: 'in-cluster' }))
-  const outRow = outC.split('\n').find((l) => l.startsWith('| Analyze |'))
+  const outRow = t.split('\n').find((l) => l.startsWith('| Analyze |'))
   const inRow = inC.split('\n').find((l) => l.startsWith('| Analyze |'))
   assert.match(outRow, /\| ssh_exec \+ ssh_download \|/, 'out-of-cluster analyze over ssh')
   assert.match(inRow, /\| python \(direct\) \|/, 'in-cluster analyze runs python directly')
   assert.match(outRow, /write compact JSON into <design>\/SimResults\//)
   assert.ok(!outRow.includes('full recipe'), 'no recipe pointer')
-})
-
-test('workflowTable: the Report row is the spec pointer only', () => {
-  const t = workflowTable(S())
+  // Report: the spec pointer only — no schema pointer, no dashboard note
   const report = t.split('\n').find((l) => l.startsWith('| Report |'))
   assert.match(report, /spec = path to the report spec JSON, placed in <design>\/SimResults\//)
   assert.ok(!report.includes('gen_sweep_report description'), 'no schema pointer')

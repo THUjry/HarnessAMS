@@ -24,7 +24,6 @@ import { toolDefinitions } from '../src/index.js'
 import { makeTool } from '../src/tool.js'
 import { syncAgentsMd } from '../src/core/agentsmd.js'
 import { buildSshCommand, buildSubmitCommand, nextSimDir, parsePollOutput, pluginAssets, pluginScripts, simScriptsDir } from '../src/core/batch.js'
-import { resolveRemoteDir, sanitizeRel } from '../src/lib/remotepath.js'
 import { callTool } from '../src/channel/remote.js'
 
 const OLD_SIM_SCRIPTS = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
@@ -594,10 +593,7 @@ test('batch_submit anchors a subagent call on the ancestor session (D-004 gate +
   }
 })
 
-test('path guards and poll parsing', () => {
-  assert.throws(() => sanitizeRel('../x.py'), /unsafe relative path/)
-  assert.throws(() => resolveRemoteDir('/home/op/sim', '../evil'), /escapes the remote workspace/)
-  assert.equal(resolveRemoteDir('/home/op/sim', 'batch1'), '/home/op/sim/batch1')
+test('poll output parsing: job states and shell splices', () => {
   const parsed = parsePollOutput(pollValue({ meta: 2, total: 2 }).stdout, { total: 2 })
   assert.equal(parsed.state, 'completed')
   assert.equal(parsed.completed, 2)
@@ -958,28 +954,7 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
   }
 })
 
-test('batch_poll reads the job file, reports completed and auto-fetches the result files', async () => {
-  const run = makeRunDir()
-  try {
-    fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
-      machine_id: 'node1', remote_root: '/home/op/sim', remote_dir: '/home/op/sim/batch1', job_id: '777', total_points: 2,
-    }))
-    const ctx = makeCtx({ poll: { meta: 2, total: 2 } })
-    const res = await tool(ctx, 'batch_poll').execute({ run_dir: run }, {})
-    assert.equal(res.ok, true)
-    assert.equal(res.state, 'completed')
-    assert.equal(res.completed, 2)
-    assert.equal(res.job_id, '777')
-    // terminal poll absorbed fetch: the light result files landed in run_dir
-    assert.deepEqual(res.fetched, ['sweep_progress.json'])
-    const prog = JSON.parse(fs.readFileSync(path.join(run, 'sweep_progress.json'), 'utf8'))
-    assert.equal(prog.status, 'completed')
-  } finally {
-    restoreEnv()
-  }
-})
-
-test('batch_poll wait_sec (D-004): a terminal first poll breaks immediately, no re-poll', async () => {
+test('batch_poll reads the job file, reports completed, auto-fetches and breaks wait_sec at once', async () => {
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
@@ -990,7 +965,13 @@ test('batch_poll wait_sec (D-004): a terminal first poll breaks immediately, no 
     assert.equal(res.ok, true)
     assert.equal(res.state, 'completed')
     assert.equal(res.completed, 2)
-    assert.equal(res.scheduler, 'lsf') // payload shape unchanged by wait_sec
+    assert.equal(res.job_id, '777')
+    // terminal poll absorbed fetch: the light result files landed in run_dir
+    assert.deepEqual(res.fetched, ['sweep_progress.json'])
+    const prog = JSON.parse(fs.readFileSync(path.join(run, 'sweep_progress.json'), 'utf8'))
+    assert.equal(prog.status, 'completed')
+    // a terminal FIRST poll breaks the wait loop immediately: one poll, payload shape unchanged
+    assert.equal(res.scheduler, 'lsf')
     const polls = ctx.calls.filter((c) => c.name === 'ssh_exec' && String(c.arguments.command).includes('__BJOB__'))
     assert.equal(polls.length, 1)
   } finally {

@@ -12,9 +12,10 @@ import { execFileAsync, readJsonTolerant, readJsonBom, atomicWrite, atomicWriteS
 import { PKG_ROOT, dshHome } from '../src/lib/paths.js'
 import { remoteJoin, normalizeRemoteRoot, resolveRemoteDir, defaultRemoteScriptsDir, sanitizeRel } from '../src/lib/remotepath.js'
 
-test('io: readJsonTolerant strips a BOM and returns null on missing/corrupt', async () => {
+test('io: BOM-tolerant reads, atomic writes, promisified exec', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-lib-'))
   try {
+    // readers: the tolerant face (null on missing/corrupt)…
     const bom = path.join(dir, 'bom.json')
     await writeFile(bom, '\uFEFF{"a":1}', 'utf8')
     assert.deepEqual(readJsonTolerant(bom), { a: 1 }, 'a BOM must not break the tolerant read')
@@ -22,15 +23,10 @@ test('io: readJsonTolerant strips a BOM and returns null on missing/corrupt', as
     await writeFile(corrupt, '{nope', 'utf8')
     assert.equal(readJsonTolerant(corrupt), null, 'corrupt JSON degrades to null')
     assert.equal(readJsonTolerant(path.join(dir, 'missing.json')), null, 'missing file degrades to null')
-    // the strict twin: same BOM tolerance, failures throw
+    // …and the strict twin: same BOM tolerance, failures throw
     assert.deepEqual(readJsonBom(bom), { a: 1 })
     assert.throws(() => readJsonBom(corrupt), SyntaxError)
-  } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
-test('io: atomic writers leave no tmp and overwrite in place', async () => {
-  const dir = await mkdtemp(path.join(tmpdir(), 'hams-lib-'))
-  try {
+    // writers: tmp+rename in place, the last write wins, no leftovers
     const f = path.join(dir, 'state.json')
     await atomicWrite(f, '{"n":1}\n')
     await atomicWrite(f, '{"n":2}\n')
@@ -39,9 +35,7 @@ test('io: atomic writers leave no tmp and overwrite in place', async () => {
     const leftovers = fs.readdirSync(dir).filter((n) => n.endsWith('.tmp'))
     assert.deepEqual(leftovers, [], 'no .tmp files remain after the atomic writes')
   } finally { await rm(dir, { recursive: true, force: true }) }
-})
-
-test('io: execFileAsync is the promisified execFile', async () => {
+  // the promisified execFile: a spawned child's stdout resolves on the promise
   const r = await execFileAsync(process.execPath, ['-e', 'process.stdout.write("ok")'])
   assert.equal(r.stdout, 'ok')
 })
