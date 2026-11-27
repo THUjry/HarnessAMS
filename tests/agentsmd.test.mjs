@@ -16,7 +16,7 @@ import { ensureAgentsMdTemplate, latestSelfcheckRun, parseFacts, syncAgentsMd, a
 import { writeSettings } from '../src/core/settings.js'
 import { registerRoutes, callPost, callPut, clientSrc, assertDictKeys } from './helpers.mjs'
 
-// D-017: isolate the plugin-global store — the save_agentsmd action heals pins
+// D-003: isolate the plugin-global store — the save_agentsmd action heals pins
 // from it, so tests must never read the real ~/.dsh/harnessams.json
 process.env.HARNESSAMS_GLOBAL_STORE = path.join(tmpdir(), 'hams-globalstore-agentsmd-' + process.pid + '.json')
 
@@ -79,7 +79,7 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
       'row order: local env facts, then the selfcheck group at the tail')
     assert.ok(md.includes('  cluster_env: "out-of-cluster"'), 'the working environment mirrors the config')
     assert.ok(md.includes('  run_mode: "remote"'))
-    // 2026-11-25 (D-018): the CONFIGURED machine renders as one row — the model
+    // 2026-11-25 (D-002): the CONFIGURED machine renders as one row — the model
     // sees which ssh alias the project's batches and remote-first analysis use
     assert.ok(md.includes('  machine_id: "node1"'), 'the configured machine_id renders as a settings row')
     assert.ok(md.indexOf('  compute_remote: "python"') < md.indexOf('  machine_id: ')
@@ -89,20 +89,20 @@ test('agentsmd: values sync fills measured yaml facts, adds the workflow table, 
     assert.ok(md.includes('  remote_python: null'), 'no interpreter pin yet → the YAML null literal')
     assert.ok(md.includes('  remote_spectre_cmd: null'), 'no spectre pin yet → the YAML null literal')
     assert.ok(md.includes('  last_selfcheck_run_id: null'), 'no done run yet → null')
-    // the workflow table rides the values build (D-021 slim: purpose rows,
+    // the workflow table rides the values build (D-008 slim: purpose rows,
     // parameter semantics live in the tool descriptions)
     assert.ok(md.includes(WORKFLOW_TABLE), 'the values sync renders the workflow table')
     assert.ok(md.includes('| Submit | batch_submit |'))
     assert.ok(md.includes('omit machine_id / remote_root / remote_python'),
       'the submit row states what resolves from the config, not parameter semantics')
-    // the two numpy tri-state rows (D-021): null until a green run measures
+    // the two numpy tri-state rows (D-002): null until a green run measures
     assert.ok(md.includes('  remote_python_numpy: null'), 'the remote numpy tri-state row renders null (unmeasured)')
     assert.ok(md.includes('  local_python_numpy: null'), 'the local numpy tri-state row renders null (unmeasured)')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block after the sync')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: the toolchain pins mirror as yaml rows a session reads for remote parsers (D-016)', async () => {
+test('agentsmd: the toolchain pins mirror as yaml rows a session reads for remote parsers (D-006)', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-pins-'))
   try {
     await ensureAgentsMdTemplate(ws)
@@ -141,7 +141,7 @@ test('agentsmd: re-syncing under different settings switches the table wording w
       scheduler: 'lsf', simulator: 'spectre', compute_script_local: 'python', compute_script_remote: 'python' }
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: remoteLsf })
     let md = await readFile(agentsMdPath(ws), 'utf8')
-    // D-021: the scheduler matrix moved into the batch_submit description —
+    // D-008: the scheduler matrix moved into the batch_submit description —
     // the only remaining cluster_env fork in the block is the Analyze tool cell
     assert.ok(md.includes('| Analyze | ssh_exec + ssh_download |'), 'out-of-cluster analyze over ssh')
     await syncAgentsMd({}, { project: { path: ws, title: 'demo' }, settings: localSpectre })
@@ -150,14 +150,14 @@ test('agentsmd: re-syncing under different settings switches the table wording w
     assert.ok(!md.includes('| Analyze | ssh_exec'), 'old analyze wording fully replaced')
     // local mode: the non-applicable remote rows are OMITTED, not null — a
     // values build never leaves an unfilled row behind (2026-11-25)
-    assert.ok(!md.includes('  machine_id:'), 'machine_id omitted in local mode (D-018: render only when set)')
+    assert.ok(!md.includes('  machine_id:'), 'machine_id omitted in local mode (D-002: render only when set)')
     assert.ok(!md.includes('  remote_root:'), 'remote_root omitted in local mode')
     assert.ok(!md.includes('  remote_scripts_dir:'), 'remote_scripts_dir omitted in local mode')
     assert.equal(md.split(BEGIN).length - 1, 1, 'exactly one block')
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: the registry inventory never renders — only the configured machine_id row (D-018)', async () => {
+test('agentsmd: the registry inventory never renders — only the configured machine_id row (D-002)', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-nodes-'))
   try {
     await ensureAgentsMdTemplate(ws)
@@ -209,7 +209,7 @@ test('agentsmd: latestSelfcheckRun picks the newest DONE run under .harnessams/s
   } finally { await rm(ws, { recursive: true, force: true }) }
 })
 
-test('agentsmd: parseFacts reads the managed block back as flat facts (D-017 restore display)', async () => {
+test('agentsmd: parseFacts reads the managed block back as flat facts (D-003 restore display)', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-agentsmd-facts-'))
   try {
     assert.equal(await parseFacts(ws), null, 'no AGENTS.md yet')

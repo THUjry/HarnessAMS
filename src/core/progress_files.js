@@ -1,7 +1,7 @@
 // Run-directory progress readers shared by the server progress endpoints
 // (server/progress.js) and the batch tools' local poll branch (tools/batch.js)
 // — the single implementation of the sweep_progress.json / .worker_started /
-// .batch_job.json / sweep_config.json reading ladder (D-003 single-copy rule).
+// .batch_job.json / sweep_config.json reading ladder (D-001 single-copy rule).
 // Pure file reads — nothing here starts or stops a simulation.
 import fs from 'node:fs'
 import path from 'node:path'
@@ -74,7 +74,7 @@ function countPointMetas(dir) {
 // pre-2026-10 files) -> .worker_started (worker announced total_points, first
 // progress tick still ~30 s out) -> .batch_job.json (a batch was submitted for
 // this run dir — the immediate 0/N first frame while everything still lives
-// elsewhere, D-008) -> sweep_config.json (assembled but never run) -> nothing
+// elsewhere, D-004) -> sweep_config.json (assembled but never run) -> nothing
 // readable.
 //
 // A scheduler=local worker is checked for liveness at every level below the

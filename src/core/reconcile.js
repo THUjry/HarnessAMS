@@ -1,4 +1,4 @@
-// AGENTS.md ↔ workspace_config.json reconciliation (D-021, 2026-11-25).
+// AGENTS.md ↔ workspace_config.json reconciliation (D-002, 2026-11-25).
 // The agent prefers editing the OUTSIDE file (the AGENTS.md yaml block) over
 // calling the tool with a settings payload, so every config WRITE adopts the
 // block's values first (AGENTS.md is authoritative) and the batch tools
@@ -142,7 +142,7 @@ export async function reconcileSettings(projectPath, { source } = {}) {
   return { settings, problems, warnings }
 }
 
-// Read-side overlay (the batch tools' settings resolution, D-021 "reconcile
+// Read-side overlay (the batch tools' settings resolution, D-002 "reconcile
 // at read AND write"): the session-project settings with the AGENTS.md rows
 // overlaid — legal rows win, illegal rows keep the json value and surface as
 // warnings the tool result carries. Synchronous (the batch call sites are

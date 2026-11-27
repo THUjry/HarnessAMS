@@ -1,9 +1,9 @@
-// Tests for the gen_sweep_report tool (D-006, 2026-11-21) and register_report
-// (D-026, 2026-11-26): spec-driven report rendering, the D-006 file layout
+// Tests for the gen_sweep_report tool (D-008, 2026-11-21) and register_report
+// (D-003, 2026-11-26): spec-driven report rendering, the D-008 file layout
 // (report at the project root, its data JS in SimResults/<report name>/ — one
 // directory per report since 2026-11-25, PNGs in Figs/ gated by the calling
 // SESSION's report_figs option), the guarded single-session merge-write of the
-// VERSIONLESS sessions.json (D-026), the full tool.execute(args, exec) flow —
+// VERSIONLESS sessions.json (D-003), the full tool.execute(args, exec) flow —
 // the calling session comes from exec.agent.id (a delegated subagent resolves
 // to its topmost user-visible ancestor) — and register_report attaching ANY
 // existing local HTML into the calling session's dashboard.
@@ -20,7 +20,7 @@ import { makeTool } from '../src/tool.js'
 const SID_A = 'session-aaaa1111-2222-3332-4444-555555555555'
 const SID_B = 'session-bbbb1111-2222-3332-4444-555555555555'
 
-// D-021 anchoring: the report tool resolves the calling session's project
+// D-008 anchoring: the report tool resolves the calling session's project
 // through ctx.workspaceRegistry (no path walk-up) — a minimal registry mapping
 // the fixture workspace to the session ids the tests use.
 function registryCtx(ws) {
@@ -55,7 +55,7 @@ async function setSessionFigs(storeDir, sid, on) {
   await writeFile(file, JSON.stringify(store, null, 2) + '\n', 'utf8')
 }
 
-test('inject: sessionsStoreAt anchors at a GIVEN project root (D-021: no walk-up)', async () => {
+test('inject: sessionsStoreAt anchors at a GIVEN project root (D-008: no walk-up)', async () => {
   const { ws } = await makeWorkspace()
   try {
     // the store dir is always <projectRoot>/.harnessams — a nested design
@@ -101,7 +101,7 @@ test('inject: registerReportIntoSession appends, selects, dedupes by path, prese
     assert.ok(!r3.error, r3.error)
     const store3 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
     assert.equal(store3.sessions[sidC].reports.length, 1)
-    // versionless (D-026): the tool's own write heals the legacy `version` key
+    // versionless (D-003): the tool's own write heals the legacy `version` key
     // off the fixture file
     assert.equal(store3.version, undefined)
 
@@ -173,7 +173,7 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     assert.equal(res.ok, true)
     assert.equal(res.registered, true)
     assert.equal(res.session, SID_A)
-    // D-006 layout: report at the PROJECT ROOT, its data JS in a directory of
+    // D-008 layout: report at the PROJECT ROOT, its data JS in a directory of
     // its own under SimResults/ (named after the HTML file)
     assert.match(res.report_path, /projX[\\/]projX_report\.html$/)
     assert.equal(res.report_dir, proj)
@@ -201,7 +201,7 @@ test('gen_sweep_report e2e — spec renders at the project root, registers into 
     const mLine = html.split('\n').find((l) => l.includes('const MANIFEST')) ?? ''
     assert.ok(mLine.includes('Sim0_20260805_batch2') && mLine.indexOf('Sim0_20260805_batch2') < mLine.indexOf('Sim0_20260805_batch1'),
       'manifest must list the newest round first')
-    // the D-006 empty-table fix: the param branch reads p.params, not the root
+    // the D-004 empty-table fix: the param branch reads p.params, not the root
     assert.ok(html.includes('c.kind === "param") return { txt: esc(show(p.params ? p.params[c.key] : null))'),
       'cellVal must carry the param branch')
     // conclusions card renders (mini-markdown)
@@ -535,7 +535,7 @@ test('gen_sweep_report: a subagent registers into the ancestor session; a broken
   }
 })
 
-// register_report (D-026, 2026-11-26): the standalone registration tool — an
+// register_report (D-003, 2026-11-26): the standalone registration tool — an
 // EXISTING local HTML (typically NOT gen_sweep_report's output) into the
 // CALLING session's dashboard; every missing value (entry key, store location,
 // id/name/added_at) is filled from the caller.
@@ -560,7 +560,7 @@ test('register_report: registers an EXISTING html into the CALLING session — f
     const store1 = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
     assert.equal(store1.sessions[SID_A].reports.length, 1)
     assert.equal(store1.sessions[SID_A].dashboard_selected, res.report.id)
-    assert.equal(store1.version, undefined, 'the tool\'s write is versionless (D-026)')
+    assert.equal(store1.version, undefined, 'the tool\'s write is versionless (D-003)')
 
     // same path again → same entry (idempotent); a name arg cannot rename a
     // reused entry
@@ -578,7 +578,7 @@ test('register_report: registers an EXISTING html into the CALLING session — f
     assert.equal(store2.sessions[SID_A].dashboard_selected, res3.report.id)
 
     // a corrupted sibling session in the same store → the read-side skip
-    // warning rides the result as store_warnings (loud skip, D-026)
+    // warning rides the result as store_warnings (loud skip, D-003)
     const raw = JSON.parse(await readFile(path.join(storeDir, 'sessions.json'), 'utf8'))
     raw.sessions['bad key!'] = { display: 'overview', reports: [] }
     await writeFile(path.join(storeDir, 'sessions.json'), JSON.stringify(raw, null, 2) + '\n', 'utf8')

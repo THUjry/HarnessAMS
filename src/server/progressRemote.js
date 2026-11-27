@@ -1,5 +1,5 @@
 // Remote live progress for the batch_poll session card (client.js useSimProgress,
-// D-008): reads the batch's own progress files on the executing side — over the
+// D-004): reads the batch's own progress files on the executing side — over the
 // dsh-ssh exec funnel, or locally through the ctx.shell seam for an in-cluster
 // LSF job (no machine in the job file; bjobs and the progress files live on
 // this host's shared filesystem) — the same pollCommand one-shot the
@@ -15,7 +15,7 @@
 // exec channel per TTL window — comfortably under the ~10-channel MaxSessions
 // budget of one shared connection. Failures resolve to { unreachable: true }
 // (HTTP 200) so the card keeps its last frame plus a dim note instead of going
-// blank — the D-008 rule: a visible card at every moment, placeholder never.
+// blank — the D-004 rule: a visible card at every moment, placeholder never.
 import path from 'node:path'
 import { readRunProgress } from '../core/progress_files.js'
 import { readJob, pollCommand, parsePollOutput } from '../core/batch.js'

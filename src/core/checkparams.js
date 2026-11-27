@@ -1,5 +1,5 @@
 // Check parameters — PROJECT-LEVEL FALLBACK since 2026-11-19 (decisions.md
-// D-005): confirmed params are per-session (sessions.json), and this file at
+// D-003): confirmed params are per-session (sessions.json), and this file at
 // <workspace>/.harnessams/check_params.json is the middle of the resolution
 // chain the SmartAnaSim pre-check engine applies:
 //   built-in defaults  <-  check_params.json  <-  the session's confirmed table

@@ -6,7 +6,7 @@
 //           assets (vendored .js packages with licenses + the served package
 //           copy);
 //   tier 2: project = DSH workspace (a local folder) — every SESSION is a work
-//           unit (the task concept was retired 2026-11-19, decisions.md D-005):
+//           unit (the task concept was retired 2026-11-19, decisions.md D-003):
 //           each session carries its own dashboard reports and confirmed check
 //           params in <workspace>/.harnessams/sessions.json;
 //   tier 3: right-sidebar tab — the first-level strip is exactly two entries,
@@ -846,7 +846,7 @@ window.__ModuleLoader__.load({
     // directory, so the card covers local scans too); every other call,
     // batch_submit included, stays on the DSH generic card.
     // While the poll call blocks (wait_sec), the card reads /api/progress-remote
-    // (the batch's own counters on the remote host, D-008) after an instant
+    // (the batch's own counters on the remote host, D-004) after an instant
     // local 0/N first frame from the job file — it never shows a dead
     // placeholder. Result cards add the cross-batch aggregate from
     // /api/progress-summary.
@@ -889,7 +889,7 @@ window.__ModuleLoader__.load({
 
     // Progress data for one card: /api/progress (single run) + /api/progress-summary
     // (cross-batch aggregate); the batch_poll card swaps the single-run source for
-    // /api/progress-remote (D-008, the remote batch's live counters) at the 5 s
+    // /api/progress-remote (D-004, the remote batch's live counters) at the 5 s
     // cadence the wait policy prescribes. While the tool call is in flight
     // (active) poll with the visibility pause/resume discipline shared by the
     // sidebar polls; settled cards fetch once on mount (one fetch per scroll-back
@@ -929,7 +929,7 @@ window.__ModuleLoader__.load({
             // Three independent chains: instant local frame → aggregate →
             // remote truth (remote wins once it answers; an unreachable remote
             // keeps the last frame plus a dim note — the card never goes blank
-            // mid-poll, D-008).
+            // mid-poll, D-004).
             if (localUrl) fetchJson(localUrl).catch(() => null).then(on(my, (pl) => {
               if (remoteAnswered || pl.unreachable) return
               commit({ prog: normRemoteProg(pl) })
@@ -1059,7 +1059,7 @@ window.__ModuleLoader__.load({
       // While the tool call blocks (a local sweep, or a batch_poll holding a
       // wait): live bar from the progress source — local file or remote poll,
       // both normalized to the same shape. An unreachable remote keeps the last
-      // frame plus a dim note (D-008: a visible card at every moment, never a
+      // frame plus a dim note (D-004: a visible card at every moment, never a
       // dead placeholder).
       if (phase === 'start') {
         if (live.remoteErr) els.push(h('div', { key: 'rerr', className: 'hams-dim' }, tr('card.remoteUnreachable')))
@@ -1205,7 +1205,7 @@ window.__ModuleLoader__.load({
 
     // Console-page display settings: the toggle backing the tool cards (guide s6
     // points here; the preference is browser-local by design — see TOOLVIEW_KEY),
-    // plus the plugin-global self-check freshness window (D-017: server-truth in
+    // plus the plugin-global self-check freshness window (D-003: server-truth in
     // ~/.dsh/harnessams.json through PUT /api/global-config — it decides when a
     // restored verdict still shows its check mark vs "not checked for > N min").
     function DisplaySettingsSection() {
@@ -1346,7 +1346,7 @@ window.__ModuleLoader__.load({
     }
 
     // First-level strip + session config state, PER SESSION (decisions.md
-    // D-005, 2026-11-19): each DSH session is a work unit carrying its own
+    // D-003, 2026-11-19): each DSH session is a work unit carrying its own
     // config — which view the body shows ('overview' | 'session'), its
     // dashboard reports and confirmed check params — PERSISTED to
     // <workspace>/.harnessams/sessions.json (a reload must NOT lose it).
@@ -1369,7 +1369,7 @@ window.__ModuleLoader__.load({
         dashboard_selected: typeof src.dashboard_selected === 'string' ? src.dashboard_selected : null,
         // the session's report-figures option: stored only while on
         ...(src.report_figs === true ? { report_figs: true } : {}),
-        // the session's scan-size ceiling (D-019): stored only while set
+        // the session's scan-size ceiling (D-004): stored only while set
         ...(Number.isInteger(src.max_points_per_scan) && src.max_points_per_scan > 0
           ? { max_points_per_scan: src.max_points_per_scan }
           : {}),
@@ -1387,7 +1387,7 @@ window.__ModuleLoader__.load({
       return sessionConfigState.get(sessionId)
     }
     // Copy source for a first-seen FORK (deliberately branch-point-independent,
-    // D-005): the last-ACTIVE session of this page lifetime when there is one,
+    // D-003): the last-ACTIVE session of this page lifetime when there is one,
     // else the store's most recently written entry (sessions.json insertion
     // order doubles as recency — the fork source is almost always the last
     // writer). Never the session itself.
@@ -1407,7 +1407,7 @@ window.__ModuleLoader__.load({
     // (persisted / gave up) with bounded retries: a FORK session may not be in
     // the host's workspace registry yet, so its first PUT can 404 transiently —
     // swallowing that silently used to leave fork-adopted reports unresolvable
-    // by /dash until a manual refresh (D-006 fix). Fire-and-forget callers may
+    // by /dash until a manual refresh (D-008 fix). Fire-and-forget callers may
     // ignore the promise.
     function putSessionConfig(sessionId, { retries = 4 } = {}) {
       if (!sessionId) return Promise.resolve(false)
@@ -1643,7 +1643,7 @@ window.__ModuleLoader__.load({
       return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
     }
 
-    // Status restore from the AGENTS.md facts (D-017): when the in-memory run
+    // Status restore from the AGENTS.md facts (D-003): when the in-memory run
     // state is gone (page reload, project switch away and back), the panel
     // falls back to the managed block's last_selfcheck_* rows — a verdict
     // finished within the freshness window keeps its check mark, past the
@@ -1727,7 +1727,7 @@ window.__ModuleLoader__.load({
     // Step-detail table under the settings table: local/remote section headers +
     // the classic Item/Result/Elapsed/Status rows (skipped steps show ⏭ with the
     // skip reason as the tooltip). With no in-memory run, the AGENTS.md facts
-    // supply a compact "last self-check" line instead (D-017 restore display).
+    // supply a compact "last self-check" line instead (D-003 restore display).
     function SelfcheckSteps({ run, facts, nowMs }) {
       if (!run || !(run.steps ?? []).length) {
         const restored = restoredCellResult(facts, 'run_mode', nowMs)
@@ -1779,11 +1779,11 @@ window.__ModuleLoader__.load({
     const overviewMemory = { path: null, project: null, checksInfo: null }
     const selfcheckMemory = { path: null, settings: null, draft: null, run: null, envRun: null }
 
-    // Project initialization on sidebar open (D-015, 2026-11-25): one POST per
+    // Project initialization on sidebar open (D-002, 2026-11-25): one POST per
     // project path per page load — the server backfills the workspace config,
     // lays the AGENTS.md template, reconciles json <- AGENTS.md, and heals null
     // toolchain pins from the plugin-global node memory (NO script staging and
-    // NO sim_scripts_dir flip since D-033 — the package location stays the
+    // NO sim_scripts_dir flip since D-002 — the package location stays the
     // scripts root). All of it idempotent server-side; the Set only keeps the
     // traffic down (a failed init is not retried).
     const projectInitFired = new Set()
@@ -1902,7 +1902,7 @@ window.__ModuleLoader__.load({
       // a stop request is one-shot: clear it once the status leaves 'running'
       useEffect(() => { if (runStatus !== 'running') setStopping(false) }, [runStatus])
 
-      // restore-display clock (D-017): a page left open must still flip the
+      // restore-display clock (D-003): a page left open must still flip the
       // restored check mark to the "> N min" wording when the freshness window
       // lapses — the 30 s tick only runs while the restore display is live
       const [nowMs, setNowMs] = useState(() => Date.now())
@@ -1931,7 +1931,7 @@ window.__ModuleLoader__.load({
 
       const dirty = !!draft && !!settings && JSON.stringify(draft) !== JSON.stringify(settings)
       // pending edits ride along on every action (strict UI = config = AGENTS.md).
-      // D-021: send only the DIRTY KEYS, not the full draft — a full draft would
+      // D-002: send only the DIRTY KEYS, not the full draft — a full draft would
       // clobber values the server just adopted from a hand-edited AGENTS.md block
       // (or another writer changed between our last poll and this save) with the
       // stale copies this browser still holds; the server merges partial
@@ -2014,8 +2014,8 @@ window.__ModuleLoader__.load({
         void saveAgents()
       }, [checkAllPending, run?.status])
 
-      // Working-environment switch (cluster_env, D-002): the toggle opens a
-      // confirm dialog first; the write sends ONLY the environment key (D-021:
+      // Working-environment switch (cluster_env, D-001): the toggle opens a
+      // confirm dialog first; the write sends ONLY the environment key (D-002:
       // a full base would clobber server-side adoptions — the AGENTS.md
       // reconcile, the global-memory heal — with this browser's stale copy),
       // and save_agentsmd re-renders the AGENTS.md workflow for the new
@@ -2049,7 +2049,7 @@ window.__ModuleLoader__.load({
         settingsError && h('div', { className: 'hams-err' }, txt(settingsError)),
         !draft && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
         draft && h('div', null,
-          // working environment (cluster_env, D-002): the confirm-gated 0/1
+          // working environment (cluster_env, D-001): the confirm-gated 0/1
           // switch — the value only lands after the dialog's "switch" button
           h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: '0 0 4px' } },
             h('b', { style: { flexShrink: 0 } }, tr('pset.envTitle')),
@@ -2152,7 +2152,7 @@ window.__ModuleLoader__.load({
             // the facts ride the route as a SIBLING of project (the server's
             // contract, see index.js /api/project + the selfcheck tests) —
             // fold them onto the project object here, the cached shape the
-            // restore display reads (D-017)
+            // restore display reads (D-003)
             const projectInfo = r?.project ? { ...r.project, selfcheck_facts: r.selfcheck_facts ?? null } : null
             if (!projectInfo || projectInfo.path !== overviewMemory.path) {
               // different (or first) project: drop the cached surfaces so the
@@ -2203,7 +2203,7 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // D-026 store read warnings: entries sessions.json skipped as invalid —
+    // D-003 store read warnings: entries sessions.json skipped as invalid —
     // surfaced by every session-config GET and rendered as one notice line
     // inside the session branch (both sub-views). Server strings, English.
     const storeWarningsOf = (d) => (Array.isArray(d?.warnings) ? d.warnings.filter((w) => typeof w === 'string' && w) : [])
@@ -2220,7 +2220,7 @@ window.__ModuleLoader__.load({
       const [config, setConfig] = useState(() => cloneSessionConfig(sessionConfigState.get(sessionId) ?? emptySessionConfig()))
       const [view, setView] = useState(readTaskView)
       const [error, setError] = useState(null)
-      // store-level skip notices (D-026), captured from the session-config GETs
+      // store-level skip notices (D-003), captured from the session-config GETs
       const [storeWarnings, setStoreWarnings] = useState([])
 
       const projectPath = project?.path ?? null
@@ -2253,7 +2253,7 @@ window.__ModuleLoader__.load({
       // Per-session config: reload on session switch. A FIRST-SEEN session asks
       // the server for its fork verdict (computed only while the entry is
       // missing): fork => deep-copy the previously active session's CURRENT
-      // config (branch-point-independent by design, D-005); otherwise start
+      // config (branch-point-independent by design, D-003); otherwise start
       // empty. Either way the entry is persisted right away — the write doubles
       // as the tombstone that stops fork re-detection. After the adopt, this
       // session becomes the "previously active" for the next first-seen one.
@@ -2265,7 +2265,7 @@ window.__ModuleLoader__.load({
           const source = first ? forkCopySource(sessionsMap, sessionId) : null
           let adopted = cloneSessionConfig(sessionConfigOf(sessionId, fork, source))
           if (first) {
-            // D-006 fork-404 fix: an adopted config that selects a report mounts
+            // D-008 fork-404 fix: an adopted config that selects a report mounts
             // the dashboard iframe the moment setConfig lands — the PUT that
             // persists this session's entry must reach sessions.json BEFORE
             // that mount, or /dash/<sid>/<rid> answers the not-found error
@@ -2274,7 +2274,7 @@ window.__ModuleLoader__.load({
             // Tombstone race (2026-11-26): the second writer (gen_sweep_report)
             // may have created this entry between the hydrate GET and this PUT —
             // re-check the server first; if the entry is already there, adopt IT
-            // (the entry-on-disk precondition of D-006 already holds) instead of
+            // (the entry-on-disk precondition of D-008 already holds) instead of
             // tombstoning a fresh entry over the injected report.
             const again = await fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId)).catch(() => null)
             const serverEntry = again?.sessions?.[sessionId]
@@ -2346,7 +2346,7 @@ window.__ModuleLoader__.load({
               setReason(r.project ? null : r.reason ?? null)
               if (r?.project) {
                 lastProjectInfo.initialized = !!r.project.initialized
-                // sidebar open = the project-initialization moment (D-015)
+                // sidebar open = the project-initialization moment (D-002)
                 ensureProjectInit(r.project.path, sessionId)
               }
             })
@@ -2464,7 +2464,7 @@ window.__ModuleLoader__.load({
                 'aria-selected': view === v.id,
                 onClick: () => { rememberTaskView(v.id); setView(v.id) },
               }, tr(v.labelKey)))),
-            // store-level read notices (D-026): invalid entries skipped while
+            // store-level read notices (D-003): invalid entries skipped while
             // reading sessions.json — one warn line on top of the session
             // branch, visible from both sub-views; the detail is server-side
             // English text folded by ClampText.
@@ -2513,7 +2513,7 @@ window.__ModuleLoader__.load({
     }
 
     // Session option, second strip line: the scan-size ceiling batch_submit
-    // enforces (D-019). Positive integer commits immediately; blank clears
+    // enforces (D-004). Positive integer commits immediately; blank clears
     // the field back to the built-in default (100). Uncontrolled on purpose —
     // the same capture-before-await discipline as the select above (an
     // invalid draft simply never lands in the store).
@@ -2714,7 +2714,7 @@ window.__ModuleLoader__.load({
     // folder the system flow landed on (initialCwd) or the home dir; clicking
     // an HTML file registers it. The manual path field covers paths outside
     // the browsable tree and now carries its own .html/.htm format gate — the
-    // store write would reject a wrong extension anyway (D-022 strict), but
+    // store write would reject a wrong extension anyway (D-009 strict), but
     // that round-trip leaves the optimistic row in place; catching it here
     // keeps the dialog open and explains. This dialog is the FALLBACK half of
     // the 2026-11-26 system-first ruling: the add button pops the native OS
@@ -2780,7 +2780,7 @@ window.__ModuleLoader__.load({
 
     // Check-parameters sub-view (session panel): editable table of the
     // assembly-layer check thresholds/switches stored in THIS session's
-    // sessions.json entry (per-session since D-005). The initial table is the
+    // sessions.json entry (per-session since D-003). The initial table is the
     // session's confirmed copy, or the project-file∪built-in fallback while
     // unconfirmed (the source line under the title says which is in effect).
     // Each R/C/L bound drafts as a {value, unit} pair (a unit dropdown per

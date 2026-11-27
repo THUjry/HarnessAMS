@@ -12,7 +12,7 @@ import { execFileAsync } from '../lib/io.js'
 // One python probe: version + absolute executable + the numpy tri-state in a
 // single call (sys.executable is the interpreter's own path — no PATH
 // guessing, which the old `python --version` row could not provide). The
-// numpy leg answers yes / fallback / no (D-021): native `import numpy`; else
+// numpy leg answers yes / fallback / no (D-002): native `import numpy`; else
 // the staged numfallback asset (assetsDir as argv[1]) imports; else neither
 // (a python 2 shell where even the pure-stdlib fallback has py3 syntax).
 // Falls back to `--version` (path empty, numpy unmeasured) for exotic shells;

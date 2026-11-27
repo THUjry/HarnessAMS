@@ -2,7 +2,7 @@
 // retirement, 2026-11-14). One read-only channel: the tool shell — ssh_list
 // through the batch-contract funnel in ../remote.js. Structured values, no
 // credentials. The per-alias remote root is NOT registry data and NOT a family
-// map anymore (2026-11-19 D-004): it is the project's settings.remote_root —
+// map anymore (2026-11-19 D-002): it is the project's settings.remote_root —
 // consumers that need a root pass it explicitly; the machine projections here
 // are pure registry facts.
 import { listMachines } from '../channel/remote.js'

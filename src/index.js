@@ -2,7 +2,7 @@
 // three-tier client UI (see client.js for the UI itself):
 //   tier 1 (global console page) — machines (the dsh-ssh host registry), digital assets;
 //   tier 2 (project = DSH workspace) — session-to-workspace mapping + the per-session
-//            config store at <workspace>/.harnessams/sessions.json (D-005);
+//            config store at <workspace>/.harnessams/sessions.json (D-003);
 //   tier 3 (session sidebar) — the Overview project settings / self-check surface:
 //            the four buttons and the settings table all land on ONE tool,
 //            harnessams_selfcheck (tools/selfcheck.js), through POST /api/tool —
@@ -33,10 +33,10 @@
 // Remote connectivity is delegated entirely to @linxin666/dsh-ssh (ssh_* tools
 // by alias, zero gating); each project's remote root is its own setting
 // (workspace_config.json settings.remote_root — the family harnessams.json and
-// its remote_machines map are retired, 2026-11-19 D-004).
+// its remote_machines map are retired, 2026-11-19 D-002).
 // Model tools: harnessams_selfcheck (self-check + config), the batch channel
 // (batch_submit with its local/ssh/lsf schedulers, semantics set by the
-// project's cluster_env — D-002 — + batch_poll with the
+// project's cluster_env — D-001 — + batch_poll with the
 // terminal auto-fetch; worker scripts come from the project's
 // workspace.sim_scripts_dir) and the simulator-agnostic report/ops tools
 // (gen_sweep_report / safe_trash).
@@ -243,7 +243,7 @@ async function handle(req, res, ctx) {
         settings: body?.settings,
         runId: body?.run_id,
         lang: body?.lang === 'zh' ? 'zh' : 'en',
-        // the UI funnel is USER-initiated (D-021): an AGENTS.md reconcile
+        // the UI funnel is USER-initiated (D-002): an AGENTS.md reconcile
         // problem blocks the save with an error here, where the in-chat agent
         // caller only gets warnings
         source: 'user',
@@ -253,7 +253,7 @@ async function handle(req, res, ctx) {
       return
     }
     if (req.method === 'POST' && route === '/api/project-init') {
-      // Project initialization hook (D-015 2026-11-25; D-033 2026-11-26): the
+      // Project initialization hook (D-002 2026-11-25; D-002 2026-11-26): the
       // sidebar opening a project backfills the workspace config, lays the
       // AGENTS.md template, reconciles json <- AGENTS.md, and heals null
       // toolchain pins from the plugin-global node memory. NO script staging
@@ -269,7 +269,7 @@ async function handle(req, res, ctx) {
       if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
       try {
         const init = await initProjectStorage(project.path)
-        // D-021: reconcile json ← AGENTS.md BEFORE the heal — a hand-edited
+        // D-002: reconcile json ← AGENTS.md BEFORE the heal — a hand-edited
         // block (e.g. a .harnessams deletion that kept AGENTS.md) adopts at the
         // sidebar-open moment; invalid rows warn into the response (this is an
         // automatic surface, no user to block). Agent semantics by design.
@@ -406,7 +406,7 @@ async function handle(req, res, ctx) {
       return
     }
     if (req.method === 'PUT' && route === '/api/global-config') {
-      // The plugin-global display config (D-017: ~/.dsh/harnessams.json) —
+      // The plugin-global display config (D-003: ~/.dsh/harnessams.json) —
       // today the self-check freshness window the console's display settings
       // own. Body { selfcheck_fresh_min } (minutes, 1..1440).
       let body
@@ -519,7 +519,7 @@ async function handle(req, res, ctx) {
   // ---- tier 2: project mapping + per-session config store ----
   if (route === '/api/project') {
     const mapped = sessionProject(ctx.workspaceRegistry, url.searchParams.get('sessionId'))
-    // the AGENTS.md self-check facts ride along (D-017): the sidebar restores
+    // the AGENTS.md self-check facts ride along (D-003): the sidebar restores
     // its status display from the yaml block after a page reload — no global
     // "latest run" surface, the block is the per-project record
     if (mapped.project?.path) {
@@ -588,7 +588,7 @@ async function handle(req, res, ctx) {
     return
   }
   if (route === '/api/progress-remote') {
-    // Remote live progress for the batch_poll card (D-008): polls the batch's
+    // Remote live progress for the batch_poll card (D-004): polls the batch's
     // own progress files on the remote host through the dsh-ssh exec funnel.
     // Same workspace fence as the local endpoints; the machine and remote dir
     // are resolved server-side from the run dir's .batch_job.json (written by

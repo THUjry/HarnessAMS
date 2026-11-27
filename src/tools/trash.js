@@ -13,7 +13,7 @@ import { atomicWriteSync } from '../lib/io.js'
 
 // Trash root: the owning project's workspace_config.json workspace.trash_dir
 // (default .harnessams/trash under the project root). `projectRoot` is the
-// SESSION-RESOLVED project root (D-021: no ancestor walk-up — the safe_trash
+// SESSION-RESOLVED project root (D-002: no ancestor walk-up — the safe_trash
 // tool resolves the project from the calling session or an explicit `project`
 // argument, and the target path itself no longer picks the project).
 export function trashDir(projectRoot) {
@@ -171,7 +171,7 @@ export function purgeEntry(name, opts = {}) {
 }
 
 // Model-facing safe_trash tool (the definition lives beside the mechanics it
-// routes to). D-021: the project comes from the calling session (or an
+// routes to). D-002: the project comes from the calling session (or an
 // explicit `project` argument) — the target path itself no longer anchors the
 // trash root through a walk-up.
 export function safeTrashTool(ctx) {

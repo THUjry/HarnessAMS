@@ -1,4 +1,4 @@
-// AGENTS.md project-config block (2026-11-18; flattened 2026-11-19 D-004;
+// AGENTS.md project-config block (2026-11-18; flattened 2026-11-19 D-002;
 // reshaped 2026-11-24). Per the front-of-house rule (the DSHstudy context-sync
 // note: AGENTS.md is the reviewable, diff-able sync vehicle — plugins must not
 // assemble injections in the back half), this module only maintains ONE marked
@@ -55,19 +55,19 @@ const scalar = (v) => (v === null || v === undefined ? 'null' : typeof v === 'bo
 
 // Single-level projection: meta + workspace root + the settings mirror + the
 // python-fact rows + the latest finished self-check verdict. Machine rendering
-// (D-018, revising the 2024-11-24 alias-absent clause): the CONFIGURED
+// (D-002, revising the 2024-11-24 alias-absent clause): the CONFIGURED
 // machine_id renders as one row so the model sees which ssh alias the
 // project's batches and remote-first analysis use; alias INVENTORIES and host
 // addresses never appear — the machine card / ssh_list is the inventory. The
 // remote side is stated as paths (remote_root, remote_scripts_dir, the
 // toolchain pins remote_python / remote_spectre_cmd, the remote_python_numpy
 // tri-state, and the self-check dir).
-// 2026-11-25 shape (D-016/D-017): the local env rows carry the local_ prefix,
+// 2026-11-25 shape (D-006/D-003): the local env rows carry the local_ prefix,
 // the selfcheck group sits at the tail (selfcheck_remote_dir + the verdicts),
 // and rows that would render null because they do not apply (machine_id,
 // remote_root / remote_scripts_dir in local mode) are OMITTED, not left
 // empty — a synced values build never leaves an unfilled row behind.
-// 2026-11-25 D-021: the local_node_* rows render from PROCESS facts (dsh runs
+// 2026-11-25 D-002: the local_node_* rows render from PROCESS facts (dsh runs
 // on node — always available, never a subprocess probe; filled at template
 // establishment too); the local_python_* rows (version, path, numpy
 // tri-state) render from the PERSISTED settings — measured at self-check
@@ -147,7 +147,7 @@ function spliceSection(existing, section) {
 // must not fail the settings/session write that calls it). `facts.settings`
 // (optional) prefills the python-fact rows — initProjectStorage passes the
 // freshly global-memory-prefilled settings so establishment already shows
-// them (D-021 "fill at establishment"); the local_node_* rows always render
+// them (D-002 "fill at establishment"); the local_node_* rows always render
 // from process. No workflow table at first fill (facts.table unset).
 export async function ensureAgentsMdTemplate(workspacePath, facts = {}) {
   try {
@@ -191,13 +191,13 @@ export async function latestSelfcheckRun(workspacePath) {
   return null
 }
 
-// Read the managed block BACK as a flat facts object (D-017): the sidebar's
+// Read the managed block BACK as a flat facts object (D-003): the sidebar's
 // status display restores from the AGENTS.md yaml after a page reload — the
 // block is the per-project record, so no global "latest run" surface is
 // needed. Rows are `  key: value` single-level scalars: the YAML null literal
 // or a JSON double-quoted string. Returns null when the file/block/fence is
 // missing (nothing to restore yet). parseFactsSync is the same parse for the
-// synchronous read paths (the batch tools' AGENTS.md overlay, D-021).
+// synchronous read paths (the batch tools' AGENTS.md overlay, D-002).
 function parseFactsText(text) {
   if (typeof text !== 'string') return null
   const begin = text.indexOf(BEGIN)
@@ -247,7 +247,7 @@ export function parseFactsSync(workspacePath) {
 // the self-check finalize. settings come from the caller (readSettings at the
 // action — keeps this module free of a settings.js import cycle, since
 // settings.js hooks ensureAgentsMdTemplate). No python probe here anymore
-// (D-021): the local_node_* rows render from process, the local_python_* rows
+// (D-002): the local_node_* rows render from process, the local_python_* rows
 // from the persisted settings the caller passes.
 export async function syncAgentsMd(ctx, { project, settings }) {
   try {

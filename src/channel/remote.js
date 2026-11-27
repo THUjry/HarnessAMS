@@ -20,7 +20,7 @@
 //     file per call; parent directories are auto-created remotely);
 //   - ssh_download → value { ok, bytes?, error? } (single file only);
 //   - the remote root per alias is NOT dsh-ssh data: it is a per-project
-//     setting (workspace_config.json settings.remote_root, 2026-11-19 D-004)
+//     setting (workspace_config.json settings.remote_root, 2026-11-19 D-002)
 //     passed explicitly by every consumer — no family-level map, no merge.
 //
 // Hardening owned by this funnel (selection-doc §6/§7 mitigations):
@@ -285,12 +285,12 @@ export async function resolveMachine(ctx, machineId, remoteRoot) {
   return { machine, alias: machine.id, remoteRoot: root }
 }
 
-// The channel matrix (D-002) as ONE builder — the single implementation of
+// The channel matrix (D-001) as ONE builder — the single implementation of
 // the exec/transfer selection. Exec follows the alias: over dsh-ssh when a
 // host is targeted, else the official local ctx.shell seam (in-cluster LSF,
 // no machine in the job file). Transfers cross ssh ONLY out-of-cluster — an
 // in-cluster run stages and fetches with plain local copies on the shared
-// filesystem, whatever the scheduler. The D-029 abort signal rides every
+// filesystem, whatever the scheduler. The D-004 abort signal rides every
 // call (exec-shaped calls get the dsh-ssh KILL+close path or the ctx.shell
 // kill, plus the callTool race; sftp has no abort path, so the orphaned
 // transfer is harmless — re-staging is idempotent). Consumers: the batch

@@ -1,4 +1,4 @@
-// Fork detection (D-005): a session counts as forked iff its own log carries
+// Fork detection (D-003): a session counts as forked iff its own log carries
 // the inherited cut marker — event {type:'session/end-seed', data:{inherited:true}}
 // (dsh-session buildForkSeed). Resumed sessions write end-seed WITHOUT the flag,
 // so the predicate is the flag, not the event type. Everything fails open to

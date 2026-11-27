@@ -1,18 +1,18 @@
-// gen_sweep_report (D-006, 2026-11-21; underscore name 2026-11-23) and
-// register_report (D-026, 2026-11-26). The renderer is a pure report drawer:
+// gen_sweep_report (D-008, 2026-11-21; underscore name 2026-11-23) and
+// register_report (D-003, 2026-11-26). The renderer is a pure report drawer:
 // raw-data processing is the MODEL's job (remote analysis by default; only
 // compact results are pulled back), so it consumes a model-written spec JSON
 // (points/curves inline or via {"$file"} references) and renders the sweep
-// dashboard in the DESIGN FOLDER (D-021, 2026-11-25: <project>/<design>/ holds
+// dashboard in the DESIGN FOLDER (D-008, 2026-11-25: <project>/<design>/ holds
 // the report HTML, its data JS in SimResults/<report name>/ — one directory
-// per report — and Figs/). Registration is its own concern since D-026:
+// per report — and Figs/). Registration is its own concern since D-003:
 // gen_sweep_report auto-registers into the CALLING session's dashboard unless
 // register: false, and register_report attaches ANY existing local HTML (not
 // only this renderer's output) into the calling session's dashboard — both
 // share the identity anchor (callerAnchor) and registerReportIntoSession
 // below. Chart PNGs go into <design>/Figs/ ONLY when that session's "Report
 // figures" option is on (HarnessAMS session panel, default off — headless
-// jsdom+plotly+resvg, fail-open). Project anchoring (D-021): the OUTPUT root
+// jsdom+plotly+resvg, fail-open). Project anchoring (D-008): the OUTPUT root
 // comes from the spec (spec.project_dir, or the spec sitting in a SimResults/
 // directory — its parent is the design folder); the CONFIG root (sessions
 // store, plotly source) comes from the calling session's project — no
@@ -28,7 +28,7 @@ import { resolveProjectTool } from '../core/project.js'
 import { effectiveSessionId } from '../subagent.js'
 
 // --- report registration target: the calling session's HarnessAMS dashboard.
-// Since the task retirement (2026-11-19, D-005) each DSH session carries its
+// Since the task retirement (2026-11-19, D-003) each DSH session carries its
 // own report list in <workspace>/.harnessams/sessions.json; the calling session
 // is identified EXACTLY through the tool execution context (exec.agent.id IS
 // the SessionId — probe-verified, see probe-taskmerge-20261119; a delegated
@@ -44,7 +44,7 @@ const MAX_REPORTS = 32 // same cap as the sidebar's writer (server/project.js)
 const MAX_NAME = 80 // same cap as the store's writer (server/project.js)
 
 // The shared caller anchor: resolves the calling session's identity and the
-// CONFIG root (D-021 — the session's project, or an explicit project argument;
+// CONFIG root (D-002 — the session's project, or an explicit project argument;
 // never a path walk-up). A delegated subagent resolves to its topmost
 // user-visible ancestor; a subagent whose lineage did not resolve degrades to
 // NO identity (sid null, subagentUnresolved true) so the store never gains a
@@ -63,7 +63,7 @@ function callerAnchor(ctx, exec, projectArg) {
   return { sid, configRoot: p?.project?.path ?? null, subagentUnresolved }
 }
 
-// Sessions store at a KNOWN project root (D-021: the config root comes from
+// Sessions store at a KNOWN project root (D-008: the config root comes from
 // the calling session — no ancestor walk-up). Returns { storeDir } always
 // (readSessionConfigs fails open on a missing store).
 export function sessionsStoreAt(projectRoot) {
@@ -76,7 +76,7 @@ export function sessionsStoreAt(projectRoot) {
 // name (missing entry fields — id, added_at — are filled here from the caller
 // side). Returns { session, report, warnings? } or { error } — never throws,
 // never clobbers sibling sessions (single-session merge write). `warnings`
-// carries the store's read-side skip notices (D-026) so tool results can
+// carries the store's read-side skip notices (D-003) so tool results can
 // surface them.
 export async function registerReportIntoSession(storeDir, sessionId, reportPath, { name } = {}) {
   const { readSessionConfigs, writeSessionConfig } = await import('../core/project.js')
@@ -208,7 +208,7 @@ function buildRoundData(specRound, projectRoot, at) {
   return rd
 }
 
-// OUTPUT root (the design folder, D-021): spec.project_dir > the spec file's
+// OUTPUT root (the design folder, D-008): spec.project_dir > the spec file's
 // parent's parent when the spec sits directly in <design>/SimResults/ > error.
 // Purely local — no project-root verification, no walk-up.
 function deriveProjectRoot(specFile, specObj) {
@@ -260,7 +260,7 @@ export function genReportTools(ctx) {
           throw new Error(`spec must be a JSON object: ${specFile}`)
         }
         // OUTPUT root = the design folder (spec-anchored, local rule); CONFIG
-        // root = the calling session's project (D-021: the sessions store, the
+        // root = the calling session's project (D-008: the sessions store, the
         // plotly source, and the registration all resolve there — no walk-up).
         // A delegated subagent anchors on its topmost user-visible ancestor
         // (src/subagent.js): its reports land in the user session's entry. A
@@ -336,7 +336,7 @@ export function genReportTools(ctx) {
         }
 
         // Auto-registration into the CALLING session's dashboard (identity =
-        // the topmost user-visible session; D-005), with an opt-out: register:
+        // the topmost user-visible session; D-003), with an opt-out: register:
         // false leaves the file unattached — the model then calls register_report
         // itself (any session context, external HTML included). The report is
         // already on disk, so a failure here is reported, never thrown. The
@@ -376,7 +376,7 @@ export function genReportTools(ctx) {
         + 'dashboard. Use it for reports gen_sweep_report did NOT generate (hand-written or third-party '
         + 'HTML), or to attach a report later after generating it with register: false. Everything else '
         + 'is filled from the caller: the session entry key (a delegated subagent resolves to its '
-        + 'topmost user-visible ancestor, src/subagent.js D-025), the store location (the calling '
+        + 'topmost user-visible ancestor, src/subagent.js D-003), the store location (the calling '
         + 'session\'s project, or an explicit project argument), and any missing entry fields (id, '
         + 'added_at, and the display name defaulting to the file\'s basename — pass name to override). '
         + 'Pitfalls: report_path must name an existing regular file ending in .html/.htm (absolute, or '
@@ -398,7 +398,7 @@ export function genReportTools(ctx) {
         try { st = fs.statSync(abs) } catch { throw new Error(`report file not found: ${abs}`) }
         if (!st.isFile()) throw new Error(`report path is not a regular file: ${abs}`)
         if (!/\.html?$/i.test(abs)) throw new Error(`report path must end in .html (or .htm): ${abs}`)
-        // Identity strictly from the caller (D-025: a delegated subagent anchors
+        // Identity strictly from the caller (D-003: a delegated subagent anchors
         // on its topmost user-visible ancestor; there is deliberately NO
         // session_id override — the store stays keyed by user-visible sessions).
         // Unlike gen_sweep_report there is no on-disk artifact to salvage, so

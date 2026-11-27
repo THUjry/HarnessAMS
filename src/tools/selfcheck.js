@@ -1,4 +1,4 @@
-// harnessams_selfcheck — the ONE self-check/config tool (2026-11-19 D-004 wave).
+// harnessams_selfcheck — the ONE self-check/config tool (2026-11-19 D-002 wave).
 // The Overview's four buttons are thin parameterizations of this tool (they go
 // through POST /api/tool, which calls this def's execute directly with the
 // session's project injected and source='user'), and a conversational agent
@@ -6,12 +6,12 @@
 // a partial payload is merged over the stored settings) writes the project's
 // workspace_config.json settings section first, so the agent controls the run
 // configuration with the same single write face the UI uses. Session identity
-// follows the D-005 precedent (exec.agent.id ≡ sessionId, as in
+// follows the D-003 precedent (exec.agent.id ≡ sessionId, as in
 // gen_sweep_report; a delegated subagent resolves to its topmost user-visible
-// ancestor via src/subagent.js) — no project guessing, and since D-021 no
+// ancestor via src/subagent.js) — no project guessing, and since D-008 no
 // path walk-up either: resolveProjectTool (server/project.js) is the one
 // project anchor.
-// 2026-11-25 D-021 write shape: every settings write (1) reconciles json ←
+// 2026-11-25 D-008 write shape: every settings write (1) reconciles json ←
 // AGENTS.md first — the block is authoritative because the agent edits the
 // outside file first; an invalid row is refused (agent: warning, UI: the save
 // is blocked with an error), (2) merges the payload over the reconciled
@@ -41,11 +41,11 @@ export async function runSelfcheckAction(ctx, { sessionId, project, action, sett
     : r)
   if (settings != null) {
     if (typeof settings !== 'object' || Array.isArray(settings)) return { error: 'settings must be an object', code: 400 }
-    // D-021 (1): reconcile json ← AGENTS.md — the block is authoritative.
+    // D-002 (1): reconcile json ← AGENTS.md — the block is authoritative.
     const rec = await reconcileSettings(project.path, { source })
     if (rec.error) return { error: rec.error, code: rec.code ?? 400 }
     if (rec.warnings?.length) warnings.push(...rec.warnings)
-    // (2) partial merge (D-016): the payload overrides the RECONCILED settings
+    // (2) partial merge (D-006): the payload overrides the RECONCILED settings
     // key by key — this call's explicit intent beats the hand-edit baseline,
     // so an agent can pin one value without echoing the whole table.
     const v = validateSettings({ ...rec.settings, ...settings })
@@ -56,7 +56,7 @@ export async function runSelfcheckAction(ctx, { sessionId, project, action, sett
     } catch (e) {
       return { error: `workspace_config.json write failed: ${String(e?.message ?? e)}`, code: 500 }
     }
-    // (4) an explicit toolchain pin write doubles as node memory (D-017): the
+    // (4) an explicit toolchain pin write doubles as node memory (D-003): the
     // machine's CURRENT pin pair is remembered plugin-globally — values set,
     // clears cleared, so a fresh project on the same node prefills and an
     // explicit null STAYS null (the supplement below runs after this, finds
@@ -70,7 +70,7 @@ export async function runSelfcheckAction(ctx, { sessionId, project, action, sett
         remote_spectre_cmd: v.settings.remote_spectre_cmd ?? null,
       }).catch(() => { /* best-effort memory */ })
     }
-    // (5) D-021 null-supplement from the plugin-global memories: only NULL
+    // (5) D-008 null-supplement from the plugin-global memories: only NULL
     // fields fill (an explicit value always wins; a cleared memory key never
     // refills) — a payload that set machine_id prefills that node's remembered
     // pins and python facts here.
@@ -107,9 +107,9 @@ export async function runSelfcheckAction(ctx, { sessionId, project, action, sett
     return withWarnings({ ok: true, facts, checks })
   }
   if (action === 'save_agentsmd') {
-    // D-021: reconcile json ← AGENTS.md first (the ADOPTION path for a
+    // D-002: reconcile json ← AGENTS.md first (the ADOPTION path for a
     // hand-edited block — the agent's natural route for config edits), then
-    // the D-017/D-021 prefill of still-null fields from the global memories,
+    // the D-003/D-002 prefill of still-null fields from the global memories,
     // then the re-render. A settings payload riding this call already did all
     // three steps above; this second pass is idempotent and only fills what
     // the first pass left.
@@ -162,7 +162,7 @@ export function selfcheckTools(ctx) {
       project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
     },
     async execute(args, exec) {
-      // D-021 anchoring with the subagent policy (src/subagent.js): a
+      // D-002 anchoring with the subagent policy (src/subagent.js): a
       // delegated subagent resolves to its topmost user-visible ancestor, so
       // a delegation-run self-check lands on the user session's project and
       // dedup (runningBySession) spans the whole delegation tree.

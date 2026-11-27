@@ -1,4 +1,4 @@
-// Shared IO primitives — the single implementation of each (D-003): the
+// Shared IO primitives — the single implementation of each (D-001): the
 // promisified execFile shared by every local process channel, the BOM-tolerant
 // JSON readers, and the atomic tmp+rename writers. Zero dependencies beyond
 // node builtins: lib/ holds leaf primitives only, and no project or session

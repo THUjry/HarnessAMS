@@ -1,4 +1,4 @@
-// Per-project workspace config — the SINGLE config file (2026-11-19 D-004 wave):
+// Per-project workspace config — the SINGLE config file (2026-11-19 D-002 wave):
 // <workspace>/.harnessams/workspace_config.json. It replaces both the retired
 // project_settings.json and the retired family harnessams.json, and carries two
 // sections:
@@ -10,18 +10,18 @@
 //     the harnessams_selfcheck tool (working environment / mode / machine /
 //     remote_root / selfcheck_remote_dir / scheduler / simulator / compute
 //     scripts / the cluster toolchain pins remote_python + remote_spectre_cmd,
-//     D-016) plus the MEASURED python facts: local_python_version/_path and
+//     D-006) plus the MEASURED python facts: local_python_version/_path and
 //     the local_python_numpy / remote_python_numpy tri-states (yes / no /
-//     fallback — D-021 wave, 2026-11-25). The facts are null until a green
+//     fallback — D-008 wave, 2026-11-25). The facts are null until a green
 //     self-check measures them; global-store memory prefills fresh projects.
 //     The remote root now lives HERE
 //     (settings.remote_root), not in a family map — the project is the single
 //     authority, so UI / config file / AGENTS.md can never disagree.
-// Project anchoring (D-021): there is NO findProjectRoot walk-up anymore —
+// Project anchoring (D-002): there is NO findProjectRoot walk-up anymore —
 // every consumer resolves the project from the calling SESSION (or an explicit
 // project argument) and reads this file at that root; resolveWorkspacePathsAt
 // resolves the workspace section's relative keys against a GIVEN root.
-// Per-session check params are NOT here (D-005: sessions.json carries the
+// Per-session check params are NOT here (D-003: sessions.json carries the
 // confirmed table; checkparams.js reads the project fallback file).
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -45,7 +45,7 @@ const ENUMS = {
   remote_python_numpy: ['yes', 'no', 'fallback'],
 }
 
-// The numpy tri-state fields and their legal values (D-021): "yes" the
+// The numpy tri-state fields and their legal values (D-008): "yes" the
 // interpreter imports numpy natively; "fallback" it does not but the staged
 // numfallback asset imports (the pure-stdlib shim); "no" neither works (a
 // python 2 shell where even the fallback has py3 syntax). null = unmeasured.
@@ -85,12 +85,12 @@ export function defaultSettings() {
     simulator: 'spectre',
     compute_script_local: 'python',
     compute_script_remote: 'python',
-    // cluster toolchain pins (D-016): absolute paths to the executables the
+    // cluster toolchain pins (D-006): absolute paths to the executables the
     // batch channel runs on the cluster side; null = unpinned, the bare
     // defaults apply (python3 / spectre on PATH)
     remote_python: null,
     remote_spectre_cmd: null,
-    // MEASURED python facts (D-021, 2026-11-25): local_* describe THIS host's
+    // MEASURED python facts (D-008, 2026-11-25): local_* describe THIS host's
     // bare `python` (probed at self-check finalize, remembered plugin-globally
     // so a fresh project prefills); remote_python_numpy describes the
     // interpreter the worker ran under (worker telemetry on a green run). null
@@ -127,7 +127,7 @@ export function defaultSimScriptsDir() {
 // (the SmartAnaSim sibling — dev checkout or npm layout); a legacy flipped
 // project or a hand-set root resolves itself. Resolution only; existence is
 // the consumer's problem (the batch worker check fails loud, the stager
-// fails open). `workspacePath` IS the project root (no walk-up since D-021).
+// fails open). `workspacePath` IS the project root (no walk-up since D-002).
 export function resolveScriptsSource(workspacePath) {
   const env = process.env.HARNESSAMS_SIM_SCRIPTS_DIR
   if (env) return path.resolve(env)
@@ -238,7 +238,7 @@ export async function readSettings(workspacePath) {
 }
 
 // Settings at a KNOWN project root, synchronously (the batch tools' setup is
-// synchronous). No walk-up (D-021): the caller resolved the project from the
+// synchronous). No walk-up (D-002): the caller resolved the project from the
 // calling session (or an explicit project argument). A missing or corrupt file
 // = the defaults (out-of-cluster, the conservative channel).
 export function readSettingsAt(projectRoot) {
@@ -274,7 +274,7 @@ export function resolveWorkspacePathsAt(projectRoot) {
   }
 }
 
-// ---- cluster toolchain pins (D-016) -------------------------------------------
+// ---- cluster toolchain pins (D-006) -------------------------------------------
 //
 // remote_python / remote_spectre_cmd name the executables the batch channel
 // runs on the cluster side by ABSOLUTE path (the cluster-setup skill harvests
@@ -310,7 +310,7 @@ export function normalizePin(value, key) {
 
 // ---- validate + write --------------------------------------------------------
 
-// Context-free per-key validation for ONE value (D-021, 2026-11-25): the
+// Context-free per-key validation for ONE value (D-002, 2026-11-25): the
 // single authority validateSettings loops over, and the AGENTS.md reconcile
 // (reconcile.js) reuses to validate one hand-edited yaml row before adopting
 // it. Nullable keys accept null/'' → { value: null }; NO cross-key coupling —
@@ -391,7 +391,7 @@ export function validateSettings(input) {
 // the primary timing, the fresh writeSettings path and the self-check start
 // are backstops). Idempotent: the AGENTS.md template lands only while
 // missing. Since 2026-11-26 there is NO script staging and NO sim_scripts_dir
-// flip here anymore (the package-path-first policy, D-024's plotly shape): a
+// flip here anymore (the package-path-first policy, D-009's plotly shape): a
 // fresh config keeps the packaged default root (the SmartAnaSim sibling in
 // either layout), .harnessams/scripts copies exist only where a config
 // explicitly points at one (the legacy flipped projects, a hand-set root —
@@ -410,7 +410,7 @@ export async function initProjectStorage(workspacePath, { settings } = {}) {
   await fsp.mkdir(dir, { recursive: true })
   if (fresh) {
     // Measured local python facts prefill from the plugin-global memory
-    // (D-021): the local_node_* rows render from process either way (dsh runs
+    // (D-002): the local_node_* rows render from process either way (dsh runs
     // on node — always available, filled at establishment), the python rows
     // PERSIST here, honestly null when this machine was never measured. Pins
     // stay null on a fresh config (no machine to attribute them to yet; the
@@ -426,7 +426,7 @@ export async function initProjectStorage(workspacePath, { settings } = {}) {
     // The template renders the settings about to be WRITTEN when the caller
     // states them (writeSettings' fresh path) — a template carrying the
     // pre-write defaults would read as a divergent hand-edit at the next
-    // reconcile (D-021).
+    // reconcile (D-002).
     await ensureAgentsMdTemplate(workspacePath, { settings: settings ?? cur.config.settings })
   }
   if (configMissing) {
@@ -487,8 +487,8 @@ export async function declarePlotlyUrl(workspacePath) {
   return { added: true, path: file }
 }
 
-// Prefill NULL settings fields from the plugin-global memories (D-017, widened
-// D-021): a node measured for any earlier project heals a project on the same
+// Prefill NULL settings fields from the plugin-global memories (D-003, widened
+// D-002): a node measured for any earlier project heals a project on the same
 // machine (the toolchain pins plus the measured remote_python_numpy tri-state
 // — machine-scoped, machine_id required); THIS host's remembered python facts
 // heal the local_python_* fields (host-scoped, no machine needed). Only NULL

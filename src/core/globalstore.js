@@ -1,4 +1,4 @@
-// Plugin-global store (D-017, 2026-11-25): machine-scope facts that outlive any
+// Plugin-global store (D-003, 2026-11-25): machine-scope facts that outlive any
 // one project. Three tenants:
 //   nodes   — the cluster toolchain pins a node MEASURED for any project (a
 //             green self-check pins them, see selfcheck.js finalize); the next
