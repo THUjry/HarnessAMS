@@ -38,7 +38,8 @@ Every functional area maps to its test files (file-level; the suites run with ba
 
 | Functional area | Tests |
 |---|---|
-| `batch_submit` / `batch_poll` — scheduler matrix, submit contract, netlist pre-check gate, wait_sec polling, abort contract, toolchain pin resolution, auto-naming | `tests/batch.test.mjs` |
+| `batch_submit` / `batch_poll` — scheduler matrix, submit contract, netlist pre-check gate, wait_sec polling, in-flight frame store publication, abort contract, toolchain pin resolution, auto-naming | `tests/batch.test.mjs` |
+| in-flight poll frame store (`core/pollframes.js` — callId-keyed frames shared by `batch_poll` and the session card) | `tests/pollframes.test.mjs` |
 | `harnessams_selfcheck` — settings validation and the single write face, orchestration flows, golden dataset, telemetry/auto-pin, routes | `tests/selfcheck.test.mjs` |
 | AGENTS.md project-config block (template, values sync, reconcile) | `tests/agentsmd.test.mjs` |
 | recommended-workflow table | `tests/selfcheckWorkflow.test.mjs` |
@@ -46,7 +47,7 @@ Every functional area maps to its test files (file-level; the suites run with ba
 | `safe_trash` — round-trip, fences, purge, entry-as-item layout restore | `tests/trash.test.mjs` |
 | per-project config + check-params chain + per-session store | `tests/server.test.mjs`, `tests/checkparams.test.mjs` |
 | dashboard/report browsing, pickers, open-local, report-stat routes | `tests/dashboard.test.mjs` |
-| progress ladder, project summaries, `/api/progress*` endpoints | `tests/progress.test.mjs` |
+| progress ladder, project summaries, `/api/progress*` endpoints (callId fast path) | `tests/progress.test.mjs` |
 | remote directory browser (`/api/remote-browse`) | `tests/remotebrowse.test.mjs` |
 | fork detection | `tests/forkdetect.test.mjs` |
 | diagnosis-session handoff | `tests/diagnose.test.mjs` |
