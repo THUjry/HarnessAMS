@@ -59,9 +59,9 @@ test('apply injects both system prompt sections (fail-open)', async () => {
   assert.match(discipline.text, /stop and ask the user instead of inspecting PDK trees/)
   assert.ok(policy, 'wait-policy section registered')
   assert.equal(policy.order, 5500)
-  // 2026-11-24 safety-core-only rework: the operational cadence moved to the
-  // project AGENTS.md workflow table and the batch-sweep skill — what stays
-  // in the prompt is the ask-first/no-fallback/no-raw-ssh safety core
+  // the prompt keeps the ask-first/no-fallback/no-raw-ssh safety core only;
+  // the operational cadence lives in the project AGENTS.md workflow table
+  // and the batch-sweep skill
   assert.match(policy.text, /stop and ask the user first/)
   assert.match(policy.text, /never improvise a workaround on your own/)
   assert.match(policy.text, /explicit user approval/)
@@ -69,7 +69,7 @@ test('apply injects both system prompt sections (fail-open)', async () => {
   assert.match(policy.text, /never raw ssh commands from the shell/)
   assert.match(policy.text, /prefer the SAS\/HA plugin tools/)
   assert.match(policy.text, /two working environments/, 'the env-dichotomy pointer rides the policy')
-  assert.match(policy.text, /cluster_env row of the project.s AGENTS\.md config block/, 'points at the yaml row, not the retired prose statement')
+  assert.match(policy.text, /cluster_env row of the project.s AGENTS\.md config block/, 'points at the yaml row of the config block')
   // fail-open: without the service, apply still mounts routes/tools quietly
   const bare = {
     effect: (fn) => fn(),
@@ -142,8 +142,8 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   assert.ok(src.includes("slots.inject('tool.call.toolview'"), 'must inject the tool card slot')
   // The endpoints hang off the /harnessams/api prefix (API constant) — pin the
-  // composed forms so an '/api/api/…' double-prefix regression cannot come back.
-  // D-004: the batch_poll card swaps the single-run source for the remote poll.
+  // composed forms so an '/api/api/…' double-prefix cannot slip in.
+  // the batch_poll card swaps the single-run source for the remote poll.
   assert.ok(src.includes("API + (remote ? '/progress-remote' : '/progress')"), 'cards must pick the local/remote progress endpoint')
   assert.ok(src.includes("API + '/progress-summary"), 'cards must poll the progress-summary endpoint')
   assert.ok(src.includes('normRemoteProg'), 'remote payloads must normalize to the prog shape')
@@ -151,9 +151,9 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
   // A failed frame must not show its losses twice (failed:N AND pending:total):
   // the result view takes the payload's own pending when it carries one.
   assert.ok(src.includes('v: d.pending ?? ('), 'result card prefers the payload pending')
-  // A key typo never renders (silent generic-card fallback), so the three heavy
-  // tool names are pinned against the model-facing tool surface verbatim (the
-  // D-004 scope ruling shrank the list from eight).
+  // A key typo never renders (silent generic-card fallback), so the carded
+  // tool names are pinned against the model-facing tool surface verbatim —
+  // batch_poll is the one carded tool.
   const m = /const SIM_CARD_TOOLS = \[([^\]]+)\]/.exec(src)
   assert.ok(m, 'SIM_CARD_TOOLS list must exist')
   const cardTools = m[1].split(',').map((s) => s.trim().replace(/^'|'$/g, '')).filter(Boolean)
@@ -166,9 +166,8 @@ test('client half: simulation tool cards keyed by exact wire tool names', async 
 
 test('client half: single tab — two-entry strip (project overview + this session)', async () => {
   const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
-  // ONE tab remains, and its first-level strip is exactly TWO entries since the
-  // task retirement (D-003, 2026-11-19) — the project overview (default) and
-  // the current session's own capsule.
+  // ONE tab: its first-level strip is exactly two entries — the project
+  // overview (default) and the current session's own capsule.
   assert.ok(src.includes('function ProjectOverviewView'), 'project overview view component')
   assert.ok(src.includes("config.display === 'overview' && h(ProjectOverviewView"), 'overview renders as the strip selection')
   assert.ok(src.includes("'tasks.projectOverview'"), 'project overview strip capsule copy key')
@@ -178,18 +177,17 @@ test('client half: single tab — two-entry strip (project overview + this sessi
   assert.ok(src.includes('const sidebarOpenState'), 'open-state tracking')
   assert.ok(src.includes('right.openTab(TAB_KIND)'), 'reopen targets the HarnessAMS tab')
   assert.ok(src.includes('overviewMemory'), 'same-project remount cache stays')
-  // The check sub-view keeps its contract (per-session since D-003)
+  // The check sub-view keeps its contract (per-session)
   assert.ok(/id: 'check', labelKey: 'tasks\.viewCheck'/.test(src), 'TASK_VIEWS must carry the check view')
   assert.ok(src.includes("API + '/session-config"), 'check sub-view reads through the session-config API')
   assert.ok(src.includes('fallback_params'), 'unconfirmed table shows the fallback source')
   assert.ok(src.includes('check.oldValue'), 'unconfirmed edits must show the old value')
 })
 
-test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow, 8-line clamp, per-session selection', async () => {
+test('client half: single scroll, no horizontal overflow, 8-line clamp, per-session selection', async () => {
   const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
   // ONE scroll container: the task tab's outer .hams-body; the overview is
-  // plain flowing content (the old nested .hams-body + height:100% chain is
-  // what starved the overview of its vertical scrollbar)
+  // plain flowing content (no nested body box, no height:100% chain)
   assert.equal((src.match(/className: 'hams-body'/g) ?? []).length, 1, 'exactly one scroll container element')
   assert.ok(src.includes('.hams-body { padding: 8px 10px; overflow-y: auto; overflow-x: hidden;'), 'scroll container bans horizontal scroll')
   assert.ok(src.includes("flex: 'none', fontSize: 'var(--dsh-content-font-size, 14px)'"), 'overview flows, no height chain')
@@ -204,19 +202,19 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   // dropdown options follow the theme (hover-only-readable bug)
   assert.ok(src.includes('.hams-select { color-scheme: light dark; }'), 'select color-scheme')
   assert.ok(src.includes('.hams-select option { background: canvas; color: canvasText; }'), 'option colors')
-  // per-session CONFIG with fork-split first-seen (D-003): a forked session
+  // per-session CONFIG with fork-split first-seen: a forked session
   // deep-copies the previously active session's CURRENT config (deliberately
   // branch-point-independent); a brand-new session starts empty; every change
-  // merge-PUTs through sessions.json (versionless, D-003)
+  // merge-PUTs through the versionless sessions.json
   assert.ok(src.includes('const sessionConfigState = new Map()'), 'per-session config map')
   assert.ok(src.includes('function sessionConfigOf(sessionId, fork, fallbackSource)'), 'first-seen fork split via sessionConfigOf')
   assert.ok(src.includes('function forkCopySource('), 'copy source: last-active, else the store recency tail')
   assert.ok(src.includes('function cloneSessionConfig'), 'deep copy (fork inherits the whole config)')
   assert.ok(src.includes('adoptWith(!!d?.fork, sessions)'), 'the server fork verdict drives the split')
   assert.ok(src.includes('const lastActiveSessionId = { id: null }'), 'last-active session memory')
-  assert.ok(src.includes('function putSessionConfig(sessionId, { retries = 4 } = {})'), 'merge-PUT persistence (bounded-retry form, D-004)')
+  assert.ok(src.includes('function putSessionConfig(sessionId, { retries = 4 } = {})'), 'merge-PUT persistence (bounded-retry form)')
   assert.ok(src.includes("API + '/session-config?sessionId='"), 'session-config API wired')
-  // D-003 store read warnings: every session-config GET captures the read-side
+  // store read warnings: every session-config GET captures the read-side
   // skip notices and the session branch renders one warn line (tr summary +
   // ClampText detail); the zh/en key pair is enforced by the dict-key test
   assert.ok(src.includes('const storeWarningsOf = (d)'), 'store warning capture helper')
@@ -230,14 +228,14 @@ test('client half: 2026-11-18 UI wave — single scroll, no horizontal overflow,
   assert.ok(src.includes('autoOpenedFor'), 'once per page lifetime')
 })
 
-test('client half: fork adopt awaits session persistence before mounting an inherited report (D-008 fix)', async () => {
+test('client half: fork adopt awaits session persistence before mounting an inherited report', async () => {
   const src = await readFile(new URL('../src/client/client.js', import.meta.url), 'utf8')
-  // The 2026-11-21 fork bug: adoptWith setConfig'd a config whose dashboard_
-  // selected mounts the /dash iframe while the fork's sessions.json entry was
-  // still in flight (fire-and-forget PUT, swallowed errors) — the iframe 404'd
-  // until a manual refresh. The fix pins BOTH halves: the await-before-setConfig
-  // ordering and a bounded retry on the PUT itself (a fork session not yet in
-  // the workspace registry 404s transiently).
+  // adoptWith must not setConfig a dashboard-selected config before the
+  // fork's own sessions.json entry has landed: the /dash iframe mount reads
+  // that entry, and a fire-and-forget PUT (or a fork session not yet in the
+  // workspace registry, a transient 404) leaves the iframe 404ing until a
+  // manual refresh. Both halves are pinned: await-before-setConfig and a
+  // bounded retry on the PUT itself.
   assert.ok(src.includes('const adoptWith = async (fork, sessionsMap)'), 'adoptWith must be async')
   assert.ok(src.includes('await putSessionConfig(sessionId)'), 'first-seen adopt must await persistence before setConfig')
   assert.ok(src.includes('if (!alive) return'), 'stale adopt after unmount must not setConfig')

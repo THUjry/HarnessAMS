@@ -1,15 +1,11 @@
-// workflowTable (server/selfcheckWorkflow.js) — the recommended-workflow table
-// rendered into the AGENTS.md project-config block on values builds. The
-// 2026-11-24 rework replaced the five prose self-check branches with ONE
-// table; the 2026-11-25 D-002 dedup slimmed it to purpose rows; the
-// 2026-11-26 ruling dropped the POINTER CLAUSES too ("documented in the
-// batch_submit description" & co.): the tool descriptions are already in the
-// model's context, so each row is now the action + a minimal fill hint and
-// nothing else. Five rows (Write/Submit/Monitor/Analyze/Report), columns
-// Step | Tool | Model fills. The Write row is the write action itself (the
-// hand-authored netlist), not a pre-check call. The only remaining
-// cluster_env fork is the Analyze row's Tool cell. ASCII-only by the block's
-// language ruling; one line per table row.
+// workflowTable (core/selfcheckWorkflow.js) — the recommended-workflow table
+// rendered into the AGENTS.md project-config block on values builds: five
+// purpose rows (Write/Submit/Monitor/Analyze/Report), columns
+// Step | Tool | Model fills. Each row is the action + a minimal fill hint
+// only — the tool descriptions are already in the model's context, so no
+// row repeats them. The Write row is the write action itself (the
+// hand-authored netlist), not a pre-check call. The only cluster_env
+// fork is the Analyze row's Tool cell. ASCII-only; one line per table row.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { workflowTable } from '../src/core/selfcheckWorkflow.js'

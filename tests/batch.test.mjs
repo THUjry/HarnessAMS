@@ -1,7 +1,7 @@
 // Generic remote batch tools: machine resolution, upload/submit/poll against
 // a mocked @linxin666/dsh-ssh tool shell (structured values, no network, no SSH, no
 // LSF required). The scheduler=ssh path is the detached launch mode (nohup, no bsub). The
-// channel matrix follows the project's cluster_env (D-001): out-of-cluster (the
+// channel matrix follows the project's cluster_env: out-of-cluster (the
 // default for bare temp dirs) keeps every operation over the mocked ssh shell;
 // in-cluster tests plant a .harnessams project root with cluster_env=in-cluster
 // and a mocked ctx.shell seam — bsub runs "locally" and transfers are plain
@@ -9,11 +9,11 @@
 // worker-script upload tree comes from the project's
 // workspace_config.json workspace.sim_scripts_dir; tests point
 // HARNESSAMS_SIM_SCRIPTS_DIR at a self-built fixture, and the fencing remote root
-// is an explicit remote_root argument (the per-project settings.remote_root —
-// the family remote_machines map is retired), so nothing depends on the real
+// is an explicit remote_root argument (the per-project settings.remote_root),
+// so nothing depends on the real
 // SmartAnaSim checkout or any workspace file.
 // The ssh_exec wrapping (timeout -s KILL) and the value shapes live in
-// remote.test.mjs / server.test.mjs; submit/ssh idempotency guards are asserted
+// server.test.mjs; submit/ssh idempotency guards are asserted
 // here against the generated commands.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -62,7 +62,7 @@ const HOSTS = [
   // there): node1 carries a jump chain (the second hop), lab9 is a direct
   // jump-less entry — the second-hop policy tests lean on exactly that
   { alias: 'node1', host: '192.0.2.11', port: 22, user: 'op', auth: 'key', keyReady: true, proxyJump: ['login4'] },
-  // a second registry alias — the registry is pure facts now (roots are
+  // a second registry alias — the registry is pure facts (roots are
   // per-project settings, not machine columns), it resolves like any other
   { alias: 'lab9', host: '192.0.2.99', port: 22, user: 'op', auth: 'key', keyReady: true, proxyJump: [] },
 ]
@@ -81,11 +81,11 @@ function pollValue({ meta = 2, total = 2, status = 'completed', bjobs = '777 RUN
 // src/tools.ts (ssh_exec failures are values, not throws). Commands arrive
 // already wrapped by execRemote (timeout -s KILL ... -- sh -c "..."); routing
 // matches substrings inside the wrapper, exactly like the assertions below.
-// D-002 anchoring fixture: a registered workspace root the harness injects as
+// Anchoring fixture: a registered workspace root the harness injects as
 // the explicit `project` argument of every tool call — the tools resolve the
-// project through the registry/session seam now, the findProjectRoot walk-up
-// is gone. The default mirrors the old walk-up-fail-open behavior (defaults,
-// out-of-cluster); tests with a planted root pass it as `project`.
+// project through the registry/session seam (no findProjectRoot walk-up).
+// The bare default is the out-of-cluster defaults; tests with a planted
+// root pass it as `project`.
 function makeAnchoredProject(clusterEnv = 'out-of-cluster', extra = {}) {
   const root = tmp('hams-anchor-')
   fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
@@ -117,7 +117,7 @@ function makeCtx({ poll = {}, pollSeq = null, archive = null, failUpload = false
     workspaceRegistry: registryFor(proj),
     tools: {
       // spectre_pre_check: registered by default (a passing check); the
-      // preCheck option drives the D-005 submit-gate tests
+      // preCheck option drives the submit-gate tests
       get: (name) => ((['ssh_list', 'ssh_exec', 'ssh_upload', 'ssh_download'].includes(name)
         || (name === 'spectre_pre_check' && !preCheck.missing))
         ? { name } : undefined),
@@ -256,7 +256,7 @@ function tool(ctx, name) {
   const def = toolDefinitions(ctx).find((d) => d.name === name)
   assert.ok(def, name)
   const t = makeTool(def)
-  // D-002: inject the harness's anchored project as the explicit `project`
+  // inject the harness's anchored project as the explicit `project`
   // argument of every call (the session seam itself is covered in
   // server.test.mjs / selfcheck.test.mjs)
   const proj = ctx.__fixtureProject
@@ -284,7 +284,7 @@ test('worker scripts root: env override resolves, bad values and pluginScripts l
     assert.equal(s.local, path.join(SCRIPTS_ROOT, ...s.rel.split('/')))
   }
 
-  // The sibling assets bucket (D-002): snp_common resolves its numfallback
+  // The sibling assets bucket: snp_common resolves its numfallback
   // import at <scripts root>/../assets, so that is the one probe — absent in
   // the bare fixture, listed when planted next to a scripts root.
   assert.deepEqual(pluginAssets(SCRIPTS_ROOT), [], 'no sibling assets dir in the bare fixture')
@@ -321,7 +321,7 @@ test('batch_submit resolves machine/root from the project settings and uploads t
     const run = makeRunDir({ under: root })
     const ctx = makeCtx({ project: root })
     // machine_id and remote_root deliberately omitted: both must resolve from
-    // the project settings (D-008: the session-resolved project, injected by
+    // the project settings (the session-resolved project, injected by
     // the harness registry — no walk-up)
     const res = await tool(ctx, 'batch_submit').execute({
       run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
@@ -333,7 +333,7 @@ test('batch_submit resolves machine/root from the project settings and uploads t
     assert.ok(uploads.includes('/home/op/sim/.harnessams/scripts/spectre/spectre_sweep_worker.py'),
       'worker uploaded from the configured scripts root')
     assert.ok(uploads.includes('/home/op/sim/.harnessams/assets/numfallback.py'),
-      'the sibling assets bucket uploads beside the scripts root (D-002)')
+      'the sibling assets bucket uploads beside the scripts root')
   } finally {
     restoreEnv()
     fs.rmSync(base, { recursive: true, force: true })
@@ -341,10 +341,10 @@ test('batch_submit resolves machine/root from the project settings and uploads t
   }
 })
 
-// D-002 (read-side reconcile): a hand-edited AGENTS.md yaml row takes effect
+// Read-side reconcile: a hand-edited AGENTS.md yaml row takes effect
 // at the very next batch_submit read — no write in between; an illegal row
 // keeps the stored value and warns into the submit result.
-test('batch_submit overlays a hand-edited AGENTS.md block at READ time (D-008)', async () => {
+test('batch_submit overlays a hand-edited AGENTS.md block at READ time', async () => {
   const base = tmp('hams-ov-')
   const scriptsRoot = path.join(base, 'scripts')
   fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
@@ -390,10 +390,8 @@ test('batch_submit overlays a hand-edited AGENTS.md block at READ time (D-008)',
   }
 })
 
-// 2026-11-25: PEND right after bsub is the expected state (queueing), not a
-// failure — the submit result says queued with zero failure-shaped warnings
-// (the old wording "post-submit verification failed: <job> PEND" + "no
-// .worker_started marker yet" fired on every healthy queued submit).
+// PEND right after bsub is the expected state (queueing), not a
+// failure — the submit result says queued with zero failure-shaped warnings.
 test('batch_submit classifies a queued (PEND) job as expected — state queued, no warnings', async () => {
   const base = tmp('hams-pend-')
   const scriptsRoot = path.join(base, 'scripts')
@@ -427,10 +425,10 @@ test('batch_submit classifies a queued (PEND) job as expected — state queued, 
   }
 })
 
-// 2026-11-26: the second-hop (ProxyJump) policy — a dsh-ssh entry without a
+// The second-hop (ProxyJump) policy — a dsh-ssh entry without a
 // jump chain still runs DIRECT (never blocked), but the submit result warns;
 // an entry carrying a jump chain stays silent. An alias entirely absent from
-// the registry remains the hard up-front error (resolveMachine, unchanged).
+// the registry remains the hard up-front error (resolveMachine).
 test('batch_submit second-hop policy: no ProxyJump warns and still runs direct; a jump chain stays silent', async () => {
   const base = tmp('hams-jump-')
   const scriptsRoot = path.join(base, 'scripts')
@@ -454,7 +452,7 @@ test('batch_submit second-hop policy: no ProxyJump warns and still runs direct; 
       run_dir: run, remote_dir: 'batch1', worker: 'spectre/spectre_sweep_worker.py',
     }, {})
     // the direct connection runs: the submit succeeds and the warning rides
-    // the result (2026-11-26 ruling: warn, never block)
+    // the result (warn, never block)
     assert.equal(res.ok, true, JSON.stringify(res))
     assert.equal(res.state, 'queued')
     assert.ok(res.warnings.some((w) => /no ProxyJump \(second hop\)/.test(String(w))), JSON.stringify(res.warnings))
@@ -473,10 +471,10 @@ test('batch_submit second-hop policy: no ProxyJump warns and still runs direct; 
   }
 })
 
-// 2026-11-25 (D-004): the session-level Max-points-per-scan gate. A 222-point
+// The session-level max-points-per-scan gate. A 222-point
 // sweep_config against the calling session's limit of 100 rejects before any
 // upload; raising the session field to 250 lets the same scan through.
-test('batch_submit enforces the session max-points-per-scan gate (D-004)', async () => {
+test('batch_submit enforces the session max-points-per-scan gate', async () => {
   const base = tmp('hams-mp-')
   const scriptsRoot = path.join(base, 'scripts')
   fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
@@ -525,14 +523,14 @@ test('batch_submit enforces the session max-points-per-scan gate (D-004)', async
   }
 })
 
-// 2026-11-26: the subagent anchoring policy (src/subagent.js). A delegated
+// The subagent anchoring policy (src/subagent.js). A delegated
 // subagent's own id is never workspace-accounted; its effective id is the
-// topmost user-visible ancestor, so the D-004 gate reads the USER session's
+// topmost user-visible ancestor, so the scan-size gate reads the USER session's
 // limit and the nested pre-check call carries the USER session's id. The
 // fixture drops makeCtx's explicit `project` injection and accounts only the
 // ancestor session in the registry — the lineage walk is the only way
 // through.
-test('batch_submit anchors a subagent call on the ancestor session (D-004 gate + nested pre-check id)', async () => {
+test('batch_submit anchors a subagent call on the ancestor session (gate + nested pre-check id)', async () => {
   const base = tmp('hams-sub-')
   const scriptsRoot = path.join(base, 'scripts')
   fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
@@ -601,10 +599,10 @@ test('poll output parsing: job states and shell splices', () => {
   assert.equal(empty.state, 'completed')
   const running = parsePollOutput(pollValue({ meta: 1, total: 2, status: 'running' }).stdout, { total: 2 })
   assert.equal(running.state, 'running')
-  // Live-sampled 2026-11-22: a progress file written WITHOUT a trailing newline
+  // A progress file written WITHOUT a trailing newline
   // makes the shell splice `cat sweep_progress.json` straight into `echo __ERR__`
   // (`}__ERR__`). The section split must tolerate the missing boundary newline
-  // — before the fix this shape silently parsed progress to null (succeeded 0).
+  // — a spliced shape must parse, never silently degrade to null.
   const noNl = '__BJOB__\n777 RUN\n__META__\n1\n__DIRS__\n1\n__PROG__\n'
     + '{"status": "running", "total_points": 2, "completed": 1, "succeeded": 1, "failed": 0,'
     + ' "simulator": "fake", "compute_node": "node3"}__ERR__\n'
@@ -647,7 +645,7 @@ test('submit/ssh commands carry the replay idempotency guards (and bsub -m)', ()
   assert.ok(ssh.includes('&& touch .hams_ssh_done'), 'marker written only on worker success')
   assert.ok(!submit.includes('rm -f .hams_submitted'), 'plain submit never clears markers')
 
-  // overwrite=true (2026-11-23): a finished batch re-runs — stale markers are
+  // overwrite=true: a finished batch re-runs — stale markers are
   // cleared under the lock, and the fresh markers carry a tag so a replay of
   // the SAME overwrite call still short-circuits instead of double-running
   const ow = buildSubmitCommand({
@@ -711,7 +709,7 @@ test('batch_submit uploads the worker scripts tree and run files, then records t
   }
 })
 
-test('batch_submit runs the SmartAnaSim netlist pre-check before staging (D-005)', async () => {
+test('batch_submit runs the SmartAnaSim netlist pre-check before staging', async () => {
   try {
     const run = makeRunDir()
     const ctx = makeCtx()
@@ -803,7 +801,7 @@ test('batch_submit scheduler=ssh launches the worker detached on the target host
     }, {})
     assert.equal(res.ok, true, JSON.stringify(res))
     assert.equal(res.scheduler, 'ssh')
-    // D-004: a quick launch returns the non-terminal state — the mocked worker
+    // a quick launch returns the non-terminal state — the mocked worker
     // reports its .worker_started marker, so the startup verification maps to running
     assert.equal(res.state, 'running')
     assert.match(res.output, /worker detached/)
@@ -821,14 +819,14 @@ test('batch_submit scheduler=ssh launches the worker detached on the target host
     const ssh = String(launch.arguments.command).replace(/\\+"/g, '"')
     assert.match(ssh, /"--work-dir" "\/home\/op\/sim\/fore"/)
     assert.ok(ssh.includes('.hams_ssh_done'), 'ssh run carries the done-marker guard')
-    // D-004 shape: the guarded block is backgrounded with every fd redirected
+    // the guarded block is backgrounded with every fd redirected
     // (survives the channel closing) and the foreground waits for the marker
     assert.ok(ssh.includes('nohup sh -c'), 'guarded block runs under nohup')
     assert.ok(ssh.includes('> ssh_worker.log 2>&1 < /dev/null &'), 'worker fds redirected away from the channel')
     assert.match(ssh, /while \[ \\?\$i -lt 20 \]/, 'bounded startup wait')
     assert.ok(ssh.includes('.worker_started'), 'startup wait watches the worker marker')
     assert.ok(ssh.includes('__STARTED__'), 'startup verification marker in the launch output')
-    // the exec budget is launch-scale (60 s + execRemote's 90 s headroom), NOT the retired 600 s per-run deadline
+    // the exec budget is launch-scale (60 s + execRemote's 90 s headroom), not a per-run deadline
     assert.equal(launch.arguments.timeoutMs, 150_000)
   } finally {
     restoreEnv()
@@ -869,7 +867,7 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
     assert.equal(res.scheduler, 'local')
     assert.equal(res.state, 'running')
     assert.equal(typeof res.pid, 'number')
-    // zero SSH hops — but the netlist pre-check (D-005) did run as a tool call
+    // zero SSH hops — but the netlist pre-check did run as a tool call
     assert.equal(ctx.calls.filter((c) => c.name.startsWith('ssh_')).length, 0, 'local submit touches no ssh tool')
     assert.ok(ctx.calls.some((c) => c.name === 'spectre_pre_check'), 'the pre-check ran before the local spawn')
 
@@ -892,8 +890,8 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
     assert.equal(ctx.calls.filter((c) => c.name.startsWith('ssh_')).length, 0, 'local poll reads files only')
 
     // a worker that dies at startup is a FAILED frame carrying its stderr — not
-    // "running" until wait_sec runs out (the blocking poll used to burn its
-    // whole window on a corpse)
+    // "running" until wait_sec runs out (a blocking poll must not burn its
+    // whole window on a dead worker)
     const workerFile = path.join(scriptsRoot, 'spectre', 'spectre_sweep_worker.py')
     fs.writeFileSync(workerFile, [
       'import sys',
@@ -924,7 +922,7 @@ test('scheduler=local: detached worker + local poll, zero ssh (in-cluster projec
 
     // sim_scripts_dir naming an existing directory IS the scripts root (the
     // documented override) and wins over the env/project default — a custom
-    // worker tree runs as handed, not the stock worker (2026-11-23 instance check)
+    // worker tree runs as handed, not the stock worker
     const otherRoot = tmp('hams-local-root-')
     fs.mkdirSync(path.join(otherRoot, 'spectre'), { recursive: true })
     fs.writeFileSync(path.join(otherRoot, 'spectre', 'spectre_sweep_worker.py'), 'import sys; sys.exit(0)\n')
@@ -979,7 +977,7 @@ test('batch_poll reads the job file, reports completed, auto-fetches and breaks 
   }
 })
 
-test('batch_poll wait_sec (D-004): re-polls through a running batch until it settles', async () => {
+test('batch_poll wait_sec: re-polls through a running batch until it settles', async () => {
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
@@ -1002,7 +1000,7 @@ test('batch_poll wait_sec (D-004): re-polls through a running batch until it set
   }
 })
 
-test('batch_poll wait_sec (D-004): deadline returns the last (non-terminal) payload', async () => {
+test('batch_poll wait_sec: deadline returns the last (non-terminal) payload', async () => {
   const run = makeRunDir()
   try {
     fs.writeFileSync(path.join(run, '.batch_job.json'), JSON.stringify({
@@ -1036,7 +1034,7 @@ test('batch tools reject escaped paths and unresolvable machines', async () => {
       remote_scripts_dir: '/tmp/elsewhere', sync_scripts: true,
     }, {}), /remote_scripts_dir must be under the remote workspace/)
 
-    // machine_id falls back to the project settings first (2026-11-24); with
+    // machine_id falls back to the project settings first; with
     // no configured machine either, the rejection comes from machine resolution
     // (the resolveMachine unit surface — ghost host, root-required, alias
     // resolution — lives in server.test.mjs)
@@ -1088,7 +1086,7 @@ test('batch_submit auto-names the remote dir Sim<N>_<date>_batch<M> when remote_
       worker: 'spectre/spectre_sweep_worker.py',
     }, {})
     // Sim1 is the highest index but dated yesterday -> new index, batch1; the
-    // auto-name lands under <remote_root>/RawResults (D-008 layout)
+    // auto-name lands under <remote_root>/RawResults
     const today = new Date()
     const pad = (n) => String(n).padStart(2, '0')
     const stamp = `${today.getFullYear()}${pad(today.getMonth() + 1)}${pad(today.getDate())}`
@@ -1132,7 +1130,7 @@ test('batch_submit surfaces upload failures and refuses to clobber a batch', asy
   }
 })
 
-test('nextSimDir: Sim<N>_<date>_batch<M> naming rules (2026-11-21 convention)', () => {
+test('nextSimDir: Sim<N>_<date>_batch<M> naming rules', () => {
   // empty root -> Sim0 batch1
   assert.equal(nextSimDir([], '20261121'), 'Sim0_20261121_batch1')
   assert.equal(nextSimDir(['misc', 'Round1', 'sim0_x'], '20261121'), 'Sim0_20261121_batch1')
@@ -1149,7 +1147,7 @@ test('nextSimDir: Sim<N>_<date>_batch<M> naming rules (2026-11-21 convention)', 
     'Sim2_20261121_batch1')
 })
 
-test('in-cluster LSF (D-001): bsub through ctx.shell, transfers are local copies, no ssh', async () => {
+test('in-cluster LSF: bsub through ctx.shell, transfers are local copies, no ssh', async () => {
   const proj = makeProjectRoot('in-cluster')
   const shared = makeSharedRoot()
   const localShared = path.resolve(shared)
@@ -1224,7 +1222,7 @@ test('lsf_node pins bsub -m and validates its token shape', async () => {
   }
 })
 
-test('in-cluster LSF poll (D-001): reads bjobs and fetches results locally', async () => {
+test('in-cluster LSF poll: reads bjobs and fetches results locally', async () => {
   const proj = makeProjectRoot('in-cluster')
   const shared = makeSharedRoot()
   const localShared = path.resolve(shared)
@@ -1253,7 +1251,7 @@ test('in-cluster LSF poll (D-001): reads bjobs and fetches results locally', asy
   }
 })
 
-test('in-cluster scheduler=ssh (D-001): exec over ssh, staging stays a local copy', async () => {
+test('in-cluster scheduler=ssh: exec over ssh, staging stays a local copy', async () => {
   const proj = makeProjectRoot('in-cluster')
   const shared = makeSharedRoot()
   const localShared = path.resolve(shared)
@@ -1289,7 +1287,7 @@ test('in-cluster scheduler=ssh (D-001): exec over ssh, staging stays a local cop
   }
 })
 
-// ---- toolchain pins (D-006) ---------------------------------------------------
+// ---- toolchain pins -----------------------------------------------------------
 //
 // The project settings carry absolute paths for the worker interpreter
 // (remote_python) and the spectre executable (remote_spectre_cmd). Every
@@ -1315,7 +1313,7 @@ const flatCommand = (ctx, needle) => {
   return String(call.arguments.command).replace(/\\+"/g, '"')
 }
 
-test('toolchain pins (D-006): remote_python / remote_spectre_cmd resolve from the project settings on every remote scheduler', async () => {
+test('toolchain pins: remote_python / remote_spectre_cmd resolve from the project settings on every remote scheduler', async () => {
   const base = tmp('hams-pins-')
   const root = path.join(base, 'proj')
   fs.mkdirSync(path.join(root, '.harnessams'), { recursive: true })
@@ -1342,7 +1340,7 @@ test('toolchain pins (D-006): remote_python / remote_spectre_cmd resolve from th
     assert.equal(job.remote_python, PIN_PY, 'the job file records the interpreter that ran')
     assert.deepEqual(job.worker_args, ['--config', 'sweep_config.json', '--spectre-cmd', PIN_SPECTRE])
 
-    // ssh scheduler: the same pair, detached launch (D-004)
+    // ssh scheduler: the same pair, detached launch
     const sshCtx = makeCtx({ project: root })
     const res2 = await submit(sshCtx, { remote_dir: 'fore', scheduler: 'ssh' })
     assert.equal(res2.ok, true, JSON.stringify(res2))
@@ -1358,8 +1356,8 @@ test('toolchain pins (D-006): remote_python / remote_spectre_cmd resolve from th
     assert.ok(bsub3.includes(`"--spectre-cmd" "${PIN_SPECTRE}"`), 'the spectre pin still rides along')
 
     // a bare remote_python is refused BEFORE anything is staged — it resolves
-    // to whatever tool python comes first on PATH (the 2026-11-24 incident;
-    // the full bare-name validation surface lives in selfcheck's settings test)
+    // to whatever tool python comes first on PATH (the full bare-name
+    // validation surface lives in selfcheck's settings test)
     const ctx4 = makeCtx({ project: root })
     await assert.rejects(() => submit(ctx4, { remote_dir: 'batch4', remote_python: 'python3' }),
       /remote_python must be an ABSOLUTE path to the executable/)
@@ -1376,7 +1374,7 @@ test('toolchain pins (D-006): remote_python / remote_spectre_cmd resolve from th
     assert.equal(own.split('--spectre-cmd').length - 1, 1, 'exactly one --spectre-cmd')
     assert.ok(own.includes('"/opt/tools/legacy/bin/spectre"'))
 
-    // an unpinned project: the bare defaults, the behavior of every earlier test
+    // an unpinned project: the bare defaults
     const ctx7 = makeCtx()
     await tool(ctx7, 'batch_submit').execute({
       run_dir: makeRunDir(), remote_dir: 'batch7', machine_id: 'node1', remote_root: '/home/op/sim', worker: WORKER,
@@ -1390,7 +1388,7 @@ test('toolchain pins (D-006): remote_python / remote_spectre_cmd resolve from th
   }
 })
 
-test('toolchain pins (D-006): in-cluster — the local bsub carries the pins, the local scheduler spawns the pinned interpreter', async () => {
+test('toolchain pins: in-cluster — the local bsub carries the pins, the local scheduler spawns the pinned interpreter', async () => {
   // a runnable fake worker under a private scripts root (the shared fixture
   // tree is a stub whose upload manifest is pinned by another test)
   const scriptsRoot = tmp('hams-pin-local-')
@@ -1437,7 +1435,7 @@ test('toolchain pins (D-006): in-cluster — the local bsub carries the pins, th
   }
 })
 
-// ---- abort contract (D-004) --------------------------------------------------
+// ---- abort contract -----------------------------------------------------------
 //
 // The session stop reaches the channels as the tool's exec.signal. callTool
 // must settle AT ONCE even when the nested tool body never settles (dsh-ssh
@@ -1445,7 +1443,7 @@ test('toolchain pins (D-006): in-cluster — the local bsub carries the pins, th
 // until its bodies settle), and the batch input must carry the signal down so
 // exec-shaped calls get dsh-ssh's KILL + channel close.
 
-test('abort contract (D-004): callTool races a never-settling nested call and reports the uncertainty', async () => {
+test('abort contract: callTool races a never-settling nested call and reports the uncertainty', async () => {
   const ac = new AbortController()
   let nestedSignal = null
   const ctx = {
@@ -1468,7 +1466,7 @@ test('abort contract (D-004): callTool races a never-settling nested call and re
   assert.ok(nestedSignal && nestedSignal.aborted, 'the nested batch input carried and aborted the signal')
 })
 
-test('abort contract (D-004): an already-aborted signal returns without dispatching', async () => {
+test('abort contract: an already-aborted signal returns without dispatching', async () => {
   let dispatched = false
   const ctx = {
     tools: {
@@ -1484,7 +1482,7 @@ test('abort contract (D-004): an already-aborted signal returns without dispatch
   assert.equal(dispatched, false)
 })
 
-test('batch_poll without a job record states the batch uncertainty (D-004)', async () => {
+test('batch_poll without a job record states the batch uncertainty', async () => {
   const run = makeRunDir()
   try {
     const ctx = makeCtx()

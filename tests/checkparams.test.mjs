@@ -1,5 +1,5 @@
-// Check-parameters storage + API contract (per-session since D-003): module
-// read/validate semantics survive unchanged (the project file is the FALLBACK
+// Check-parameters storage + API contract (per-session): module
+// read/validate semantics (the project file is the FALLBACK
 // layer) and /api/session-config carries fallback_params (+ the sessions
 // map with per-session confirmed tables).
 // Run: bare `node --test` from the repo root.
@@ -52,8 +52,8 @@ test('checkparams: validateCheckParams rejects bad shapes, accepts good ones', (
   assert.ok(validateCheckParams({ ...good, mult: { ...good.mult, nf: [0, 64] } }).error) // min>0
   assert.ok(validateCheckParams({ ...good, mult: { ...good.mult, m: [1, 2.5] } }).error) // non-integer
   assert.ok(validateCheckParams({ ...good, unit_check: 'on' }).error)
-  // the session table carries the full new shape — a pre-mult entry is
-  // rejected (existing sessions are deliberately not kept compatible)
+  // a session table must carry the full shape: no mult table -> rejected
+  // (tables are never auto-migrated between shapes)
   assert.ok(validateCheckParams({ rcl: good.rcl, unit_check: true }).error) // no mult table
 })
 

@@ -1,8 +1,8 @@
-// Fork detection (D-003): a session counts as forked iff its own log carries
+// Fork detection: a session counts as forked iff its own log carries
 // the inherited cut marker — event {type:'session/end-seed', data:{inherited:true}}
 // (dsh-session buildForkSeed). Resumed sessions write end-seed WITHOUT the flag,
 // so the predicate is the flag, not the event type. Everything fails open to
-// "not a fork". Live probe evidence: harnessams-workspace/probe-taskmerge-20261119.
+// "not a fork".
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises'
@@ -29,8 +29,8 @@ test('forkdetect: inherited marker is the exact predicate; resume markers never 
       ev('session/end-seed', { seq: 37, data: { inherited: true } }),
       ev('turn/end', { seq: 38, data: { kind: 'forked' } }),
     ])
-    // resumed (NOT forked) session: end-seed WITHOUT inherited — historical
-    // logs prove this shape exists and must not false-positive
+    // resumed (NOT forked) session: end-seed WITHOUT inherited — this shape
+    // must not false-positive
     await seedLog(home, 'session-resu1111-2222-3332-4444-555555555555', [
       ev('session', { seq: 0 }),
       ev('session/end-seed', { seq: 4 }),

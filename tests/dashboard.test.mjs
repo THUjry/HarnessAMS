@@ -3,10 +3,10 @@
 // file resolution + MIME (dashboard.js), the add-report directory browser,
 // the /api/report-stat auto-refresh endpoint, the system-browser open action
 // (openlocal.js + POST /api/open-local; route-level, through the
-// apply()-registered handler), and the picking surface (picker.js since
-// 2026-11-26: the host-borrowed folder chooser POST /api/pick-directory, our
-// own native FILE dialog POST /api/pick-file — the add button's file-first
-// flow, ANY failure silently falling back to the listing).
+// apply()-registered handler), and the picking surface (picker.js: the
+// host-borrowed folder chooser POST /api/pick-directory, our own native FILE
+// dialog POST /api/pick-file — the add button's file-first flow, ANY failure
+// silently falling back to the listing).
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -150,7 +150,7 @@ test('dashboard: browseDir lists dirs + *.html, hides dot entries, reports paren
   }
 })
 
-// ---- system-browser open (openlocal.js + POST /api/open-local, 2026-11-26) -
+// ---- system-browser open (openlocal.js + POST /api/open-local) -------------
 
 test('openlocal: resolveOpenableFile enforces the viewable fence', async () => {
   const ws = await mkdtemp(path.join(tmpdir(), 'hams-open-'))
@@ -255,11 +255,11 @@ test('openlocal: POST /api/open-local guards origin, fences the path, launches t
       assert.deepEqual(launches[0], { file: 'cmd', args: ['/c', 'start', '', path.resolve(htmlPath)] })
     }
 
-    // seed-on-open (user ruling 2026-11-26): a report document seeds the
-    // project copy copy-if-missing just before the viewer launches — this is
-    // the ONLY writer now that generation no longer seeds. A successful seed
-    // (or an existing copy — the present flag) also DECLARES plotly_url in
-    // workspace_config.json: the config stays plotly-free until this click.
+    // seed-on-open: a report document seeds the project copy copy-if-missing
+    // just before the viewer launches — the open action is the ONLY writer of
+    // the project copy. A successful seed (or an existing copy — the present
+    // flag) also DECLARES plotly_url in workspace_config.json: the config stays
+    // plotly-free until this click.
     assert.equal(ok.body.plotly_seed.seeded, true)
     assert.equal(ok.body.plotly_seed.present, true)
     assert.equal(ok.body.plotly_seed.declared, true)
@@ -346,8 +346,8 @@ test('pickdir: pickDirectory drives the capability object without inject, value-
   assert.match((await pickDirectory(ctxOf({ capability: () => ({ kind: 'native', pick: async () => 42 }) }))).error, /invalid path/)
 
   // the REAL cordis ctx is a proxy that THROWS on reads of undeclared
-  // properties — the ctx.get probe itself must survive it (the openLauncher
-  // lesson, 70a36b5): value-shaped, never a throw
+  // properties — the ctx.get probe itself must survive it: value-shaped,
+  // never a throw
   const throwingCtx = new Proxy({}, {
     get: (t, k) => { throw new Error(`cannot get property "${String(k)}" without inject`) },
   })
@@ -405,23 +405,23 @@ test('pickdir: POST /api/pick-directory picks, cancels, guards origin, falls bac
 
 test('dashboard: the add button pops the system FILE picker first, then silently falls back (static contract)', async () => {
   const src = await clientSrc()
-  // add flow (2026-11-26, file-first): POST /api/pick-file — the picked path
+  // add flow (file-first): POST /api/pick-file — the picked path
   // IS a single html file (the dialog filter + the route's extension gate),
   // so it registers directly; ANY failure opens the listing without
   // surfacing an error, a cancel keeps it shut
   assert.match(src, /fetchJson\(API \+ '\/pick-file', \{/)
-  assert.ok(!src.includes("fetchJson(API + '/pick-directory'"), 'the folder chooser is no longer chained into the add flow')
+  assert.ok(!src.includes("fetchJson(API + '/pick-directory'"), 'the folder chooser stays out of the add flow')
   assert.match(src, /setDialogCwd\(null\); setDialogOpen\(true\) \/\/ silent fallback/)
   // the manual path field carries its own .html gate (the client-side half
   // of the forced single-html contract)
   assert.match(src, /'dash\.addBadExt'/)
-  // no in-dialog system affordance remains (the wave's first shape)
+  // the listing dialog is purely local: no in-dialog system affordance
   assert.ok(!src.includes('dash.sysBrowse'), 'no system-browse button inside the listing dialog')
 })
 
-// ---- our own native FILE dialog (picker.js pickFile + POST /api/pick-file,
-// 2026-11-26: the file-first add flow — the spike contract is exit 0 = the
-// chosen absolute path on stdout, exit 2 = cancel, exit 1 = script error) ---
+// ---- our own native FILE dialog (picker.js pickFile + POST /api/pick-file:
+// the file-first add flow — the dialog contract is exit 0 = the chosen
+// absolute path on stdout, exit 2 = cancel, exit 1 = script error) ----------
 
 // A fake child for the pickFile internals seam: PassThrough pipes plus an
 // event emitter; `drive` scripts the dialog outcome asynchronously (the
@@ -473,7 +473,7 @@ test('picker: pickFile maps the spike contract — picked / canceled / error, va
   assert.match(mac.error, /unsupported on darwin/)
 })
 
-test('picker: a hung dialog is killed tree-wide at the deadline (the run-spike shape)', async () => {
+test('picker: a hung dialog is killed tree-wide at the deadline', async () => {
   const kills = []
   let dialog
   const spawnImpl = (cmd, args) => {

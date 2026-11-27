@@ -1,9 +1,7 @@
 // Shared test scaffolding for the HarnessAMS suite: the apply()-registered
 // route driver (fake res + macrotask polling), the DSH_HOME mirror fixture,
 // and the client.js static-contract readers. Keeping these in one place keeps
-// the per-file tests focused on their contracts. (The bash -n shell guard was
-// retired 2026-11-26: the wrapper-shape contract is a regex in server.test.mjs
-// and the per-command guard spawned one real bash per ssh_exec.)
+// the per-file tests focused on their contracts.
 // Run: bare `node --test` from the repo root.
 import assert from 'node:assert/strict'
 import path from 'node:path'

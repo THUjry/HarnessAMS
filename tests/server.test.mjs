@@ -29,7 +29,7 @@ test('project: sessionProject maps over the workspace registry', async () => {
   assert.ok(sessionProject(null, 's1').reason) // service missing -> degrade, not throw
   assert.ok(sessionProject(registry, null).reason) // missing sessionId
   // initialized keys the sidebar default-open policy: true only once the
-  // workspace already has its .harnessams store (2026-11-18)
+  // workspace already has its .harnessams store
   const tmp = await mkdtemp(path.join(tmpdir(), 'hams-ws-'))
   const ws = { id: 'w3', path: tmp, title: 'W3', sessionIds: ['s9'] }
   try {
@@ -48,12 +48,12 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     assert.deepEqual((await readSessionConfigs(dir)).sessions, {})
     assert.equal(path.basename(sessionConfigsPath(dir)), 'sessions.json')
 
-    // empty tombstone entry (a brand-new session's first write, D-003)
+    // empty tombstone entry (a brand-new session's first write)
     let w = await writeSessionConfig(dir, sid, { display: 'overview', reports: [], dashboard_selected: null })
     assert.ok(!w.error, w.error)
     assert.deepEqual(w.sessions[sid], { display: 'overview', reports: [], dashboard_selected: null })
 
-    // reports ride in the session entry (legacy task payload, D-003); duplicate
+    // reports ride in the session entry; duplicate
     // paths dedupe; dashboard_selected only survives while it points at a report
     const rep = { id: 'r-ab12cd34', name: 'run1', path: path.join(dir, 'run1.html'), added_at: '2026-11-19T00:00:00.000Z' }
     w = await writeSessionConfig(dir, sid, {
@@ -63,8 +63,8 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     assert.equal(w.sessions[sid].dashboard_selected, null) // dangling selected drops
     assert.equal(w.sessions[sid].display, 'session')
 
-    // confirmed check_params persist with the entry (validated shape; the
-    // 2026-11-25 table: rcl + mult + unit_check, legacy keys gone)
+    // confirmed check_params persist with the entry (validated shape:
+    // rcl + mult + unit_check)
     w = await writeSessionConfig(dir, sid, {
       display: 'session', reports: [], dashboard_selected: null,
       check_params: { rcl: { r: [1, 100], c: [1e-15, 1e-6], l: [1e-13, 1e-8] },
@@ -80,7 +80,7 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
     w = await writeSessionConfig(dir, sid, { display: 'task-xxxx', reports: [], dashboard_selected: null })
     assert.equal(w.sessions[sid].display, 'overview')
 
-    // versionless store (D-003): a legacy `version` key is ignored either way —
+    // versionless store: a legacy `version` key is ignored either way —
     // a versioned v2 file loads unchanged, and a task-era tasks.json shape has
     // no sessions map, reading as empty WITH a warning (nothing silently empty)
     const store = path.join(dir, '.harnessams', 'sessions.json')
@@ -96,7 +96,7 @@ test('session-config: v2 store read-missing is empty, write->read roundtrip, val
   } finally { await rm(dir, { recursive: true, force: true }) }
 })
 
-test('session-config: D-003 loud skip — bad leaves warn and load partially, unknown fields ride, self-heal on write', async () => {
+test('session-config: loud skip — bad leaves warn and load partially, unknown fields ride, self-heal on write', async () => {
   const dir = await mkdtemp(path.join(tmpdir(), 'hams-sessd26-'))
   const sid = 'session-bbbb1111-2222-3332-4444-555555555555'
   const C = 'session-cccc1111-2222-3332-4444-555555555555'
@@ -125,7 +125,7 @@ test('session-config: D-003 loud skip — bad leaves warn and load partially, un
     assert.equal(r.sessions[sid].dashboard_selected, 'r-good0001')
     assert.equal(r.sessions[sid].report_figs, undefined)
     assert.equal(r.sessions[sid].max_points_per_scan, undefined)
-    // unknown fields ride through the read untouched (cross-version, D-003)
+    // unknown fields ride through the read untouched (cross-version)
     assert.deepEqual(r.sessions[sid].future_field, { nested: true })
     // the junk sessions are skipped — LOUDLY (warnings, never silent)
     assert.ok(!r.sessions['bad key!'])
@@ -137,7 +137,7 @@ test('session-config: D-003 loud skip — bad leaves warn and load partially, un
     assert.match(r.warnings[3], /bad key!.*does not match the session id shape/)
     assert.match(r.warnings[4], /entry is not an object/)
     assert.ok(r.warnings[4].includes(C), 'the skipped key names the non-object session')
-    // self-heal (D-003): the next write rewrites from the lenient read view —
+    // self-heal: the next write rewrites from the lenient read view —
     // the junk sessions and bad leaves heal off disk, unknown fields survive,
     // and the file comes back VERSIONLESS
     const w = await writeSessionConfig(dir, 'session-dddd1111-2222-3332-4444-555555555555',
@@ -164,8 +164,8 @@ test('assets: plotly status reflects the shipped file', async () => {
   assert.ok(st.plotly.available, 'plotly.min.js missing from src/assets')
   assert.ok(st.plotly.bytes > 4_000_000)
   // the packages list carries the shipped vendored copy and its route
-  // (the family-workspace copy scan is retired — no `copies` field anymore)
-  assert.equal(st.packages.length, 1, 'only plotly is vendored now')
+  // (no `copies` field — the status never scans workspaces)
+  assert.equal(st.packages.length, 1, 'only plotly is vendored')
   const p = st.packages[0]
   assert.equal(p.file, 'plotly.min.js')
   assert.equal(p.license, 'MIT')
@@ -189,10 +189,9 @@ test('machines: ssh_list single channel carries the batch contract', async () =>
     get: (name) => (name === 'ssh_list' ? { name } : undefined),
     execute: async (input) => {
       inputs.push(input)
-      // regression pin: dsh-tools 0.2.2-rc.x takes ToolBatchInput — the 0.2.1
-      // single-call shape {callId,name,arguments} crashes on calls.map wrapped
-      // as "Tool batch execution failed", and without a signal the pipeline
-      // crashes reading `signal.aborted`
+      // the tool shell speaks the dsh-tools batch contract: ToolBatchInput
+      // (one-entry calls[] + AbortSignal) — the single-call shape fails on
+      // calls.map and a signal-less call fails on signal.aborted
       assert.ok(Array.isArray(input.calls) && input.calls.length === 1, 'one-entry calls[] required')
       const call = input.calls[0]
       assert.equal(call.type, 'tool-call')
@@ -276,8 +275,9 @@ test('remote: resultText/resultValue extract the tool result payloads', () => {
   assert.equal(resultValue(null), null)
 })
 
-test('remote: attributeSshError annotates the MaxSessions shape (live-sampled string)', () => {
-  // sampled on node1 with 14 concurrent execs (2026-11-14): channels 11+ throw
+test('remote: attributeSshError annotates the MaxSessions shape', () => {
+  // under concurrent execs the ssh server refuses channel opens past its
+  // MaxSessions limit — this exact string is that failure
   assert.match(
     attributeSshError('(SSH) Channel open failure: open failed'),
     /Channel open failure: open failed \[suspected MaxSessions/)
@@ -494,7 +494,7 @@ test('session-config: single-session merge-write never clobbers siblings; prune 
     assert.equal(Object.keys(r3.sessions).length, 200)
     assert.ok(!r3.sessions[A]) // oldest dropped
     assert.ok(r3.sessions['session-00000204-2222-3332-4444-555555555555'])
-    // corrupt file degrades to empty, never throws — with a visible warning (D-003)
+    // corrupt file degrades to empty, never throws — with a visible warning
     await writeFile(path.join(dir, '.harnessams', 'sessions.json'), '{not json', 'utf8')
     const rc = await readSessionConfigs(dir)
     assert.deepEqual(rc.sessions, {})

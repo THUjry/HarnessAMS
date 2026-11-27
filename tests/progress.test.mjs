@@ -28,7 +28,7 @@ test('progress: projectRootOf derives the root from run-dir shapes', () => {
   assert.equal(projectRootOf('/proj/sweep/top'), null)
   assert.equal(projectRootOf(''), null)
   assert.equal(projectRootOf(null), null)
-  // D-004: <root>/RawResults/Sim* strips the RawResults base like sweep/
+  // <root>/RawResults/Sim* strips the RawResults base like sweep/
   assert.equal(projectRootOf('/home/u/proj/RawResults/Sim0_20261121_batch1'), '/home/u/proj')
   assert.equal(projectRootOf('D:\\w\\proj\\RawResults\\Sim3_20261121_batch2'), 'D:/w/proj')
   assert.equal(projectRootOf('/home/u/proj/RawResults/run1'), null) // still needs the Sim shape
@@ -59,7 +59,7 @@ test('progress: readRunProgress walks the progress → worker_started → config
 
     // .batch_job.json (a remote batch was submitted; everything still lives on
     // the remote host) outranks the config — the immediate 0/N submitted frame
-    // the batch_poll card shows on its very first fetch (D-004)
+    // the batch_poll card shows on its very first fetch
     await writeFile(path.join(run, '.batch_job.json'),
       JSON.stringify({ job_id: '777', machine_id: 'node1', remote_root: '/home/op/sim',
         remote_dir: '/home/op/sim/batch1', scheduler: 'lsf', total_points: 6,
@@ -188,7 +188,7 @@ test('progress: summarizeProject aggregates sweep/Round*/top with totals', async
   }
 })
 
-test('progress: summarizeProject scans <project>/RawResults/Sim* (D-004 layout), deduped against the root', async () => {
+test('progress: summarizeProject scans <project>/RawResults/Sim*, deduped against the root', async () => {
   const proj = await mkdtemp(path.join(tmpdir(), 'hams-rawres-'))
   try {
     const mkSim = async (base, name, files = {}) => {
@@ -267,7 +267,7 @@ test('progress: GET endpoints fence by cwd→workspace then answer payloads', as
     assert.equal(aggByProject.code, 200)
     assert.equal(aggByProject.body.totals.batches, 2)
 
-    // fence (review D-3): missing sessionId → 400
+    // fence: missing sessionId → 400
     assert.equal((await call('/api/progress?runDir=' + q(top1))).code, 400)
     // fence: session not accounted in any workspace → 400
     assert.equal((await call('/api/progress?runDir=' + q(top1) + '&sessionId=nope')).code, 400)
@@ -277,7 +277,7 @@ test('progress: GET endpoints fence by cwd→workspace then answer payloads', as
 
     // POSIX remote-shaped path: outside the workspace root by construction →
     // the fence 403s before the payload ladder (remote batches poll post-fetch
-    // local paths, so remote-shaped strings no longer reach local:false)
+    // local paths, so remote-shaped strings never reach local:false)
     const remoteish = await call('/api/progress-summary?runDir=' + q('/home/u/proj/sweep/Round1/top') + sidq)
     assert.equal(remoteish.code, 403)
 
@@ -289,7 +289,7 @@ test('progress: GET endpoints fence by cwd→workspace then answer payloads', as
   }
 })
 
-// D-004: the remote live-progress endpoint. The ssh_* tool shell is mocked per
+// The remote live-progress endpoint. The ssh_* tool shell is mocked per
 // the installed dsh-ssh contract (structured values; same routing-by-substring
 // style as batch.test.mjs's makeCtx) — machine/dir/job come from the run dir's
 // .batch_job.json, never from client params.
@@ -316,7 +316,7 @@ function sshTools({ hosts } = {}) {
   }
 }
 
-test('progress: GET /api/progress-remote answers remote truth, local fallback, fence and single-flight (D-004)', async () => {
+test('progress: GET /api/progress-remote answers remote truth, local fallback, fence and single-flight', async () => {
   const proj = await mkdtemp(path.join(tmpdir(), 'hams-prog-rem-'))
   const stray = await mkdtemp(path.join(tmpdir(), 'hams-prog-rem-stray-'))
   try {
@@ -378,8 +378,7 @@ test('progress: GET /api/progress-remote answers remote truth, local fallback, f
     assert.equal(asLocal.body.total, 3)
 
     // a scheduler=local job file is NOT a remote batch: the run directory is
-    // the truth — local semantics straight from the ladder, zero ssh (otherwise
-    // the endpoint answered `unreachable` and the card froze on its first frame)
+    // the truth — local semantics straight from the ladder, zero ssh calls
     const localJob = path.join(proj, 'RawResults', 'Sim1_20261122_batch1')
     await mkdir(localJob, { recursive: true })
     await writeFile(path.join(localJob, 'sweep_config.json'),

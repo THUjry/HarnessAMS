@@ -1,8 +1,6 @@
-// Diagnosis-session surface (server/diagnose.js): entry sanitization and the
-// session-controller handoff consumed by the self-check orchestrator. The
-// Overview health-check handoff (buildDiagnosisPrompt + POST /api/checks/analyze)
-// was retired with that panel on 2026-11-18. Run: bare `node --test` from the
-// repo root.
+// Diagnosis-session surface (core/diagnose.js): entry sanitization and the
+// session-controller handoff consumed by the self-check orchestrator.
+// Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { sanitizeFailed, createDiagnosisSession } from '../src/core/diagnose.js'

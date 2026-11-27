@@ -1,4 +1,4 @@
-// Bundled-skill registration tests (2026-11-21 wave): frontmatter parsing,
+// Bundled-skill registration tests: frontmatter parsing,
 // the catalog shape (name + description + directory resourceBase — only the
 // catalog lines are model-facing; bodies load on demand), and fail-open on a
 // missing ctx.skills or a broken SKILL.md.
@@ -51,8 +51,8 @@ test('skills: cluster-setup is harvest, verify, pin: read-only, through ssh_exec
   }
   // probes go through ssh_exec: no raw shell ssh, no host placeholder to guess
   assert.ok(!/ssh <[a-z]+>/.test(content), 'no raw shell ssh probe')
-  assert.ok(!/absolute path, always/.test(content), 'the old always-absolute stance is gone')
-  assert.ok(!content.includes('module list'), 'the interactive-only module list probe is gone')
+  assert.ok(!/absolute path, always/.test(content), 'no always-absolute path stance')
+  assert.ok(!content.includes('module list'), 'no interactive-only module list probe')
   assert.ok(/^[\x00-\x7F]*$/.test(content), 'ASCII-only skill body')
 })
 
@@ -86,10 +86,10 @@ test('skills: the resources referenced by each skill body all exist', () => {
   }
 })
 
-// The 2026-11-24 reorganization moved nfet_switch.json down into sky130proc/
-// and every calculator silently kept the old default — a model hit the
-// FileNotFoundError at run time (2026-11-25 session). This guard resolves each
-// DEFAULT_DATA_DIR the way the script would and asserts the data file exists.
+// Every calculator resolves its data file through DEFAULT_DATA_DIR at run
+// time — a stale default fails only when a model actually runs it. This
+// guard resolves each DEFAULT_DATA_DIR the way the script would and asserts
+// the data file exists.
 test('skills: the calculators\' default data dir resolves at sky130proc', () => {
   const byName = Object.fromEntries(bundledSkills().map((s) => [s.name, s]))
   const cell = byName['dca-cell-design']

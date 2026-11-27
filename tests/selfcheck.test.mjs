@@ -2,7 +2,7 @@
 // contracts). Run: bare `node --test` from the repo root.
 //
 // The flows call startSelfcheck() DIRECTLY with a temp project (runs live under
-// <project>/.harnessams/selfcheck since the 2026-11-19 storage fix) and drive a
+// <project>/.harnessams/selfcheck) and drive a
 // mock ctx.tools shell that:
 //   - answers ssh_* (@linxin666/dsh-ssh) with scripted structured values —
 //     every ssh_exec command (wrapped in `timeout -s KILL ... sh -c "…"`) is
@@ -13,7 +13,7 @@
 //     submissions (scheduler=local) are intercepted to lay down the worker's
 //     output + job file, which the REAL batch_poll local branch then reads;
 //   - fakes the SmartAnaSim boundary at assemble only (real bundled gen
-//     script); parsing is script-face since 2026-11-23 — the parse step runs
+//     script); parsing is script-face — the parse step runs
 //     the fixture parser written into the dummy scripts root, which emits the
 //     analytic psf CSVs the real parser would produce;
 //   - leaves the verify step REAL (python via runPython / js via import), so
@@ -42,7 +42,7 @@ import { callRoute, getReq, clientSrc, assertDictKeys } from './helpers.mjs'
 const execFileAsync = promisify(execFile)
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 
-// D-003: isolate the plugin-global store — tests must never touch the real
+// isolate the plugin-global store — tests must never touch the real
 // ~/.dsh/harnessams.json (node memory, freshness window). Per-test overrides
 // point at their own tmp file for isolation between suites.
 process.env.HARNESSAMS_GLOBAL_STORE = path.join(os.tmpdir(), 'hams-globalstore-selfcheck-' + process.pid + '.json')
@@ -152,7 +152,7 @@ function makeHarness({ scenario = {} }) {
     // with the sibling SmartAnaSim checkout absent — the real engine lives
     // there): the staging contract (template.scs + sweep_config.json present
     // in run_dir) is the smoke. The gen step itself runs the REAL gen script
-    // directly since 2026-11-25 (no spectre_assemble tool call anymore).
+    // directly (no spectre_assemble tool call).
     spectre_pre_check: async (args) => {
       const dir = path.resolve(args.run_dir)
       const have = fs.existsSync(path.join(dir, 'template.scs'))
@@ -221,7 +221,7 @@ function makeHarness({ scenario = {} }) {
     }
     if (command.includes('wc -l')) return { success: true, exitCode: 0, timedOut: false, stdout: '0\n', stderr: '', durationMs: 3 }
     // the terminal-fetch probe lists sweep_progress.json (errlog.txt only
-    // exists on failures — the green-run norm the 2026-11-25 fix covers).
+    // exists on failures — the green-run norm).
     // Match WITHOUT the quotes: execRemote wraps commands in sh -c "…", so
     // the inner double quotes reach here backslash-escaped.
     if (command.includes('ls -1') && command.includes('sweep_progress.json')) {
@@ -230,7 +230,7 @@ function makeHarness({ scenario = {} }) {
     return { success: true, exitCode: 0, timedOut: false, stdout: '', stderr: '', durationMs: 3 }
   }
 
-  // The official ctx.shell seam (in-cluster local execution, D-001): routes
+  // The official ctx.shell seam (in-cluster local execution): routes
   // the SAME command script as sshExec — but as the raw command, no
   // `timeout -s KILL` wrapper — and, because the "remote" side is this host's
   // filesystem, physically lays down the artifacts the transfers then copy:
@@ -284,7 +284,7 @@ function makeHarness({ scenario = {} }) {
       })
       await fsp.writeFile(local, rows.join('\n') + '\n', 'utf8')
     } else if (remote.endsWith('sweep_progress.json')) {
-      // the worker's telemetry (D-006/D-003) rides along when the scenario
+      // the worker's telemetry rides along when the scenario
       // opts in — the auto-pin flow test reads it back through the fetch
       const prog = { status: 'completed', total_points: 9, succeeded: 9 }
       if (scenario.telemetry) prog.toolchain = { python: PIN_PY, spectre: PIN_SPECTRE, node: 'node5' }
@@ -345,8 +345,7 @@ function makeHarness({ scenario = {} }) {
         }
       }
       if (name === 'batch_submit' && args.scheduler === 'local') {
-        // the re-entry hang point (the retired spectre_assemble hang moved
-        // here when the gen step became a direct spawn) — one-shot, like the
+        // the re-entry hang point for a local submit — one-shot, like the
         // poll hang: a second local submit later in the chain must not hang
         if (scenario.hangTool === 'batch_submit' && !hangUsed) {
           hangUsed = true
@@ -484,7 +483,7 @@ async function startFlow({ scenario = {}, settings = {} }) {
   await fsp.mkdir(projectPath, { recursive: true })
   // worker scripts root for the batch tools (dummy tree; upload is mocked).
   // The parser entry is FUNCTIONAL: the self-check's parse step runs it
-  // directly (script-face since 2026-11-23), and it emits exactly the
+  // directly (script-face), and it emits exactly the
   // analytic psf CSVs + psf_index.json the real SmartAnaSim parser would.
   const scriptsRoot = path.join(tmp, 'scripts')
   fs.mkdirSync(path.join(scriptsRoot, 'spectre'), { recursive: true })
@@ -551,7 +550,7 @@ async function startFlow({ scenario = {}, settings = {} }) {
 // 1) settings
 // ---------------------------------------------------------------------------
 
-// D-006 toolchain pins — placeholder paths (the fixture gate: no real cluster paths)
+// toolchain pins — placeholder paths (the fixture gate: no real cluster paths)
 const PIN_PY = '/opt/tools/python3/bin/python3'
 const PIN_SPECTRE = '/opt/tools/spectre/bin/spectre'
 
@@ -563,7 +562,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
     remote_python: null, remote_spectre_cmd: null,
     local_python_version: null, local_python_path: null, local_python_numpy: null, remote_python_numpy: null,
   })
-  // D-008 python facts: the numpy tri-states are enum-or-null; the loose string
+  // python facts: the numpy tri-states are enum-or-null; the loose string
   // facts are string-or-null with a length and control-character gate (a valid
   // base: the bare defaults fail the out-of-cluster local-spectre coupling)
   const factsBase = { ...defaultSettings(), cluster_env: 'in-cluster' }
@@ -579,7 +578,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(facts.settings.local_python_path, 'C:\\Python314\\python.exe', 'Windows paths are legal for the local facts')
   assert.match(validateSettings({ ...factsBase, local_python_version: 'x'.repeat(401) }).error, /local_python_version too long/)
   assert.match(validateSettings({ ...factsBase, local_python_path: 'a\nb' }).error, /control characters/)
-  // D-008 plotly fields (2026-11-26 ruling): NOT default-materialized — the
+  // plotly fields: NOT default-materialized — the
   // report chain runs off the package route; the project-copy declaration
   // (plotly_url) enters the file only after a successful seed-on-open copy
   // (declarePlotlyUrl), plotly_asset stays hand-edit only. A fresh read has
@@ -598,7 +597,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
     remote_root: '/home/op/sim', selfcheck_remote_dir: '/abs/path', scheduler: 'ssh', compute_script_remote: 'js' })
   assert.ok(!v.error, v.error)
   assert.equal(v.settings.compute_script_remote, 'js')
-  // D-006 toolchain pins: an absolute path to the executable file, or null.
+  // toolchain pins: an absolute path to the executable file, or null.
   // (positive cases need a valid base: out-of-cluster + local + spectre is refused)
   const ok = { ...defaultSettings(), cluster_env: 'in-cluster' }
   const pinned = validateSettings({ ...ok, remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE })
@@ -609,7 +608,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.equal(validateSettings({ ...ok }).settings.remote_spectre_cmd, null, 'an omitted key = unpinned')
   assert.equal(validateSettings({ ...ok, remote_python: '/opt/tools/python3\\bin\\python3' }).settings.remote_python,
     '/opt/tools/python3/bin/python3', 'backslashes normalize to the POSIX form')
-  // bare names are the incident's failure mode: refused with guidance, both keys
+  // bare names are refused with guidance, both keys
   assert.match(validateSettings({ ...defaultSettings(), remote_python: 'python3' }).error, /remote_python must be an ABSOLUTE path to the executable/)
   assert.match(validateSettings({ ...defaultSettings(), remote_spectre_cmd: 'python3' }).error, /remote_spectre_cmd must be an ABSOLUTE path/)
   // the value is joined into a remote command line: no spaces, no shell characters, a file not a directory
@@ -633,7 +632,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   assert.match(validateSettings({ ...defaultSettings(), run_mode: 'remote' }).error, /run_mode=remote requires machine_id/)
   assert.match(validateSettings({ ...defaultSettings(), run_mode: 'remote', machine_id: 'm1' }).error,
     /run_mode=remote requires remote_root/)
-  // D-001 coupling: out-of-cluster forbids local spectre (the host cannot run it)
+  // coupling: out-of-cluster forbids local spectre (the host cannot run it)
   assert.match(validateSettings({ ...defaultSettings(), run_mode: 'local', simulator: 'spectre' }).error,
     /requires cluster_env=in-cluster/)
   assert.ok(!validateSettings({ ...defaultSettings(), cluster_env: 'in-cluster' }).error)
@@ -653,7 +652,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   await writeSettings(tmp, v.settings)
   const raw = JSON.parse(await fsp.readFile(configPath(tmp), 'utf8'))
   // fresh file: single config carries the workspace section; the
-  // package-path-first policy (2026-11-26) — the scripts root stays the
+  // package-path-first policy — the scripts root stays the
   // PACKAGED SmartAnaSim sibling, no project-local copy is staged at creation
   assert.equal(raw.version, 1)
   assert.equal(raw.workspace.sim_scripts_dir, defaultSimScriptsDir())
@@ -684,13 +683,13 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   const dirty = await readSettings(tmp)
   assert.equal(dirty.settings.run_mode, 'local')
   assert.equal(dirty.settings.machine_id, 'x')
-  // unknown scheduler values (incl. the retired "direct"/"none") fall back to
-  // the default — no migration, the pre-release no-compat ruling (D-001 wave)
+  // unknown scheduler values (incl. "direct"/"none") fall back to
+  // the default — no migration, no compat table
   await fsp.writeFile(configPath(tmp), '{"settings":{"scheduler":"none"}}', 'utf8')
   assert.equal((await readSettings(tmp)).settings.scheduler, 'lsf')
   await fsp.writeFile(configPath(tmp), '{"settings":{"scheduler":"direct"}}', 'utf8')
   assert.equal((await readSettings(tmp)).settings.scheduler, 'lsf')
-  // D-006: a hand-edited invalid pin (a bare name) reads as UNPINNED — the
+  // a hand-edited invalid pin (a bare name) reads as UNPINNED — the
   // worker then runs under the bare default, never under junk; a valid pin
   // beside it survives
   await fsp.writeFile(configPath(tmp), JSON.stringify({ settings: { remote_python: 'python3', remote_spectre_cmd: PIN_SPECTRE } }), 'utf8')
@@ -702,7 +701,7 @@ test('settings: defaults, validation, persistence, workspace section', async () 
   const storedPins = (await readSettings(tmp)).settings
   assert.equal(storedPins.remote_python, PIN_PY)
   assert.equal(storedPins.remote_spectre_cmd, PIN_SPECTRE)
-  // 2026-11-25 rename: a legacy remote_dir key migrates on read (no rewrite
+  // a legacy remote_dir key migrates on read (no rewrite
   // forced — the next validated write persists the new key)
   await fsp.writeFile(configPath(tmp), JSON.stringify({ settings: { remote_dir: '.harnessams/legacycheck' } }), 'utf8')
   const legacy = (await readSettings(tmp)).settings
@@ -915,7 +914,7 @@ test('routes: GET project-settings defaults + the /api/tool funnel + guards', as
   assert.equal((await readSettings(projectPath)).settings.machine_id, 'm1')
   assert.equal((await readSettings(projectPath)).settings.scheduler, 'lsf')
 
-  // D-006: a PARTIAL settings payload merges over the STORED settings — an
+  // a PARTIAL settings payload merges over the STORED settings — an
   // agent pins one value without echoing the whole table, and every untouched
   // key keeps its stored value
   const post = (settings) => driveRoute(routes, {
@@ -961,10 +960,10 @@ test('routes: GET project-settings defaults + the /api/tool funnel + guards', as
 })
 
 // ---------------------------------------------------------------------------
-// D-003: plugin-global store + pin heal + auto-pin + project init
+// plugin-global store + pin heal + auto-pin + project init
 // ---------------------------------------------------------------------------
 
-test('globalstore + heal (D-003): node memory, remembered clears stick, heal prefills only nulls', async () => {
+test('globalstore + heal: node memory, remembered clears stick, heal prefills only nulls', async () => {
   const tmp = await tmpDir()
   const prevStore = process.env.HARNESSAMS_GLOBAL_STORE
   process.env.HARNESSAMS_GLOBAL_STORE = path.join(tmp, 'global.json')
@@ -1015,15 +1014,14 @@ test('globalstore + heal (D-003): node memory, remembered clears stick, heal pre
   }
 })
 
-test('project init (package-path-first, 2026-11-26): init stages nothing and flips nothing; the config gap still heals; explicit values kept', async () => {
+test('project init (package-path-first): init stages nothing and flips nothing; the config gap still heals; explicit values kept', async () => {
   const tmp = await tmpDir()
   const ws = path.join(tmp, 'proj-init')
   await fsp.mkdir(ws, { recursive: true })
   try {
     // a session-config write creates .harnessams + the AGENTS.md template
     // WITHOUT a workspace_config.json — the asymmetry this init hook exists
-    // to heal (the config still lands; the scripts staging that used to ride
-    // along is gone with the package-path-first policy)
+    // to heal (the config lands; no scripts staging rides along)
     await writeSessionConfig(ws, 's1', {})
     assert.ok(fs.existsSync(path.join(ws, 'AGENTS.md')))
     assert.ok(!fs.existsSync(path.join(ws, '.harnessams', 'scripts')), 'not staged by the session write')
@@ -1050,7 +1048,7 @@ test('project init (package-path-first, 2026-11-26): init stages nothing and fli
   } finally { await fsp.rm(tmp, { recursive: true, force: true }) }
 })
 
-test('autoPin (D-006/D-003): a green run pins the MEASURED toolchain and remembers the node', async () => {
+test('autoPin: a green run pins the MEASURED toolchain and remembers the node', async () => {
   const tmp = await tmpDir()
   const prevStore = process.env.HARNESSAMS_GLOBAL_STORE
   process.env.HARNESSAMS_GLOBAL_STORE = path.join(tmp, 'pin-global.json')
@@ -1112,10 +1110,10 @@ test('autoPin (D-006/D-003): a green run pins the MEASURED toolchain and remembe
 })
 
 // ---------------------------------------------------------------------------
-// D-002: AGENTS.md reconcile (write + read), the python-fact families
+// AGENTS.md reconcile (write + read), the python-fact families
 // ---------------------------------------------------------------------------
 
-test('reconcile (D-002): a SYNCED block adopts legal hand-edits; illegal rows warn (agent) or block (user); unsynced templates never adopt', async () => {
+test('reconcile: a SYNCED block adopts legal hand-edits; illegal rows warn (agent) or block (user); unsynced templates never adopt', async () => {
   const tmp = await tmpDir()
   const ws = path.join(tmp, 'proj-rec')
   try {
@@ -1169,7 +1167,7 @@ test('reconcile (D-002): a SYNCED block adopts legal hand-edits; illegal rows wa
   }
 })
 
-test('python facts (D-002): local memory prefills init and heals NULLs only; the numpy telemetry lands with the pins', async () => {
+test('python facts: local memory prefills init and heals NULLs only; the numpy telemetry lands with the pins', async () => {
   const tmp = await tmpDir()
   const prevStore = process.env.HARNESSAMS_GLOBAL_STORE
   process.env.HARNESSAMS_GLOBAL_STORE = path.join(tmp, 'facts-global.json')
@@ -1224,7 +1222,7 @@ test('python facts (D-002): local memory prefills init and heals NULLs only; the
   }
 })
 
-test('routes: project-init (D-002) + global-config (D-003) + project facts', async () => {
+test('routes: project-init + global-config + project facts', async () => {
   const tmp = await tmpDir()
   const projectPath = path.join(tmp, 'proj')
   await fsp.mkdir(projectPath, { recursive: true })
@@ -1241,7 +1239,7 @@ test('routes: project-init (D-002) + global-config (D-003) + project facts', asy
       async *[Symbol.asyncIterator]() { yield Buffer.from(JSON.stringify({ sessionId: 's1' })) },
     })
     // sidebar-open init: fresh store + template + config in one call — and
-    // NO script staging anymore (package-path-first, 2026-11-26: the
+    // no script staging (package-path-first: the
     // packaged SmartAnaSim sibling is the scripts root)
     const init = await postInit()
     assert.equal(init.code, 200, JSON.stringify(init.body))
@@ -1270,7 +1268,7 @@ test('routes: project-init (D-002) + global-config (D-003) + project facts', asy
     const info = await driveRoute(routes, getReq('/harnessams/api/info'))
     assert.equal(info.body.display.selfcheck_fresh_min, 45)
     const proj = await driveRoute(routes, getReq('/harnessams/api/project?sessionId=s1'))
-    assert.ok(proj.body.selfcheck_facts, 'the facts ride the project route (D-003 restore display)')
+    assert.ok(proj.body.selfcheck_facts, 'the facts ride the project route')
     assert.equal(proj.body.selfcheck_facts.fresh_min, 45)
     assert.equal(proj.body.selfcheck_facts.last_selfcheck_overall, null)
     // session fence still applies
@@ -1332,13 +1330,13 @@ test('flow: simulator=spectre + local', async () => {
     assert.equal(byCol['spectre_psf_parse.py (LPF+HPF)'].ok, true)
     assert.equal(byCol['pointwise verify (python, LPF+HPF)'].ok, true)
     assert.match(byCol['pointwise verify (python, LPF+HPF)'].result, /9 pts/)
-    // the gen step is a direct spawn from the package install location
-    // (2026-11-25): a green run cleans its artifacts (only selfcheck_run.json
+    // the gen step is a direct spawn from the package install location:
+    // a green run cleans its artifacts (only selfcheck_run.json
     // survives) and the project never sees a script/ folder, so the
     // netlist-contract check reads the PACKAGE gen script's template — @@P@@
     // on the parameters statement only, the circuit by name, SI-suffixed
     // numbers (no scientific notation anywhere in the emitted netlist)
-    assert.ok(!fs.existsSync(path.join(f.projectPath, 'script')), 'no project script/ folder (2026-11-25 retirement)')
+    assert.ok(!fs.existsSync(path.join(f.projectPath, 'script')), 'no project script/ folder')
     const genPath = path.join(REPO, 'src', 'selfcheck', 'script', 'analysis', 'gen_selfcheck_rc.py')
     assert.ok(fs.existsSync(genPath), 'the package carries the gen script')
     const genSrc = fs.readFileSync(genPath, 'utf8')
@@ -1352,7 +1350,7 @@ test('flow: simulator=spectre + local', async () => {
     assert.ok(f.ctx.__execLog.some((x) => x.name === 'batch_poll'))
     assert.equal(f.ctx.__execLog.filter((x) => x.name.startsWith('ssh_')).length, 0)
     // run record survives under the project's .harnessams/selfcheck; a CLEAN
-    // run's artifacts are deleted at finalize (2026-11-19 ruling)
+    // run's artifacts are deleted at finalize
     assert.ok(run.runDir.includes(path.join('.harnessams', 'selfcheck')), run.runDir)
     assert.ok(fs.existsSync(path.join(run.runDir, 'selfcheck_run.json')))
     const left = await waitArtifactsGone(run.runDir)
@@ -1443,7 +1441,7 @@ test('flow: spectre + remote — scheduler=ssh fails → verdict fails (nothing 
   } finally { f.restoreAll() }
 })
 
-test('flow: spectre + remote in-cluster LSF (D-001) — local bsub via ctx.shell, zero ssh, local-copy transfers', async () => {
+test('flow: spectre + remote in-cluster LSF — local bsub via ctx.shell, zero ssh, local-copy transfers', async () => {
   // No machine_id at all: in-cluster LSF is the only channel. The shared root
   // is drive-resolved on Windows, unique per run and cleaned up after.
   const shared = `/hams_sc_ic_${process.pid}_${Date.now()}`
@@ -1476,7 +1474,7 @@ test('flow: spectre + remote in-cluster LSF (D-001) — local bsub via ctx.shell
   }
 })
 
-test('flow: spectre + remote — the toolchain pins drive the submit AND the remote parse (D-006)', async () => {
+test('flow: spectre + remote — the toolchain pins drive the submit AND the remote parse', async () => {
   const f = await startFlow({
     settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'lsf',
       remote_python: PIN_PY, remote_spectre_cmd: PIN_SPECTRE },
@@ -1544,7 +1542,7 @@ test('flow: none + remote — upload, remote compute (python), download + js cro
   } finally { f.restoreAll() }
 })
 
-test('flow: a green remote run auto-pins the measured toolchain and remembers the node (D-006/D-003)', async () => {
+test('flow: a green remote run auto-pins the measured toolchain and remembers the node', async () => {
   // The scenario opts the downloaded sweep_progress.json into carrying the
   // worker telemetry (the measurement the real worker records); a green run
   // must pin both paths into the project settings AND the plugin-global node
@@ -1655,9 +1653,9 @@ test('buildSelfcheckPrompt: english body, artifacts pointer, answer-language lin
 })
 
 // ---------------------------------------------------------------------------
-// 10) persist serialization (regression: fire-and-forget persistRun calls used
-// to share selfcheck_run.json.tmp and could publish a corrupted concatenated
-// document — live-verified 2/7 runs before the per-run persist chain)
+// 10) persist serialization: concurrent fire-and-forget persistRun calls must
+// never interleave into a corrupted concatenated document — the per-run
+// persist chain is the guard under test
 // ---------------------------------------------------------------------------
 
 test('persist serialization: status file stays valid JSON through a run and matches the final verdict', async () => {
@@ -1717,7 +1715,7 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
   assert.ok(src.includes('function SelfcheckSteps('))
   assert.ok(src.includes('SETTING_COLS'), 'row config drives the transposed three-column table (name / value / verdict)')
   assert.ok(src.includes('h(ProjectSelfcheck, { sessionId, info: checksInfo, projectPath, facts: project.selfcheck_facts ?? null })'),
-    'mounted in the Overview tab with the AGENTS.md facts (D-003 restore display)')
+    'mounted in the Overview tab with the AGENTS.md facts')
   assert.ok(src.includes('selfcheck_facts: r.selfcheck_facts ?? null'),
     'the route returns facts as a SIBLING of project — the client folds them onto the project object before the cached shape')
   assert.ok(src.includes('function fmtLocalTime('), 'timestamps render in the SYSTEM timezone')
@@ -1747,18 +1745,18 @@ test('client static contract: keys bilingual, tool funnel wired, staged table, p
   assert.ok(src.includes("value === 'remote' && !next.machine_id && machines.length"),
     'remote switch must auto-pick a machine when none is set')
   assert.ok(src.includes('next.machine_id = machines[0].id'), 'auto-pick assigns machines[0].id')
-  // working-environment switch (D-001): confirm dialog gates the write
+  // working-environment switch: confirm dialog gates the write
   assert.ok(src.includes('const [envDialog, setEnvDialog]'), 'pending-switch state exists')
   assert.ok(src.includes('const commitEnv = async (next)'), 'confirm handler commits the switch')
   assert.ok(src.includes("action: 'save_agentsmd', lang: effectiveLang(), settings: { cluster_env: next }"),
-    'the switch rides the single write funnel with a ONE-KEY payload (D-002: a full base would clobber server-side adoptions)')
+    'the switch rides the single write funnel with a ONE-KEY payload (a full base would clobber server-side adoptions)')
   assert.ok(src.includes('const pendingSettings = () => {'),
-    'pendingSettings computes a dirty DIFF, not a full draft (D-002: server-side adoptions survive UI saves)')
+    'pendingSettings computes a dirty DIFF, not a full draft (server-side adoptions survive UI saves)')
   assert.ok(src.includes("tr('envc.ok')") && src.includes("tr('common.cancel')"), 'confirm/cancel labels')
 })
 
 // ---------------------------------------------------------------------------
-// stop action (2026-11-21): mid-run cancel, bkill, cancelled finalize
+// stop action: mid-run cancel, bkill, cancelled finalize
 // ---------------------------------------------------------------------------
 
 const REMOTE_LSF = { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim',
@@ -1823,13 +1821,13 @@ test('selfcheck poll live progress: the polling step row carries the latest coun
   }
 })
 
-// ---- the 2 s worker-start gate + the conditional script heal (2026-11-26) --
+// ---- the 2 s worker-start gate + the conditional script heal ---------------
 
 test('flow: spectre + remote scheduler=ssh — the 2 s worker-start gate waits, then polls to a terminal state', async () => {
-  // D-004 made ssh submits detached: the gate probes sweep_progress.json
+  // ssh submits are detached: the gate probes sweep_progress.json
   // directly every 2 s (the user-approved ssh_exec bypass) before handing
-  // over to batch_poll — and the ssh chain now polls to a TERMINAL state
-  // instead of the pre-detach one-round break that left the run undecided
+  // over to batch_poll — and the ssh chain polls to a TERMINAL state,
+  // never a one-round break that leaves the run undecided
   const f = await startFlow({
     settings: { run_mode: 'remote', machine_id: 'node1', remote_root: '/home/op/sim', scheduler: 'ssh' },
     scenario: { gateProbes: 2 },

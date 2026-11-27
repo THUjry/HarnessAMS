@@ -3,8 +3,8 @@
 // listing parsing, POSIX parent resolution, the ssh_exec funnel wiring (batch
 // contract, alias addressing, timeout-KILL wrapper), the mkdir name fence and
 // the routes' error-code mapping. The default listing root is the project's
-// settings.remote_root (passed by the route / by callers explicitly — the
-// family remote_machines map is retired). Run: bare `node --test` from the repo root.
+// settings.remote_root (passed by the route / by callers explicitly).
+// Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -87,7 +87,7 @@ test('remotebrowse: lists one level through the exec funnel, defaulting to the g
   assert.equal(r2.parent, '/home/op/sim')
 
   // no root saved -> the listing bootstraps at the machine's $HOME (the root
-  // picker must work before any root exists — the free-typed input retired);
+  // picker must work before any root exists);
   // an ls-style (fallback) stdout yields entries without mtime
   const homeInputs = []
   const homeCtx = makeCtx((args) => {
@@ -172,7 +172,7 @@ test('remotebrowse route: session->workspace mapping, root from settings, error 
     assert.equal((await callGet(handler, base + '?sessionId=stranger&machineId=node1')).code, 404)
 
     // a project without remote_root in its settings -> the listing bootstraps
-    // at the machine's $HOME (browse-only root; no 409 anymore)
+    // at the machine's $HOME (browse-only root, never a 409)
     const bare = await mkdtemp(path.join(tmpdir(), 'hams-rb-bare-'))
     try {
       const handler2 = await registerRoutes({

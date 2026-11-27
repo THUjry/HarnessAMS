@@ -24,15 +24,15 @@ test('guide: bilingual copy — every key exactly twice, slurm marked not suppor
   assertDictKeys(src, [...new Set(keys)])
   assert.match(src, /'guide\.s2slurm': '[^']*\u6682\u4e0d\u652f\u6301/, 'slurm must be marked \u6682\u4e0d\u652f\u6301 in zh')
   assert.match(src, /'guide\.s2slurm': '[^']*not supported/, 'slurm must be marked not supported in en')
-  // the start-page guide card description was upgraded together with the feature
+  // the start-page guide card description is a dictionary key like the rest
   assertDictKeys(src, ['tasks.guideDesc'])
 })
 
 test('assets: vendored .js packages with license and the served package copy', () => {
   assert.ok(assetsSrc.includes("file: 'plotly.min.js'"), 'assets.js must list plotly.min.js as vendored')
-  assert.equal((assetsSrc.match(/license: 'MIT'/g) ?? []).length, 1, 'only plotly is vendored now')
-  // the client consumes packages from /api/assets; the route scans no workspace
-  // (the family-workspace copy scan is retired with the family workspace)
+  assert.equal((assetsSrc.match(/license: 'MIT'/g) ?? []).length, 1, 'exactly one vendored package: plotly')
+  // the client consumes packages from /api/assets; the route serves the
+  // package copies only — no workspace scan
   assert.ok(/assetsStatus\(\)/.test(indexSrc), '/api/assets serves the package copies without a workspace scan')
   assertDictKeys(src, ['assets.colPkg', 'assets.colLicense', 'assets.colPkgCopy', 'assets.colRoute',
     'assets.notices'])
