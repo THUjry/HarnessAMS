@@ -28,13 +28,12 @@ test('guide: bilingual copy — every key exactly twice, slurm marked not suppor
   assertDictKeys(src, ['tasks.guideDesc'])
 })
 
-test('assets: vendored .js packages with license and copy locations', () => {
+test('assets: vendored .js packages with license and the served package copy', () => {
   assert.ok(assetsSrc.includes("file: 'plotly.min.js'"), 'assets.js must list plotly.min.js as vendored')
   assert.equal((assetsSrc.match(/license: 'MIT'/g) ?? []).length, 1, 'only plotly is vendored now')
-  assert.ok(assetsSrc.includes('function scanCopies'), 'the bounded workspace copy scan must exist')
-  assert.ok(assetsSrc.includes("'node_modules'") && assetsSrc.includes("startsWith('.')"), 'scan must skip node_modules and dot dirs')
   // the client consumes packages from /api/assets; the route scans no workspace
+  // (the family-workspace copy scan is retired with the family workspace)
   assert.ok(/assetsStatus\(\)/.test(indexSrc), '/api/assets serves the package copies without a workspace scan')
   assertDictKeys(src, ['assets.colPkg', 'assets.colLicense', 'assets.colPkgCopy', 'assets.colRoute',
-    'assets.colWsCopies', 'assets.noCopies', 'assets.notices'])
+    'assets.notices'])
 })

@@ -18,17 +18,18 @@
 // The Dashboard viewer is display-only: it serves session-registered local HTML
 // reports read-only (bounded by each report's own directory) and a one-level
 // listing for the add-report picker (/api/browse — the dialog's FALLBACK path;
-// its primary local-directory access is the host's native OS folder chooser
-// through POST /api/pick-directory, 2026-11-26 ruling: system first, any
-// failure silently falls back to the listing) — no file writes.
-// The system-browser open action (POST /api/open-local, 2026-11-26) stays the
-// only route that spawns an OS process from THIS plugin's code: a view action
-// fenced to viewable file types (whitelist + existing regular file +
-// quoting-safe characters) with same-origin checks — never an executable/
-// script path, never arguments. POST /api/pick-directory pops the host's
-// native folder dialog through the host 'directoryPicker' service (the host
-// spawns the dialog child; the service is read via ctx.get without an inject
-// declaration, server/pickdir.js — headless embeds simply get 503).
+// its primary local access is the plugin's own native FILE chooser at POST
+// /api/pick-file, 2026-11-26: system file dialog first, any failure silently
+// falls back to the listing) — no file writes.
+// Two routes spawn an OS process straight from this plugin's code, each fenced:
+// POST /api/open-local (view a report with the OS default application —
+// viewable-extension whitelist + existing regular file + quoting-safe
+// characters, same-origin) and POST /api/pick-file (the native file chooser —
+// a .html/.htm filter and an absolute path, same-origin). POST
+// /api/pick-directory pops the HOST's native folder dialog through the
+// 'directoryPicker' service (read via ctx.get without an inject declaration;
+// headless embeds simply get 503) and is no longer chained into the add-report
+// flow — it stays a public route.
 // Remote connectivity is delegated entirely to @linxin666/dsh-ssh (ssh_* tools
 // by alias, zero gating); each project's remote root is its own setting
 // (workspace_config.json settings.remote_root — the family harnessams.json and
@@ -241,11 +242,14 @@ async function handle(req, res, ctx) {
       return
     }
     if (req.method === 'POST' && route === '/api/project-init') {
-      // Project initialization hook (D-015 2026-11-25): the sidebar opening a
-      // project is the PRIMARY staging timing — scripts land, the AGENTS.md
-      // template appears, sim_scripts_dir flips to the project-local copy, and
-      // null toolchain pins heal from the plugin-global node memory. Idempotent
-      // (copy-if-missing); the client fires it once per project per page load.
+      // Project initialization hook (D-015 2026-11-25; D-033 2026-11-26): the
+      // sidebar opening a project backfills the workspace config, lays the
+      // AGENTS.md template, reconciles json <- AGENTS.md, and heals null
+      // toolchain pins from the plugin-global node memory. NO script staging
+      // and NO sim_scripts_dir flip happen here — the package location stays
+      // the scripts root (the self-check start is the lazy-heal backstop for
+      // legacy project-local roots). Idempotent; the client fires it once per
+      // project per page load.
       let body
       try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
       const sessionId = body?.sessionId
@@ -462,7 +466,7 @@ async function handle(req, res, ctx) {
 
   // ---- tier 1: machines / assets ----
   if (route === '/api/machines') {
-    json(200, { ok: true, ...(await remoteMachinesStatus(ctx.tools, req, ctx.workspaceRegistry)) })
+    json(200, { ok: true, ...(await remoteMachinesStatus(ctx.tools)) })
     return
   }
   if (route === '/api/assets') {

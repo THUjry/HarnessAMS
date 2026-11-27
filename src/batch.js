@@ -17,8 +17,8 @@
 // Worker-script source: the batch tools live here but the simulator workers do
 // NOT — they ship with the SmartAnaSim plugin. The upload tree / worker lookup
 // root is the project's workspace_config.json workspace.sim_scripts_dir
-// (normally the SmartAnaSim scripts/ directory; the project root is discovered
-// by walking up from the run directory for a .harnessams store), so
+// (normally the SmartAnaSim scripts/ directory; the project root comes from the
+// calling session or an explicit project argument — D-021, no path walk-up), so
 // cross-package npm resolution is never required (dev-mount loads plugins by
 // absolute path). HARNESSAMS_SIM_SCRIPTS_DIR overrides discovery (tests, custom
 // layouts). The tree uploads as a unit with its relative layout so any worker

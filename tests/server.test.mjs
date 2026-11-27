@@ -163,42 +163,15 @@ test('assets: plotly status reflects the shipped file', async () => {
   // in the repo checkout the file must be present and large
   assert.ok(st.plotly.available, 'plotly.min.js missing from src/assets')
   assert.ok(st.plotly.bytes > 4_000_000)
-})
-
-test('assets: bounded workspace scan lists stray vendored copies', async () => {
-  const root = await mkdtemp(path.join(tmpdir(), 'hams-assets-'))
-  try {
-    await mkdir(path.join(root, 'assets'), { recursive: true })
-    await mkdir(path.join(root, 'demo1', 'Analysis'), { recursive: true })
-    await mkdir(path.join(root, '.trash'), { recursive: true })
-    await mkdir(path.join(root, 'node_modules', 'pkg'), { recursive: true })
-    await mkdir(path.join(root, 'a', 'b', 'c', 'd', 'e', 'f', 'g'), { recursive: true })
-    const body = 'x'.repeat(1000)
-    await writeFile(path.join(root, 'assets', 'plotly.min.js'), body)
-    await writeFile(path.join(root, 'demo1', 'Analysis', 'plotly.min.js'), body)
-    await writeFile(path.join(root, '.trash', 'plotly.min.js'), body) // dot dir: skipped
-    await writeFile(path.join(root, 'node_modules', 'pkg', 'plotly.min.js'), body) // node_modules: skipped
-    await writeFile(path.join(root, 'a', 'b', 'c', 'd', 'e', 'f', 'g', 'plotly.min.js'), body) // beyond maxDepth: skipped
-    await writeFile(path.join(root, 'assets', 'not-an-asset.js'), body) // other names: ignored
-
-    const st = assetsStatus(root)
-    assert.equal(st.packages.length, 1, 'only plotly is vendored')
-    const byFile = new Map(st.packages.map((p) => [p.file, p]))
-    // both non-skipped copies surface (assets/ and demo1/Analysis/); the dot
-    // dir, node_modules and beyond-maxDepth copies stay hidden
-    assert.equal(byFile.get('plotly.min.js').copies.length, 2)
-    assert.ok(byFile.get('plotly.min.js').copies.some((c) => c.path.endsWith(path.join('assets', 'plotly.min.js'))))
-    assert.ok(byFile.get('plotly.min.js').copies.some((c) => c.path.endsWith(path.join('demo1', 'Analysis', 'plotly.min.js'))))
-    assert.ok(byFile.get('plotly.min.js').copies.every((c) => c.bytes === 1000))
-    for (const p of st.packages) {
-      assert.equal(p.license, 'MIT')
-      assert.ok(p.pkg && p.pkg.bytes > 0, 'the package copy itself must be listed')
-      assert.equal(p.url, '/harnessams/assets/' + p.file)
-    }
-    // no workspace root: no scan, empty copy lists, no throw
-    const bare = assetsStatus()
-    assert.ok(bare.packages.every((p) => p.copies.length === 0))
-  } finally { await rm(root, { recursive: true, force: true }) }
+  // the packages list carries the shipped vendored copy and its route
+  // (the family-workspace copy scan is retired — no `copies` field anymore)
+  assert.equal(st.packages.length, 1, 'only plotly is vendored now')
+  const p = st.packages[0]
+  assert.equal(p.file, 'plotly.min.js')
+  assert.equal(p.license, 'MIT')
+  assert.ok(p.pkg && p.pkg.bytes > 0, 'the package copy itself must be listed')
+  assert.equal(p.url, '/harnessams/assets/' + p.file)
+  assert.ok(!('copies' in p), 'no workspace-copy list is produced')
 })
 
 // ---- dsh-ssh machine channel ----

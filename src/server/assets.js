@@ -18,14 +18,14 @@ const TYPES = {
 const cache = new Map()
 
 // The vendored .js packages the plugin ships, with their licenses — the console's
-// asset area lists exactly these plus where each copy lives. Keep in sync with the
-// ALLOWED whitelist and THIRD_PARTY_NOTICES.md. (The vendored xterm bundle was
-// removed with the dsh-remote terminal — see THIRD_PARTY_NOTICES.md.)
+// asset area lists exactly these. Keep in sync with the ALLOWED whitelist and
+// THIRD_PARTY_NOTICES.md. (The vendored xterm bundle was removed with the
+// dsh-remote terminal — see THIRD_PARTY_NOTICES.md. The family-workspace copy
+// scan is retired with the family workspace, 2026-11-26: the route reports the
+// package copies only.)
 const VENDORED = [
   { file: 'plotly.min.js', label: 'plotly.js', license: 'MIT' },
 ]
-const COPY_NAMES = new Set(VENDORED.map((v) => v.file))
-const SCAN = { maxDepth: 6, maxDirs: 4000, maxCopies: 100 }
 
 function load(name) {
   if (cache.has(name)) return cache.get(name)
@@ -56,10 +56,8 @@ export function serveAsset(req, res, name) {
   res.end(entry.body)
 }
 
-// Status for the console's asset area: the package copies (always), plus — when a
-// workspace root is given — a bounded scan for stray copies of the vendored files
-// inside the workspace.
-export function assetsStatus(wsRoot = null) {
+// Status for the console's asset area: the package copies, always.
+export function assetsStatus() {
   const plotlyPath = ALLOWED.get('plotly.min.js')
   let available = false, bytes = 0
   try {
@@ -67,12 +65,11 @@ export function assetsStatus(wsRoot = null) {
     available = true
     bytes = st.size
   } catch { /* shipped file missing */ }
-  const found = wsRoot ? scanCopies(wsRoot) : new Map()
   const packages = VENDORED.map((v) => {
     const abs = ALLOWED.get(v.file)
     let pkg = null
     try { pkg = { path: abs, bytes: fs.statSync(abs).size } } catch { /* shipped file missing */ }
-    return { ...v, url: '/harnessams/assets/' + v.file, pkg, copies: found.get(v.file) ?? [] }
+    return { ...v, url: '/harnessams/assets/' + v.file, pkg }
   })
   return {
     plotly: {
@@ -83,35 +80,4 @@ export function assetsStatus(wsRoot = null) {
     },
     packages,
   }
-}
-
-// Bounded workspace walk for copies of the vendored files: depth-capped, skips dot
-// directories and node_modules (recycle bin included via its dot name), stat-only —
-// never reads file bodies. The package's own copies live in ASSET_DIR, outside the
-// workspace, so every hit is a workspace copy by construction.
-function scanCopies(root) {
-  const found = new Map()
-  let dirs = 0
-  const push = (name, p) => {
-    const list = found.get(name) ?? []
-    if (list.length >= SCAN.maxCopies) return
-    try { list.push({ path: p, bytes: fs.statSync(p).size }); found.set(name, list) } catch { /* raced away */ }
-  }
-  const walk = (dir, depth) => {
-    if (depth > SCAN.maxDepth || dirs >= SCAN.maxDirs) return
-    dirs++
-    let entries
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch { return /* unreadable: skip */ }
-    for (const e of entries) {
-      const p = path.join(dir, e.name)
-      if (e.isDirectory()) {
-        if (e.name.startsWith('.') || e.name === 'node_modules') continue
-        walk(p, depth + 1)
-      } else if (e.isFile() && COPY_NAMES.has(e.name)) {
-        push(e.name, p)
-      }
-    }
-  }
-  walk(root, 0)
-  return found
 }

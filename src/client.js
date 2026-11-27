@@ -3,8 +3,8 @@
 //           first-run guide (centered entry until seen, then a persistent guide button;
 //           five sections chaining the scattered hints into one read), machines (the
 //           dsh-ssh host registry with each alias's configured remote root), digital
-//           assets (vendored .js packages with licenses + package/workspace copy
-//           locations), disk usage;
+//           assets (vendored .js packages with licenses + the served package
+//           copy);
 //   tier 2: project = DSH workspace (a local folder) — every SESSION is a work
 //           unit (the task concept was retired 2026-11-19, decisions.md D-005):
 //           each session carries its own dashboard reports and confirmed check
@@ -73,7 +73,7 @@ window.__ModuleLoader__.load({
         'guide.s3t': '工作区位置',
         'guide.s3': '配置＝各工作区自己的 .harnessams/workspace_config.json 单文件（运行设置含远端根路径、脚本目录、plotly、回收站）。远程 — 路径即远端真实路径（dsh-ssh 按别名直达，无本地镜像）。',
         'guide.s4t': '仿真插件套件',
-        'guide.s4': '套件合计 11 个工具：SmartAnaSim 6（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析脚本）＋HarnessAMS 5（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
+        'guide.s4': '套件合计 13 个工具：SmartAnaSim 7（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件＋post_check 按需数据完整性诊断，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析/诊断脚本）＋HarnessAMS 6（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、register_report 挂载已有报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
         'guide.s5': 'HarnessAMS 侧栏「项目总览」— 项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
@@ -108,8 +108,6 @@ window.__ModuleLoader__.load({
         'assets.colLicense': '协议',
         'assets.colPkgCopy': '随包副本',
         'assets.colRoute': '服务路由',
-        'assets.colWsCopies': '工作区副本',
-        'assets.noCopies': '（工作区无副本）',
         'tasks.noSession': '无活动会话',
         'tasks.loadingProject': '正在加载项目…',
         'tasks.noProject': '此会话没有对应项目。',
@@ -298,7 +296,7 @@ window.__ModuleLoader__.load({
         'guide.s3t': 'Workspace location',
         'guide.s3': 'Config = each workspace\'s own single file .harnessams/workspace_config.json (run settings incl. the remote root, script dir, plotly, trash). Remote — paths are the real remote paths (dsh-ssh goes by alias, no local mirror).',
         'guide.s4t': 'Simulation plugin suites',
-        'guide.s4': 'The suite registers 11 tools in total: SmartAnaSim 6 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, and the gen_vsch_import/export pair — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser scripts) and HarnessAMS 5 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, safe_trash and the harnessams_selfcheck self-check). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
+        'guide.s4': 'The suite registers 13 tools in total: SmartAnaSim 7 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, the gen_vsch_import/export pair and the on-demand post_check data-integrity diagnostic — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser/diagnostic scripts) and HarnessAMS 6 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, register_report for mounting an existing report, safe_trash and the harnessams_selfcheck self-check). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
         'guide.s5': 'HarnessAMS sidebar “Project overview” — the project-settings table plus project self-check is the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
@@ -333,8 +331,6 @@ window.__ModuleLoader__.load({
         'assets.colLicense': 'License',
         'assets.colPkgCopy': 'Package copy',
         'assets.colRoute': 'Served at',
-        'assets.colWsCopies': 'Workspace copies',
-        'assets.noCopies': '(no workspace copies)',
         'tasks.noSession': 'no active session',
         'tasks.loadingProject': 'Loading project…',
         'tasks.noProject': 'No project for this session.',
@@ -1282,8 +1278,8 @@ window.__ModuleLoader__.load({
     }
 
     // Digital assets (tier 1): which .js packages the plugin vendors (with their
-    // licenses), the served package copy, and where stray copies live in the
-    // workspace. Reports are NOT listed here — they live in the task dashboard.
+    // licenses) and the served package copy. Reports are NOT listed here — they
+    // live in the task dashboard.
     function AssetsSection() {
       const [assets, setAssets] = useState(null)
       const [err, setErr] = useState(null)
@@ -1301,7 +1297,7 @@ window.__ModuleLoader__.load({
         ),
         assets?.packages?.length > 0 && h('table', { className: 'hams-table' },
           h('thead', null, h('tr', null,
-            [tr('assets.colPkg'), tr('assets.colLicense'), tr('assets.colPkgCopy'), tr('assets.colRoute'), tr('assets.colWsCopies')].map((c) => h('th', { key: c }, c)))),
+            [tr('assets.colPkg'), tr('assets.colLicense'), tr('assets.colPkgCopy'), tr('assets.colRoute')].map((c) => h('th', { key: c }, c)))),
           h('tbody', null, assets.packages.map((p) => h('tr', { key: p.file },
             h('td', null, txt(p.file), h('div', { className: 'hams-dim' }, p.label)),
             h('td', null, p.license),
@@ -1309,11 +1305,7 @@ window.__ModuleLoader__.load({
               p.pkg
                 ? [txt(p.pkg.path), h('div', { className: 'hams-dim' }, fmtBytes(p.pkg.bytes))]
                 : h('span', { className: 'hams-warn' }, tr('assets.plotlyMissing'))),
-            h('td', null, h('a', { className: 'hams-link', href: p.url, target: '_blank' }, tr('assets.openAsset'))),
-            h('td', null,
-              !p.copies?.length
-                ? h('span', { className: 'hams-dim' }, tr('assets.noCopies'))
-                : p.copies.map((c) => h('div', { key: c.path, title: c.path }, txt(c.path), ' — ', fmtBytes(c.bytes))))))),
+            h('td', null, h('a', { className: 'hams-link', href: p.url, target: '_blank' }, tr('assets.openAsset')))))),
         ),
       )
     }
@@ -1788,11 +1780,12 @@ window.__ModuleLoader__.load({
     const selfcheckMemory = { path: null, settings: null, draft: null, run: null, envRun: null }
 
     // Project initialization on sidebar open (D-015, 2026-11-25): one POST per
-    // project path per page load — the server stages the reusable scripts, lays
-    // the AGENTS.md template, flips sim_scripts_dir to the project-local copy,
-    // and heals null toolchain pins from the plugin-global node memory. All of
-    // it idempotent server-side; the Set only keeps the traffic down (a failed
-    // init is not retried — the self-check start is the staging backstop).
+    // project path per page load — the server backfills the workspace config,
+    // lays the AGENTS.md template, reconciles json <- AGENTS.md, and heals null
+    // toolchain pins from the plugin-global node memory (NO script staging and
+    // NO sim_scripts_dir flip since D-033 — the package location stays the
+    // scripts root). All of it idempotent server-side; the Set only keeps the
+    // traffic down (a failed init is not retried).
     const projectInitFired = new Set()
     function ensureProjectInit(projectPath, sessionId) {
       if (!projectPath || projectInitFired.has(projectPath)) return

@@ -1,10 +1,9 @@
 // Python pipeline channel: a tool executes a plain script shipped under
 // scripts/ in a fresh `python` process (no build step, system Python only).
-// scripts/ here holds only the project self-check (selfcheck/); common/ holds
-// retired reference copies that are never executed. The analysis pipeline is
-// pure JS (tools/gen_report.js) and trash is a JS module (trash.js). The
-// simulator workers live in the SmartAnaSim package (see batch.js for the
-// upload root).
+// scripts/ here holds only the project self-check (selfcheck/). The analysis
+// pipeline is pure JS (tools/gen_report.js) and trash is a JS module
+// (trash.js). The simulator workers live in the SmartAnaSim package (see
+// batch.js for the upload root).
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -45,11 +44,6 @@ export async function runPython(scriptRel, args, timeoutMs = 900_000, options = 
     env: { ...process.env, PYTHONUTF8: '1', ...extraEnv },
     ...rest,
   })
-}
-
-export function cliError(e) {
-  const detail = [e?.stdout, e?.stderr].filter(Boolean).join('\n').slice(-2000)
-  return detail || String(e?.message ?? e)
 }
 
 export function readJsonIfExists(file) {
