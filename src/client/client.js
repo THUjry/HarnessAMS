@@ -76,7 +76,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': '套件合计 13 个工具：SmartAnaSim 7（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件＋post_check 按需数据完整性诊断，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析/诊断脚本）＋HarnessAMS 6（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、register_report 挂载已有报告、safe_trash 回收站、harnessams_selfcheck 自检）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 两个子页：「项目配置与总览」＝项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「自动化」＝自动化任务列表（config_automation 工具增/改/删、run_automation 为 agent 调试触发面；行内「运行」＝手工触发，在项目 machine_id 上顺序执行命令 .txt、结果弹窗回显）；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 两个子页：「项目配置与总览」＝项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「自动化」＝自动化任务列表（config_automation 工具增/改/删、run_automation 为 agent 调试触发面；行内「运行」＝手工触发：远程任务在项目 machine_id 上顺序执行命令 .txt、本地任务逐行调工具不套 ssh 壳，结果弹窗回显；行尾「删除」移除任务条目、命令 .txt 保留在共享库；新项目默认带一条「清空垃圾桶」示例）；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'hosts.title': '机器',
         'hosts.ok': 'dsh-ssh：{n} 台主机',
         'hosts.missing': 'dsh-ssh 不可用',
@@ -135,11 +135,20 @@ window.__ModuleLoader__.load({
         'auto.resultTitle': '自动化运行结果：{name}',
         'auto.resultDone': '全部命令成功',
         'auto.resultFailed': '存在失败命令',
-        'auto.resultAborted': '已中止（远端结果不确定）',
+        'auto.resultAborted': '已中止（受影响调用的结果不确定）',
         'auto.resultTime': '{start} → {end}',
         'auto.exitCode': '退出码 {code}',
         'auto.duration': '{ms} ms',
         'auto.timedOut': '超时',
+        'auto.delete': '删除',
+        'auto.delTitle': '删除自动化任务',
+        'auto.delBody': '确定删除任务「{name}」？',
+        'auto.delKeepsFiles': '命令 .txt 文件不会被删除——它们是共享命令库，可能仍被其他任务引用。',
+        'auto.delFailed': '删除失败：{msg}',
+        'auto.modeLocal': '本地执行：每行一个工具调用（不套 ssh 壳）',
+        'auto.modeRemote': '远程执行：命令文件按序在 machine_id 上跑 shell',
+        'auto.oversize': '{n} 行（超 50）——建议把重内容先上传到服务器、再以路径引用',
+        'auto.localRun': '本地执行',
         'tasks.storeSkipped': 'sessions.json 有 {n} 处不合规内容被跳过',
         'dash.noReports': '（暂无报告）',
         'dash.addTitle': '添加 HTML 报告',
@@ -326,7 +335,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'The suite registers 13 tools in total: SmartAnaSim 7 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, the gen_vsch_import/export pair and the on-demand post_check data-integrity diagnostic — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser/diagnostic scripts) and HarnessAMS 6 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, register_report for mounting an existing report, safe_trash and the harnessams_selfcheck self-check). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS sidebar “Project overview” — two sub-tabs: “Config & overview” — the project-settings table plus project self-check as the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; and “Automation” — the automation task list (the config_automation tool is the CRUD face, run_automation the agent/debug trigger; the row\'s Run button is the manual trigger — the referenced .txt commands execute sequentially on the project\'s machine_id, result echoed in a dialog); “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS sidebar “Project overview” — two sub-tabs: “Config & overview” — the project-settings table plus project self-check as the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; and “Automation” — the automation task list (the config_automation tool is the CRUD face, run_automation the agent/debug trigger; the row\'s Run button is the manual trigger — remote tasks execute the referenced .txt sequentially on the project\'s machine_id, local tasks make one tool call per line with no ssh wrapper, result echoed in a dialog; the row\'s trailing Delete removes the entry and keeps the shared .txt files; a fresh project ships one “empty project trash” demo); “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'hosts.title': 'Machines',
         'hosts.ok': 'dsh-ssh: {n} host(s)',
         'hosts.missing': 'dsh-ssh not available',
@@ -385,11 +394,20 @@ window.__ModuleLoader__.load({
         'auto.resultTitle': 'Automation result: {name}',
         'auto.resultDone': 'all commands passed',
         'auto.resultFailed': 'some commands failed',
-        'auto.resultAborted': 'aborted (remote outcome uncertain)',
+        'auto.resultAborted': 'aborted (the affected call\'s outcome is uncertain)',
         'auto.resultTime': '{start} -> {end}',
         'auto.exitCode': 'exit {code}',
         'auto.duration': '{ms} ms',
         'auto.timedOut': 'timed out',
+        'auto.delete': 'Delete',
+        'auto.delTitle': 'Delete automation task',
+        'auto.delBody': 'Delete the task "{name}"?',
+        'auto.delKeepsFiles': 'The command .txt files are NOT deleted — they are the shared library and may still back other tasks.',
+        'auto.delFailed': 'delete failed: {msg}',
+        'auto.modeLocal': 'Local: one tool call per line (no ssh wrapper)',
+        'auto.modeRemote': 'Remote: the command files run as shell on machine_id',
+        'auto.oversize': '{n} lines (> 50) — prefer uploading heavy content to the server and referencing it by path',
+        'auto.localRun': 'local run',
         'tasks.storeSkipped': '{n} invalid entries skipped in sessions.json',
         'dash.noReports': '(no reports)',
         'dash.addTitle': 'Add an HTML report',
@@ -2216,15 +2234,19 @@ window.__ModuleLoader__.load({
 
     // ---------- tier 3: the Automation sub-tab list ----------
     // The phase-2 automation surface: the project's automation.json tasks,
-    // sortable per column, click-to-expand detail rows (description + one .txt
-    // reference per line — the shared command library), and the left run
-    // button that flips to Abort while its POST is in flight. The run is the
-    // MANUAL, agent-free trigger: POST /api/automation/run executes the
-    // registered commands sequentially on the project's machine_id and
-    // returns the whole result; this dialog only ECHOES it (post-run behavior
-    // is the reserved seam — nothing acts on the result yet). A plain flowing
-    // table: no scroll container of its own (the parent .hams-body scrolls
-    // however tall the list grows), width stays inside the pane.
+    // sortable per column, click-to-expand detail rows (description, the
+    // execution mode, one .txt reference per line — the shared command
+    // library, with the oversize hint when a file runs long), the left run
+    // button that flips to Abort while its POST is in flight, and the right
+    // delete button behind a confirm dialog (the entry goes, the shared
+    // command files stay). The run is the MANUAL, agent-free trigger: POST
+    // /api/automation/run executes the registered commands per the task's
+    // mode — remote shell on the project's machine_id, or local tool calls
+    // without the ssh wrapper — and returns the whole result; this dialog
+    // only ECHOES it (post-run behavior is the reserved seam — nothing acts
+    // on the result yet). A plain flowing table: no scroll container of its
+    // own (the parent .hams-body scrolls however tall the list grows), width
+    // stays inside the pane.
     const AUTOMATION_COLS = [
       { id: 'name', labelKey: 'auto.colName' },
       { id: 'created_at', labelKey: 'auto.colCreated' },
@@ -2234,11 +2256,13 @@ window.__ModuleLoader__.load({
     function AutomationList({ sessionId, projectPath }) {
       const [list, setList] = useState(null) // null = loading; { automations, warnings, machine_id }
       const [loadErr, setLoadErr] = useState(null)
-      const [error, setError] = useState(null) // run failure line
+      const [error, setError] = useState(null) // run/delete failure line
       const [sort, setSort] = useState({ field: 'created_at', dir: 'desc' })
       const [expanded, setExpanded] = useState(null) // key of the expanded row
       const [running, setRunning] = useState({}) // key -> true while its run POST is in flight
       const [result, setResult] = useState(null) // finished run -> the echo dialog
+      const [confirmDel, setConfirmDel] = useState(null) // entry pending its delete confirm
+      const [deleting, setDeleting] = useState(false) // a delete POST is in flight
       const runRefs = useRef({}) // key -> AbortController of the in-flight run
 
       const refetch = useCallback(() => {
@@ -2289,6 +2313,25 @@ window.__ModuleLoader__.load({
           })
       }
 
+      // The delete flow: the row's delete button only OPENS the confirm
+      // dialog; the confirmed POST removes the task entry (the shared command
+      // files stay — the server's deleteAutomation contract) and the list
+      // refetches.
+      const commitDelete = () => {
+        const a = confirmDel
+        if (!a) return
+        setDeleting(true)
+        setError(null)
+        fetchJson(API + '/automation/delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId, key: a.key }),
+        })
+          .then(() => { setConfirmDel(null); void refetch() })
+          .catch((e) => setError(txt(tr('auto.delFailed', { msg: String(e.message ?? e) }))))
+          .finally(() => setDeleting(false))
+      }
+
       const rows = [...(list?.automations ?? [])].sort((a, b) => {
         const mul = sort.dir === 'asc' ? 1 : -1
         if (sort.field === 'name') return mul * String(a.name ?? '').localeCompare(String(b.name ?? ''))
@@ -2303,7 +2346,8 @@ window.__ModuleLoader__.load({
         list?.warnings?.length > 0 && h('div', { className: 'hams-warn hams-storewarn' },
           txt(tr('auto.storeSkipped', { n: list.warnings.length })),
           h(ClampText, { text: list.warnings.join('\n') })),
-        list?.machine_id == null && h('div', { className: 'hams-dim', style: { margin: '4px 0' } }, tr('auto.noMachine')),
+        list?.machine_id == null && (list?.automations ?? []).some((a) => (a.mode ?? 'remote') !== 'local')
+          && h('div', { className: 'hams-dim', style: { margin: '4px 0' } }, tr('auto.noMachine')),
         error && h('div', { className: 'hams-err' }, txt(error)),
         list === null && !loadErr && h('div', { className: 'hams-dim' }, tr('common.loading')),
         list !== null && h('table', { className: 'hams-table', style: { margin: '0 0 8px' } },
@@ -2315,9 +2359,10 @@ window.__ModuleLoader__.load({
                 ? { field: c.id, dir: prev.dir === 'asc' ? 'desc' : 'asc' }
                 : { field: c.id, dir: 'asc' })),
               title: tr('auto.sortHint'),
-            }, tr(c.labelKey) + (sort.field === c.id ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''))))),
+            }, tr(c.labelKey) + (sort.field === c.id ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''))),
+            h('th', { style: { width: '58px' } }, ''))),
           h('tbody', null,
-            rows.length === 0 && h('tr', null, h('td', { colSpan: 4, className: 'hams-dim' }, tr('auto.empty'))),
+            rows.length === 0 && h('tr', null, h('td', { colSpan: 5, className: 'hams-dim' }, tr('auto.empty'))),
             rows.flatMap((a) => {
               const isRunning = !!running[a.key]
               return [
@@ -2336,14 +2381,29 @@ window.__ModuleLoader__.load({
                     }, tr(isRunning ? 'auto.stop' : 'auto.run'))),
                   h('td', null, txt(a.name)),
                   h('td', { className: 'hams-dim' }, fmtLocalTime(a.created_at)),
-                  h('td', { className: 'hams-dim' }, fmtLocalTime(a.updated_at))),
+                  h('td', { className: 'hams-dim' }, fmtLocalTime(a.updated_at)),
+                  h('td', null,
+                    h('button', {
+                      className: 'hams-btn hams-btn-sm',
+                      disabled: deleting,
+                      title: tr('auto.delete'),
+                      onClick: (e) => {
+                        e.stopPropagation()
+                        setConfirmDel(a)
+                      },
+                    }, tr('auto.delete')))),
                 expanded === a.key && h('tr', { key: a.key + ':detail' },
-                  h('td', { colSpan: 4 },
+                  h('td', { colSpan: 5 },
                     h('div', { className: 'hams-dim' }, txt(a.description || tr('auto.noDesc'))),
+                    h('div', { className: 'hams-dim', style: { margin: '4px 0 0' } },
+                      tr(a.mode === 'local' ? 'auto.modeLocal' : 'auto.modeRemote')),
                     h('div', { className: 'hams-dim', style: { margin: '4px 0 0' } },
                       h('span', { style: { fontWeight: 600 } }, tr('auto.filesLabel')),
                       (a.files ?? []).length === 0 && txt(tr('auto.noFiles')),
-                      (a.files ?? []).map((f) => h('div', { key: f }, txt(f)))))),
+                      (a.files ?? []).map((f) => h('div', { key: f.file },
+                        txt(f.file),
+                        f.oversize && h('span', { className: 'hams-warn' },
+                          ' ' + tr('auto.oversize', { n: f.lines }))))))),
               ]
             }))),
         result && h('div', {
@@ -2357,22 +2417,37 @@ window.__ModuleLoader__.load({
               style: { fontWeight: 600 },
             }, tr(result.status === 'done' ? 'auto.resultDone'
               : result.status === 'aborted' ? 'auto.resultAborted' : 'auto.resultFailed')
-              + ' — ' + txt(result.machine ?? '')),
+              + ' — ' + txt(result.mode === 'local' ? tr('auto.localRun') : (result.machine ?? ''))),
             h('div', { className: 'hams-dim' },
               tr('auto.resultTime', { start: fmtLocalTime(result.started_at), end: fmtLocalTime(result.finished_at) })),
             h('div', { className: 'hams-field' },
-              (result.results ?? []).map((r) => h('div', { key: r.file, style: { margin: '6px 0' } },
+              (result.results ?? []).map((r, i) => h('div', { key: (r.file ?? '') + ':' + (r.line ?? i), style: { margin: '6px 0' } },
                 h('div', null,
                   h('b', null, txt(r.file)), ' ',
+                  r.tool && txt('· ' + r.tool + ' '), ' ',
                   h('span', { className: r.ok ? 'hams-good' : 'hams-bad' }, r.ok ? '✓' : '✗'),
                   r.timedOut && txt(' ' + tr('auto.timedOut')),
                   r.exitCode != null && txt(' ' + tr('auto.exitCode', { code: r.exitCode })),
-                  r.duration_ms != null && txt(' · ' + tr('auto.duration', { ms: r.duration_ms }))),
-                (r.stdout || r.stderr || r.error) && h(ClampText, {
-                  text: [r.error, r.stdout, r.stderr ? '[stderr]\n' + r.stderr : ''].filter(Boolean).join('\n'),
+                  r.duration_ms != null && txt(' · ' + tr('auto.duration', { ms: r.duration_ms })),
+                  r.oversize && h('span', { className: 'hams-warn' }, ' ' + tr('auto.oversize', { n: r.lines }))),
+                (r.text || r.stdout || r.stderr || r.error) && h(ClampText, {
+                  text: [r.error, r.text, r.stdout, r.stderr ? '[stderr]\n' + r.stderr : ''].filter(Boolean).join('\n'),
                 })))),
             h('div', { className: 'hams-row', style: { justifyContent: 'flex-end' } },
               h('button', { className: 'hams-btn', onClick: () => setResult(null) }, tr('common.close'))))),
+        confirmDel && h('div', {
+          className: 'hams-dialog-backdrop',
+          onClick: (e) => { if (e.target === e.currentTarget && !deleting) setConfirmDel(null) },
+        },
+          h('div', { className: 'hams-dialog' },
+            h('h3', null, tr('auto.delTitle')),
+            h('div', null, txt(tr('auto.delBody', { name: confirmDel.name }))),
+            h('div', { className: 'hams-dim', style: { margin: '6px 0 0' } }, tr('auto.delKeepsFiles')),
+            h('div', { className: 'hams-row', style: { justifyContent: 'flex-end', margin: '10px 0 0' } },
+              h('button', { className: 'hams-btn hams-bad', disabled: deleting, onClick: commitDelete },
+                tr('auto.delete')),
+              h('button', { className: 'hams-btn', disabled: deleting, onClick: () => setConfirmDel(null) },
+                tr('common.cancel'))))),
       )
     }
 

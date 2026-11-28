@@ -1,9 +1,12 @@
 // Automation store + runner contracts: the shared .txt command library under
 // .harnessams/automation/, the automation.json task list (lenient read /
-// strict write), the key format, and the stateless sequential runner over the
-// dsh-ssh exec funnel — plus the config_automation / run_automation tool
-// faces and their two routes. The ssh tool shell is a mock speaking the
-// dsh-tools batch contract; the route driver is the shared helpers one.
+// strict write), the key format, the entry's execution mode, the oversize
+// warning, the seeded default demo, and the stateless sequential runner
+// (remote: the dsh-ssh exec funnel; local: one tool call per line through the
+// registered tool surface) — plus the config_automation / run_automation tool
+// faces and their routes (list / run / delete). The tool shells are mocks
+// speaking the dsh-tools batch contract; the route driver is the shared
+// helpers one.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -15,7 +18,8 @@ import { makeTool } from '../src/tool.js'
 import { automationTools } from '../src/tools/automation.js'
 import {
   addAutomation, updateAutomation, deleteAutomation, readAutomations,
-  writeCommandFile, runAutomation, makeAutomationKey, automationPath, commandDirPath,
+  writeCommandFile, runAutomation, makeAutomationKey, ensureDefaultAutomation,
+  automationPath, commandDirPath,
 } from '../src/core/automation.js'
 
 const rmrf = (dir) => fsp.rm(dir, { recursive: true, force: true })
@@ -58,6 +62,31 @@ function makeSshCtx(handle) {
 
 const okExec = () => ({ value: { success: true, stdout: 'done', stderr: '', exitCode: 0 } })
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+
+// Local-mode tool-surface mock: get() answers the registry lookup (the demo
+// tools declare a `project` parameter, so the runner's project injection
+// fires), execute() records every batch call and answers from per-tool
+// handlers; a tool with no handler reads as unregistered.
+function makeToolCtx(handlers, { declareProject = true } = {}) {
+  const calls = []
+  const ctx = {
+    tools: {
+      register: () => {},
+      get: (name) => (handlers[name]
+        ? { name, parameters: { properties: declareProject ? { project: {} } : {} } }
+        : undefined),
+      execute: async (input) => {
+        const call = input.calls[0]
+        const args = JSON.parse(call.arguments)
+        calls.push({ id: call.id, name: call.name, args, signal: input.signal })
+        const handler = handlers[call.name]
+        const result = handler ? await handler(args, calls) : { isError: true, text: `unexpected tool call: ${call.name}` }
+        return { results: [{ callId: call.id, result }] }
+      },
+    },
+  }
+  return { ctx, calls }
+}
 
 test('store: add writes the shared command files and registers the task with its key and order', async () => {
   const dir = await makeProject()
@@ -314,13 +343,196 @@ test('runner: aborting the caller signal marks the run aborted with the uncertai
   } finally { await rmrf(dir) }
 })
 
+test('store: mode rides entries — local persists, absent reads as remote, unknown values warn', async () => {
+  const dir = await makeProject()
+  try {
+    const a = await addAutomation(dir, {
+      sessionId: 's', name: 'loc', mode: 'local',
+      commands: [{ file: 'a.txt', content: 'safe_trash {"action":"list"}' }],
+    })
+    assert.equal(a.mode, 'local')
+    const b = await addAutomation(dir, { sessionId: 's', name: 'rem', commands: [{ file: 'b.txt', content: 'echo x' }] })
+    assert.equal(b.mode, 'remote', 'no mode given = the remote default')
+    const u = await updateAutomation(dir, { key: b.key, mode: 'local' })
+    assert.equal(u.mode, 'local', 'an update switches the channel')
+    const keep = await updateAutomation(dir, { key: a.key, name: 'loc2' })
+    assert.equal(keep.mode, 'local', 'an update without mode keeps the channel')
+    const bad = await addAutomation(dir, { sessionId: 's', name: 'x', mode: 'weird', commands: [{ file: 'c.txt', content: 'echo c' }] })
+    assert.match(bad.error, /mode must be 'remote' or 'local'/)
+    // the lenient read: an unknown stored value warns and reads back remote
+    await fsp.writeFile(automationPath(dir), JSON.stringify({ automations: [
+      { key: 'k-weird-000001', name: 'w', files: ['a.txt'], mode: 'weird' },
+      { key: 'k-loc-000002', name: 'l', files: ['a.txt'], mode: 'local' },
+    ] }))
+    const { automations, warnings } = await readAutomations(dir)
+    assert.equal(automations[0].mode, 'remote')
+    assert.equal(automations[1].mode, 'local')
+    assert.equal(warnings.length, 1)
+    assert.match(warnings[0], /mode is not 'remote' or 'local'/)
+  } finally { await rmrf(dir) }
+})
+
+test('runner: local-mode tasks call tools line by line with project injected, no machine needed', async () => {
+  const dir = await makeProject({ machineId: null })
+  try {
+    await addAutomation(dir, {
+      sessionId: 's-loc', name: 'clean trash', mode: 'local',
+      commands: [{
+        file: 'clean.txt',
+        content: '# one tool call per line\nsafe_trash {"action":"empty"}\nbatch_submit {"run_dir":"r1"}',
+      }],
+    })
+    const { automations } = await readAutomations(dir)
+    assert.equal(automations[0].mode, 'local')
+    const { ctx, calls } = makeToolCtx({
+      safe_trash: () => ({ value: { ok: true, purged: 2, output: 'emptied 2 entries' } }),
+      batch_submit: () => ({ value: { ok: true, job_id: 'j1' } }),
+    })
+    const r = await runAutomation(ctx, { project: { path: dir }, key: automations[0].key })
+    assert.equal(r.status, 'done')
+    assert.equal(r.mode, 'local')
+    assert.equal(r.machine, null, 'local runs need no machine_id')
+    assert.equal(calls.length, 2, 'comment lines are skipped, one call per line')
+    assert.deepEqual(calls.map((c) => c.name), ['safe_trash', 'batch_submit'])
+    assert.equal(calls[0].args.action, 'empty')
+    assert.equal(calls[0].args.project, dir, 'the project path is injected for tools that declare it')
+    assert.equal(calls[1].args.run_dir, 'r1')
+    assert.ok(calls[0].signal instanceof AbortSignal, 'a live abort signal rides the batch input')
+    assert.equal(r.results[0].tool, 'safe_trash')
+    assert.equal(r.results[0].ok, true)
+    assert.equal(r.results[0].line, 2, 'the line number of the call')
+    assert.match(r.results[0].text, /emptied 2 entries/, 'a JSON value result echoes as text')
+    assert.equal(r.results[1].line, 3)
+  } finally { await rmrf(dir) }
+})
+
+test('runner: local-mode bad lines and unknown tools report per line, the rest still run', async () => {
+  const dir = await makeProject()
+  try {
+    await addAutomation(dir, {
+      sessionId: 's', name: 'mixed', mode: 'local',
+      commands: [{ file: 'mixed.txt', content: 'safe_trash\nnope {"x":1}\nsafe_trash {"action":"list"}\nsafe_trash not-json' }],
+    })
+    const { automations } = await readAutomations(dir)
+    const { ctx, calls } = makeToolCtx({
+      safe_trash: () => ({ value: { ok: true, output: 'listed' } }),
+    })
+    const r = await runAutomation(ctx, { project: { path: dir }, key: automations[0].key })
+    assert.equal(r.status, 'failed', 'a bad line fails the overall status')
+    assert.match(r.results[0].error, /no arguments found/, 'a tool name without JSON args')
+    assert.equal(r.results[1].tool, 'nope')
+    assert.match(r.results[1].error, /not registered/)
+    assert.equal(r.results[2].ok, true, 'the failure does not stop the rest')
+    assert.match(r.results[3].error, /not valid JSON/)
+    assert.equal(calls.length, 1, 'only the well-formed registered line dispatches')
+  } finally { await rmrf(dir) }
+})
+
+test('store: oversize command files (>50 lines) warn through add, run and the list route', async () => {
+  const dir = await makeProject()
+  try {
+    const big = Array.from({ length: 51 }, (_, i) => `echo line ${i + 1}`).join('\n')
+    const r = await addAutomation(dir, { sessionId: 's', name: 'big', commands: [{ file: 'big.txt', content: big }] })
+    assert.equal(r.ok, true)
+    assert.equal(r.warnings.length, 1)
+    assert.match(r.warnings[0], /big\.txt is 51 lines/)
+    assert.match(r.warnings[0], /uploading heavy content/)
+    const { automations } = await readAutomations(dir)
+    const { ctx } = makeSshCtx(okExec)
+    const run = await runAutomation(ctx, { project: { path: dir }, key: automations[0].key })
+    assert.equal(run.status, 'done')
+    assert.equal(run.results[0].lines, 51)
+    assert.equal(run.results[0].oversize, true)
+    // a 50-line file does not warn (the boundary is exclusive)
+    const fifty = Array.from({ length: 50 }, (_, i) => `echo ${i}`).join('\n')
+    const ok = await addAutomation(dir, { sessionId: 's', name: 'ok50', commands: [{ file: 'fifty.txt', content: fifty }] })
+    assert.equal(ok.warnings, undefined)
+    // the list route enriches each file reference with its line metadata
+    ctx.workspaceRegistry = { list: () => [{ id: 'w1', path: dir, title: 'w', sessionIds: ['session-o'] }] }
+    const handler = await registerRoutes(ctx)
+    const got = await callGet(handler, 'http://127.0.0.1/harnessams/api/automation?sessionId=session-o')
+    assert.equal(got.code, 200)
+    const bigEntry = got.body.automations.find((a) => a.name === 'big')
+    assert.deepEqual(bigEntry.files, [{ file: 'big.txt', lines: 51, oversize: true }])
+    const okEntry = got.body.automations.find((a) => a.name === 'ok50')
+    assert.deepEqual(okEntry.files, [{ file: 'fifty.txt', lines: 50, oversize: false }])
+  } finally { await rmrf(dir) }
+})
+
+test('store: fresh projects seed the default local demo task, idempotently', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'hams-auto-'))
+  try {
+    const first = await ensureDefaultAutomation(dir)
+    assert.equal(first.created, true)
+    assert.match(first.key, /^seed-\d{12}$/)
+    const again = await ensureDefaultAutomation(dir)
+    assert.equal(again.created, false, 'an existing store is never re-seeded')
+    const { automations, warnings } = await readAutomations(dir)
+    assert.deepEqual(warnings, [])
+    assert.equal(automations.length, 1)
+    const demo = automations[0]
+    assert.equal(demo.mode, 'local')
+    assert.equal(demo.name, 'Empty project trash')
+    assert.deepEqual(demo.files, ['empty-trash.txt'])
+    assert.equal(await fsp.readFile(path.join(commandDirPath(dir), 'empty-trash.txt'), 'utf8'),
+      'safe_trash {"action":"empty"}')
+    // the demo runs as a local task: one safe_trash call with project injected
+    const { ctx, calls } = makeToolCtx({
+      safe_trash: () => ({ value: { ok: true, purged: 0, output: 'trash is already empty' } }),
+    })
+    const r = await runAutomation(ctx, { project: { path: dir }, key: demo.key })
+    assert.equal(r.status, 'done')
+    assert.equal(calls[0].name, 'safe_trash')
+    assert.equal(calls[0].args.action, 'empty')
+    assert.equal(calls[0].args.project, dir)
+    // deleting the task (the store file then exists) does not resurrect it
+    await deleteAutomation(dir, { key: demo.key })
+    const third = await ensureDefaultAutomation(dir)
+    assert.equal(third.created, false)
+  } finally { await rmrf(dir) }
+})
+
+test('routes: POST /api/automation/delete removes the entry, keeps the files, fences errors and cross-site', async () => {
+  const dir = await makeProject()
+  try {
+    await addAutomation(dir, { sessionId: 'session-d', name: 'd1', commands: [{ file: 'del.txt', content: 'echo x' }] })
+    const { automations } = await readAutomations(dir)
+    const registry = { list: () => [{ id: 'w1', path: dir, title: 'w', sessionIds: ['session-d'] }] }
+    const { ctx } = makeSshCtx(okExec)
+    ctx.workspaceRegistry = registry
+    const handler = await registerRoutes(ctx)
+    const del = await callPost(handler, 'http://127.0.0.1/harnessams/api/automation/delete',
+      { sessionId: 'session-d', key: automations[0].key })
+    assert.equal(del.code, 200)
+    assert.equal(del.body.ok, true)
+    assert.deepEqual(del.body.files_kept, ['del.txt'])
+    // the shared command file stays on disk
+    await fsp.access(path.join(commandDirPath(dir), 'del.txt'))
+    const gone = await callGet(handler, 'http://127.0.0.1/harnessams/api/automation?sessionId=session-d')
+    assert.equal(gone.body.automations.length, 0)
+    const unknown = await callPost(handler, 'http://127.0.0.1/harnessams/api/automation/delete',
+      { sessionId: 'session-d', key: 'nope' })
+    assert.equal(unknown.code, 404)
+    const noKey = await callPost(handler, 'http://127.0.0.1/harnessams/api/automation/delete',
+      { sessionId: 'session-d' })
+    assert.equal(noKey.code, 400)
+    const cross = await callRoute(handler, {
+      method: 'POST', url: 'http://127.0.0.1/harnessams/api/automation/delete',
+      headers: { 'sec-fetch-site': 'cross-site' },
+      async *[Symbol.asyncIterator]() { yield Buffer.from('{}') },
+    })
+    assert.equal(cross.code, 403)
+  } finally { await rmrf(dir) }
+})
+
 test('tools: run_automation takes only the key; config_automation is the action runner', async () => {
   const [configDef, runDef] = automationTools({})
   const configTool = makeTool(configDef)
   const runTool = makeTool(runDef)
   assert.deepEqual(Object.keys(runTool.parameters.properties), ['key'], 'the index key is the only field')
   assert.deepEqual(runTool.parameters.required, ['key'])
-  assert.deepEqual(configTool.parameters.properties.action.enum, ['add', 'update', 'delete'])
+    assert.deepEqual(configTool.parameters.properties.action.enum, ['add', 'update', 'delete'])
+    assert.deepEqual(configTool.parameters.properties.mode.enum, ['remote', 'local'], 'the execution channel switch')
   // the config tool never runs anything; the run tool runs by key through the
   // session-anchored project
   const dir = await makeProject()
@@ -338,6 +550,7 @@ test('tools: run_automation takes only the key; config_automation is the action 
     assert.deepEqual(run.results.map((x) => x.file), ['hi.txt'])
     // a bogus action never reaches execute — the compiled enum fences it
     await assert.rejects(() => configT.execute({ action: 'nuke' }, { agent: { id: 'session-tool' } }), /must be one of/)
+    await assert.rejects(() => configT.execute({ action: 'add', name: 'x', mode: 'vm', commands: [{ file: 'x.txt', content: 'echo x' }] }, { agent: { id: 'session-tool' } }), /must be one of/)
     const unknown = await runT.execute({ key: 'nope' }, { agent: { id: 'session-tool' } })
     assert.match(unknown.error, /no such automation/)
   } finally { await rmrf(dir) }

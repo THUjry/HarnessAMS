@@ -71,7 +71,7 @@ import { genReportTools } from './tools/gen_report.js'
 import { selfcheckTools, runSelfcheckAction } from './tools/selfcheck.js'
 import { safeTrashTool } from './tools/trash.js'
 import { automationTools } from './tools/automation.js'
-import { readAutomations, runAutomation } from './core/automation.js'
+import { readAutomations, runAutomation, deleteAutomation, ensureDefaultAutomation, commandFileMeta } from './core/automation.js'
 import { registerSkills } from './skills.js'
 
 export const name = 'dsh-harnessams'
@@ -273,10 +273,11 @@ async function handle(req, res, ctx) {
       // The sidebar Automation list's run button (body { sessionId, key }) —
       // the MANUAL, agent-free trigger of the phase-2 automation feature: the
       // same stateless runner the run_automation tool calls (core/automation.js
-      // runAutomation — sequential ssh_exec on the project's machine_id, the
-      // whole result returns with this call). Same-origin guard like the other
-      // untokened POSTs with remote side effects (remote-browse/mkdir); a
-      // client disconnect mid-run aborts the in-flight channel (KILL + close
+      // runAutomation — per the task's mode: sequential ssh_exec on the
+      // project's machine_id, or local tool calls without the ssh wrapper;
+      // the whole result returns with this call). Same-origin guard like the
+      // other untokened POSTs with remote side effects (remote-browse/mkdir);
+      // a client disconnect mid-run aborts the in-flight channel (KILL + close
       // best-effort, the remote command may orphan — the aborted response is
       // discarded, the client-side cancel is what the user sees).
       const guard = sameOriginError(req)
@@ -301,11 +302,33 @@ async function handle(req, res, ctx) {
       }
       return
     }
+    if (req.method === 'POST' && route === '/api/automation/delete') {
+      // The sidebar Automation list's delete button (body { sessionId, key }) —
+      // the UI face of deleteAutomation: the entry goes, the shared command
+      // files stay (the config_automation tool's delete action is the same
+      // back end). Same-origin guard like the other untokened POSTs; a purely
+      // local fs write, so no abort wiring.
+      const guard = sameOriginError(req)
+      if (guard) { json(403, { error: guard }); return }
+      let body
+      try { body = await readBodyJson(req) } catch (e) { json(400, { error: `bad JSON body: ${e.message}` }); return }
+      const sessionId = body?.sessionId
+      if (!sessionId || typeof sessionId !== 'string') { json(400, { error: 'missing sessionId' }); return }
+      const key = body?.key
+      if (!key || typeof key !== 'string') { json(400, { error: 'missing key (the automation index key)' }); return }
+      const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+      if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+      const r = await deleteAutomation(project.path, { key })
+      if (r.error) { json(r.code ?? 400, { error: r.error }); return }
+      json(200, r)
+      return
+    }
     if (req.method === 'POST' && route === '/api/project-init') {
       // Project initialization hook (D-002 2026-11-25; D-002 2026-11-26): the
       // sidebar opening a project backfills the workspace config, lays the
-      // AGENTS.md template, reconciles json <- AGENTS.md, and heals null
-      // toolchain pins from the plugin-global node memory. NO script staging
+      // AGENTS.md template, reconciles json <- AGENTS.md, heals null
+      // toolchain pins from the plugin-global node memory, and seeds the
+      // default automation demo task on a store-less project. NO script staging
       // and NO sim_scripts_dir flip happen here — the package location stays
       // the scripts root (the self-check start is the lazy-heal backstop for
       // legacy project-local roots). Idempotent; the client fires it once per
@@ -324,13 +347,19 @@ async function handle(req, res, ctx) {
         // automatic surface, no user to block). Agent semantics by design.
         const rec = await reconcileSettings(project.path).catch(() => null)
         const healed = await healFromGlobalMemory(project.path)
+        // the automation list is never empty out of the box: the demo task
+        // seeds once, exactly when automation.json does not exist (a failure
+        // warns into the response, it never blocks the init)
+        const seeded = await ensureDefaultAutomation(project.path)
+          .catch((e) => ({ ok: false, error: String(e?.message ?? e) }))
         json(200, {
           ok: true,
           project,
           ...init,
           adopted: rec?.adopted ?? [],
-          warnings: rec?.warnings ?? [],
+          warnings: [...(rec?.warnings ?? []), ...(seeded.error ? [`automation seed failed: ${seeded.error}`] : [])],
           healed: healed.healed ?? [],
+          automation_seeded: seeded.created === true,
         })
       } catch (e) {
         json(500, { error: `project init failed: ${String(e?.message ?? e)}` })
@@ -465,7 +494,7 @@ async function handle(req, res, ctx) {
       json(200, { ok: true, selfcheck_fresh_min: r.value })
       return
     }
-    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/automation/run, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir, POST /api/pick-directory, POST /api/pick-file)' })
+    json(405, { error: 'GET only (PUT /api/session-config, PUT /api/global-config, POST /api/tool, POST /api/automation/run, POST /api/automation/delete, POST /api/project-init, POST /api/open-local, POST /api/remote-browse/mkdir, POST /api/pick-directory, POST /api/pick-file)' })
     return
   }
 
@@ -515,9 +544,11 @@ async function handle(req, res, ctx) {
   }
   if (route === '/api/automation') {
     // The sidebar Automation list (phase-2): the project's automation.json
-    // task list (lenient read — warnings ride along) plus the machine_id the
-    // runs would target (the settings table's dsh-ssh alias; null = runs
-    // refuse with a clear error until it is configured). Read-only.
+    // task list (lenient read — warnings ride along; entries carry their mode
+    // and per-file line metadata) plus the machine_id the remote-mode runs
+    // would target (the settings table's dsh-ssh alias; null = remote runs
+    // refuse with a clear error until it is configured — local runs don't
+    // need it). Read-only.
     const sessionId = url.searchParams.get('sessionId')
     const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
     if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
@@ -527,7 +558,14 @@ async function handle(req, res, ctx) {
       const { settings } = await readSettings(project.path)
       machine_id = settings.machine_id
     } catch { machine_id = null }
-    json(200, { ok: true, automations: store.automations, warnings: store.warnings, machine_id })
+    // response-side enrichment (the store itself stays string-referenced):
+    // each entry's files map to { file, lines, oversize } so the detail view
+    // can show the oversize hint without fetching file contents
+    const automations = await Promise.all(store.automations.map(async (a) => ({
+      ...a,
+      files: await Promise.all(a.files.map(async (f) => ({ file: f, ...(await commandFileMeta(project.path, f)) }))),
+    })))
+    json(200, { ok: true, automations, warnings: store.warnings, machine_id })
     return
   }
   if (route === '/api/check-params') {

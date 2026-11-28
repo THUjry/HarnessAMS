@@ -1,32 +1,44 @@
 // Per-project automation store + runner (phase-2 automation feature). Two
 // artifacts under <workspace>/.harnessams/:
 //   automation.json — the task list: entries { key, name, description,
-//     created_at, updated_at, created_by_session, files }, where `files` is an
-//     ORDERED list of command-file names (the run order).
+//     created_at, updated_at, created_by_session, files, mode }, where `files`
+//     is an ORDERED list of command-file names (the run order) and `mode`
+//     picks the execution channel ('remote', the default, or 'local').
 //   automation/     — the SHARED command library: plain .txt files, FLAT,
 //     deliberately decoupled from tasks — one file may back several tasks
 //     (cross-task reuse), and a task's `files` list is just references.
 // The store follows the sessions.json discipline (D-003): versionless, LENIENT
-// read (invalid entries / command names skipped with surfaced warnings,
-// unknown fields ride through), STRICT write (the entry being written is
-// fully validated; the merge base is the lenient view so a skipped entry
-// self-heals off disk on the next write).
+// read (invalid entries / command names / mode values skipped or defaulted
+// with surfaced warnings, unknown fields ride through), STRICT write (the
+// entry being written is fully validated; the merge base is the lenient view
+// so a skipped entry self-heals off disk on the next write).
 // The automation key is minted at creation: the creating session's id (a
 // delegated subagent resolves to its topmost user-visible ancestor,
 // src/subagent.js — D-003) plus a yymmddhhmmss local stamp; a same-second
 // collision gets a numeric suffix.
 // Running is deliberately stateless: NO in-memory registry, NO run records —
 // a run reads the entry, reads each command file FROM DISK at run time (an
-// edited library file needs no re-registration), and executes them
-// SEQUENTIALLY through the dsh-ssh exec funnel (channel/remote.js execRemote)
-// on the project's settings.machine_id; the whole result returns with the
-// call (both the sidebar's POST /api/automation/run and the run_automation
-// tool land here). Abort follows the channel contract: the caller's signal
-// races the ssh call and rides the batch input (KILL + channel close
-// best-effort) — an aborted remote command may orphan; the affected result
-// says the remote state is uncertain (D-029 semantics). Post-run behavior is
+// edited library file needs no re-registration) and executes them
+// SEQUENTIALLY in registration order. The channel follows the entry's mode:
+//   remote — each file is a shell script through the dsh-ssh exec funnel
+//     (channel/remote.js execRemote) on the project's settings.machine_id;
+//   local — each non-comment line is ONE tool call, `toolName {json}`,
+//     dispatched through the registered tool surface (ctx.tools via callTool)
+//     on THIS host, no ssh wrapper; a tool that declares a `project`
+//     parameter gets the running task's project path injected so library
+//     files stay machine-independent.
+// Both the sidebar's POST /api/automation/run and the run_automation tool
+// land here. Abort follows the channel contract: the caller's signal races
+// each call and rides the batch input (remote: KILL + channel close
+// best-effort, an aborted command may orphan — D-029; local: an aborted race
+// means the tool call may or may not have taken effect). Post-run behavior is
 // a reserved seam: the result payload below is the extension point — nothing
 // acts on it beyond the caller's echo yet.
+// A command file longer than OVERSIZE_LINES warns wherever its content is
+// surfaced (config results, run results, the list view): heavy material
+// belongs on the server, referenced by path, not carried through every run.
+// A fresh project seeds one demo task (ensureDefaultAutomation) so the list
+// is never empty out of the box.
 // (covered by tests/automation.test.mjs)
 import fs from 'node:fs'
 import fsp from 'node:fs/promises'
@@ -34,7 +46,7 @@ import path from 'node:path'
 import { parseJsonBom, atomicWrite } from '../lib/io.js'
 import { readSettingsAt } from './settings.js'
 import { ensureAgentsMdTemplate } from './agentsmd.js'
-import { execRemote } from '../channel/remote.js'
+import { execRemote, callTool } from '../channel/remote.js'
 
 const STORE_DIR = '.harnessams'
 const AUTOMATION_FILE = 'automation.json'
@@ -50,6 +62,13 @@ const COMMAND_TIMEOUT_MS = 120_000
 // stdout/stderr kept per result (the payload rides tool results and the
 // sidebar's run dialog — megabyte dumps help nobody)
 const MAX_OUTPUT = 20_000
+// A command file over this many lines warns: its content rides every run, so
+// heavy material belongs on the server and the file just references it.
+const OVERSIZE_LINES = 50
+// The skill that documents the upload-heavy-content-to-the-server workflow;
+// empty = the warning ships without a pointer. A name landing here appends
+// "see the <name> skill" to the oversize warning.
+const HEAVY_COMMAND_SKILL = ''
 
 // One command .txt name: a single printable-ASCII segment ending in .txt.
 // The library is FLAT under .harnessams/automation/ — no subdirectories, no
@@ -60,7 +79,22 @@ const COMMAND_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}\.txt$/
 // + optional numeric collision suffix.
 const KEY_RE = /^[\w-]{6,160}$/
 
-const ENTRY_KNOWN = new Set(['key', 'name', 'description', 'created_at', 'updated_at', 'created_by_session', 'files'])
+const ENTRY_KNOWN = new Set(['key', 'name', 'description', 'created_at', 'updated_at', 'created_by_session', 'files', 'mode'])
+
+// Line count of a command file's content (CRLF/CR fold to LF first — the same
+// fold the runner applies before executing).
+function commandLineCount(content) {
+  const folded = String(content ?? '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').replace(/\n$/, '')
+  return folded.length === 0 ? 0 : folded.split('\n').length
+}
+
+// The >OVERSIZE_LINES warning text: heavy content should live on the server,
+// the command file referencing it by path.
+function oversizeWarning(name, lines) {
+  return `command file ${name} is ${lines} lines (> ${OVERSIZE_LINES}) — prefer uploading heavy `
+    + `content to the server and referencing it by path`
+    + (HEAVY_COMMAND_SKILL ? ` (see the ${HEAVY_COMMAND_SKILL} skill)` : '')
+}
 
 // ---- file locations -----------------------------------------------------------
 
@@ -119,7 +153,7 @@ function normalizeCommandsInput(commands) {
 // STRICT entry validation (the write path): every known field must hold.
 // Unknown fields are the caller's business (CRUD copies them from the
 // stored entry). Returns { value } or { error }.
-function validateEntryInput({ key, name, description, files }) {
+function validateEntryInput({ key, name, description, files, mode }) {
   if (key != null && (typeof key !== 'string' || !KEY_RE.test(key))) {
     return { error: `invalid automation key: ${JSON.stringify(key)}` }
   }
@@ -133,6 +167,9 @@ function validateEntryInput({ key, name, description, files }) {
   if (description != null && description.length > MAX_DESC) {
     return { error: `automation description too long (max ${MAX_DESC} chars)` }
   }
+  if (mode != null && mode !== 'remote' && mode !== 'local') {
+    return { error: `mode must be 'remote' or 'local': ${JSON.stringify(mode)}` }
+  }
   if (!Array.isArray(files) || files.length < 1) {
     return { error: 'automation files must be a non-empty array of command file names (the run order)' }
   }
@@ -141,7 +178,7 @@ function validateEntryInput({ key, name, description, files }) {
     const e = commandFileError(f)
     if (e) return { error: e }
   }
-  return { value: { key, name: name.trim(), description: String(description ?? '').trim(), files: [...files] } }
+  return { value: { key, name: name.trim(), description: String(description ?? '').trim(), files: [...files], mode: mode === 'local' ? 'local' : 'remote' } }
 }
 
 // ---- store read (LENIENT) ------------------------------------------------------
@@ -174,6 +211,13 @@ function normalizeEntryLenient(raw, i) {
       else warnings.push(`automations[${i}]: bad command file name ${JSON.stringify(String(f))} — dropped`)
     }
   }
+  // mode: 'local' | 'remote' (absent = remote); anything else warns and reads
+  // back as remote (the entry itself stays, only the channel defaults)
+  let mode = 'remote'
+  if (raw.mode !== undefined && raw.mode !== null) {
+    if (raw.mode === 'local' || raw.mode === 'remote') mode = raw.mode
+    else warnings.push(`automations[${i}]: mode is not 'remote' or 'local' — treated as remote`)
+  }
   const fallbackStamp = new Date().toISOString()
   const rest = {}
   for (const [k, v] of Object.entries(raw)) if (!ENTRY_KNOWN.has(k)) rest[k] = v
@@ -189,6 +233,7 @@ function normalizeEntryLenient(raw, i) {
     ...(typeof raw.created_by_session === 'string' && raw.created_by_session
       ? { created_by_session: raw.created_by_session } : {}),
     files,
+    mode,
   }
   return { entry, warnings }
 }
@@ -252,21 +297,28 @@ async function writeStore(workspacePath, automations, rest = {}) {
 // Write one shared command file. Idempotent: identical content is a no-op
 // (a file referenced by several tasks is not "re-created"); different content
 // OVERWRITES — the shared-library edit semantics: every referencing task sees
-// the new content on its next run. Returns { file, written } or { error }.
+// the new content on its next run. An oversize (>OVERSIZE_LINES) file warns in
+// the result either way — the warning rides config results and the list/run
+// views. Returns { file, written, warnings? } or { error }.
 export async function writeCommandFile(workspacePath, name, content) {
   const e = commandFileError(name)
   if (e) return { error: e }
   if (typeof content !== 'string' || !content.trim()) return { error: `command content must be a non-empty string: ${name}` }
   if (content.length > MAX_CONTENT) return { error: `command content too long (max ${MAX_CONTENT} chars): ${name}` }
+  const lines = commandLineCount(content)
+  const warnings = lines > OVERSIZE_LINES ? [oversizeWarning(name, lines)] : []
   const dir = commandDirPath(workspacePath)
   const target = path.join(dir, name)
+  let written = true
   try {
     const cur = await fsp.readFile(target, 'utf8')
-    if (cur === content) return { file: name, written: false }
+    if (cur === content) written = false
   } catch { /* missing — written below */ }
-  await fsp.mkdir(dir, { recursive: true })
-  await atomicWrite(target, content)
-  return { file: name, written: true }
+  if (written) {
+    await fsp.mkdir(dir, { recursive: true })
+    await atomicWrite(target, content)
+  }
+  return { file: name, written, ...(warnings.length ? { warnings } : {}) }
 }
 
 // ---- key minting -----------------------------------------------------------------
@@ -295,9 +347,11 @@ export function makeAutomationKey(sessionId, taken, now = new Date()) {
 
 // Lay the commands payload down: content items create/overwrite their shared
 // file, reference items require the file to exist. Runs BEFORE the entry is
-// registered — a failed write leaves no half-registered task. Returns
-// { files } or { error }.
+// registered — a failed write leaves no half-registered task. Oversize
+// warnings from the content items ride along. Returns { files, warnings? }
+// or { error }.
 async function layCommands(workspacePath, commands) {
+  const warnings = []
   for (const c of commands) {
     if (c.content == null) {
       try {
@@ -308,15 +362,16 @@ async function layCommands(workspacePath, commands) {
     } else {
       const w = await writeCommandFile(workspacePath, c.file, c.content)
       if (w.error) return { error: w.error }
+      if (w.warnings) warnings.push(...w.warnings)
     }
   }
-  return { files: commands.map((c) => c.file) }
+  return { files: commands.map((c) => c.file), ...(warnings.length ? { warnings } : {}) }
 }
 
-export async function addAutomation(workspacePath, { sessionId, name, description, commands }) {
+export async function addAutomation(workspacePath, { sessionId, name, description, commands, mode }) {
   const cn = normalizeCommandsInput(commands)
   if (cn.error) return { error: cn.error, code: 400 }
-  const v = validateEntryInput({ name, description, files: cn.files })
+  const v = validateEntryInput({ name, description, files: cn.files, mode })
   if (v.error) return { error: v.error, code: 400 }
   const laid = await layCommands(workspacePath, cn.commands)
   if (laid.error) return { error: laid.error, code: 400 }
@@ -331,13 +386,14 @@ export async function addAutomation(workspacePath, { sessionId, name, descriptio
     created_by_session: typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : 'noagent',
   }
   await writeStore(workspacePath, [...store.automations, entry], store.rest)
+  const warnings = [...store.warnings, ...(laid.warnings ?? [])]
   return {
-    ok: true, key, name: entry.name, files: entry.files,
-    ...(store.warnings.length ? { warnings: [...store.warnings] } : {}),
+    ok: true, key, name: entry.name, files: entry.files, mode: entry.mode,
+    ...(warnings.length ? { warnings } : {}),
   }
 }
 
-export async function updateAutomation(workspacePath, { key, name, description, commands }) {
+export async function updateAutomation(workspacePath, { key, name, description, commands, mode }) {
   if (typeof key !== 'string' || !key.trim()) return { error: 'key is required for action=update', code: 400 }
   const k = key.trim()
   const store = await readAutomations(workspacePath)
@@ -345,18 +401,22 @@ export async function updateAutomation(workspacePath, { key, name, description, 
   if (idx < 0) return { error: `no such automation in this project: ${k}`, code: 404 }
   const cur = store.automations[idx]
   let files = cur.files
+  let laidWarnings = []
   if (commands != null) {
     const cn = normalizeCommandsInput(commands)
     if (cn.error) return { error: cn.error, code: 400 }
     const laid = await layCommands(workspacePath, cn.commands)
     if (laid.error) return { error: laid.error, code: 400 }
     files = laid.files
+    laidWarnings = laid.warnings ?? []
   }
   const v = validateEntryInput({
     key: k,
     name: name != null ? name : cur.name,
     description: description != null ? description : cur.description,
     files,
+    // mode follows the update-merge semantics: pass it to switch, omit to keep
+    mode: mode != null ? mode : (cur.mode ?? 'remote'),
   })
   if (v.error) return { error: v.error, code: 400 }
   // unknown fields of the stored entry ride through the update (D-003)
@@ -364,9 +424,10 @@ export async function updateAutomation(workspacePath, { key, name, description, 
   const automations = [...store.automations]
   automations[idx] = entry
   await writeStore(workspacePath, automations, store.rest)
+  const warnings = [...store.warnings, ...laidWarnings]
   return {
-    ok: true, key: k, name: entry.name, files: entry.files,
-    ...(store.warnings.length ? { warnings: [...store.warnings] } : {}),
+    ok: true, key: k, name: entry.name, files: entry.files, mode: entry.mode,
+    ...(warnings.length ? { warnings } : {}),
   }
 }
 
@@ -394,15 +455,107 @@ function capOutput(s) {
   return t.slice(0, MAX_OUTPUT) + `\n…[truncated ${t.length - MAX_OUTPUT} chars]`
 }
 
+// Does the registered tool declare a `project` parameter? Only such tools get
+// the running task's project path injected — a `project` field must never
+// land on a tool whose schema does not know it.
+function declaresProjectParam(ctx, name) {
+  try {
+    const def = ctx?.tools?.get?.(name)
+    return def?.parameters?.properties ? Object.hasOwn(def.parameters.properties, 'project') : false
+  } catch {
+    return false
+  }
+}
+
+// One LOCAL-mode command file: each non-comment line is ONE tool call,
+// `toolName {json-args}` — dispatched through the registered tool surface
+// (callTool, the same programmatic path the self-check uses for batch_poll),
+// so a local task can drive any tool without the ssh wrapper. Blank lines and
+// `#` comments are skipped; a bad line reports independently and the rest
+// still run. The project injection keeps library files machine-independent;
+// a line's own `project` value always wins.
+async function runLocalCommandFile(ctx, project, file, content, meta, signal) {
+  const recs = []
+  const rows = content.split('\n')
+  for (let i = 0; i < rows.length; i++) {
+    const line = rows[i].trim()
+    if (!line || line.startsWith('#')) continue
+    const rec = { file, line: i + 1, ...meta }
+    const t0 = Date.now()
+    const m = /^(\S+)[ \t]+(.+)$/.exec(line)
+    let args = null
+    if (!m) {
+      rec.ok = false
+      rec.error = 'a local command line is "toolName {json-args}" — no arguments found'
+    } else {
+      rec.tool = m[1]
+      try {
+        const parsed = JSON.parse(m[2])
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) args = parsed
+        else { rec.ok = false; rec.error = 'local command arguments must be a JSON object' }
+      } catch (e) {
+        rec.ok = false
+        rec.error = `local command arguments are not valid JSON: ${String(e?.message ?? e)}`
+      }
+    }
+    if (args) {
+      if (!('project' in args) && declaresProjectParam(ctx, rec.tool)) {
+        args = { ...args, project: project.path }
+      }
+      const r = await callTool(ctx, rec.tool, args, { timeoutMs: COMMAND_TIMEOUT_MS, signal })
+      rec.ok = !r.isError
+      if (r.isError) {
+        if (signal?.aborted === true) {
+          // the race cut the call off mid-flight: unlike the remote KILL, a
+          // local tool call either happened or it did not — say exactly that
+          rec.aborted = true
+          rec.error = 'aborted before the call settled — the tool call may or may not have taken effect'
+        } else {
+          rec.error = capOutput(r.text)
+        }
+      } else {
+        const text = r.text || (r.value != null ? JSON.stringify(r.value, null, 2) : '')
+        if (text) rec.text = capOutput(text)
+      }
+    }
+    rec.duration_ms = Date.now() - t0
+    recs.push(rec)
+  }
+  return recs
+}
+
+// One REMOTE-mode command file: the whole content is a shell script through
+// the dsh-ssh exec funnel on the project's machine_id.
+async function runRemoteCommand(ctx, machine, file, command, meta, signal) {
+  const rec = { file, ...meta }
+  const t0 = Date.now()
+  const r = await execRemote(ctx, machine, command, { timeoutMs: COMMAND_TIMEOUT_MS, signal })
+  rec.ok = !!r.ok
+  rec.exitCode = r.exitCode
+  rec.stdout = capOutput(r.stdout)
+  rec.stderr = capOutput(r.stderr)
+  rec.timedOut = !!r.timedOut
+  if (r.isError) {
+    // the aborted-race / channel-error face: the remote outcome is uncertain
+    rec.error = capOutput(r.text)
+    if (signal?.aborted === true) rec.aborted = true
+  } else if (!r.ok) {
+    rec.error = r.timedOut
+      ? `remote timeout after ${COMMAND_TIMEOUT_MS / 1000}s (exit 137)`
+      : (capOutput(r.stderr) || capOutput(r.text) || `exit ${r.exitCode}`)
+  }
+  rec.duration_ms = Date.now() - t0
+  return rec
+}
+
 // Run ONE automation by key. No registry, no run records: reads the entry,
 // then executes its files' contents sequentially, each read from disk at run
-// time, on the project's settings.machine_id through the dsh-ssh exec
-// funnel. Every command reports independently — a failure does not stop the
-// rest (the overall status just fails). The caller's `signal` (a tool turn's
-// exec.signal or the UI route's request-abort controller) races each ssh
-// call and rides the batch input: KILL + channel close best-effort, the
-// remote command may orphan (D-029) — an aborted race is reported as such,
-// never as a clean failure.
+// time, on the channel the entry's `mode` picks (remote: the dsh-ssh exec
+// funnel on settings.machine_id — unconfigured refuses up front; local: tool
+// calls on this host, no machine needed). Every command reports
+// independently — a failure does not stop the rest (the overall status just
+// fails). The caller's `signal` (a tool turn's exec.signal or the UI route's
+// request-abort controller) races each call and rides the batch input.
 // Post-run behavior is the reserved seam: this payload is the extension
 // point; nothing acts on it beyond the caller's echo yet.
 export async function runAutomation(ctx, { project, key, signal }) {
@@ -411,46 +564,37 @@ export async function runAutomation(ctx, { project, key, signal }) {
   const store = await readAutomations(project.path)
   const entry = store.automations.find((a) => a.key === k)
   if (!entry) return { error: `no such automation in this project: ${k}`, code: 404 }
-  const settings = readSettingsAt(project.path)
-  if (!settings.machine_id) {
-    return {
-      error: 'machine_id is not configured — pick a dsh-ssh host alias in the project settings table (Overview) before running automations',
-      code: 400,
+  const isLocal = entry.mode === 'local'
+  let machine = null
+  if (!isLocal) {
+    const settings = readSettingsAt(project.path)
+    if (!settings.machine_id) {
+      return {
+        error: 'machine_id is not configured — pick a dsh-ssh host alias in the project settings table (Overview) before running automations',
+        code: 400,
+      }
     }
+    machine = settings.machine_id
   }
   const startedAt = new Date().toISOString()
   const results = []
   for (const file of entry.files) {
-    const rec = { file }
-    const t0 = Date.now()
-    let command
+    let content
     try {
       // executed from disk at run time: CRLF folds to LF so a stray Windows
       // editor cannot break the remote sh -c (storage itself stays verbatim)
-      command = (await fsp.readFile(path.join(commandDirPath(project.path), file), 'utf8')).replace(/\r\n/g, '\n')
+      content = (await fsp.readFile(path.join(commandDirPath(project.path), file), 'utf8')).replace(/\r\n/g, '\n')
     } catch (e) {
-      rec.ok = false
-      rec.error = `command file unreadable: ${String(e?.code ?? e?.message ?? e)}`
-      results.push(rec)
+      results.push({ file, ok: false, error: `command file unreadable: ${String(e?.code ?? e?.message ?? e)}` })
       continue
     }
-    const r = await execRemote(ctx, settings.machine_id, command, { timeoutMs: COMMAND_TIMEOUT_MS, signal })
-    rec.ok = !!r.ok
-    rec.exitCode = r.exitCode
-    rec.stdout = capOutput(r.stdout)
-    rec.stderr = capOutput(r.stderr)
-    rec.timedOut = !!r.timedOut
-    if (r.isError) {
-      // the aborted-race / channel-error face: the remote outcome is uncertain
-      rec.error = capOutput(r.text)
-      if (signal?.aborted === true) rec.aborted = true
-    } else if (!r.ok) {
-      rec.error = r.timedOut
-        ? `remote timeout after ${COMMAND_TIMEOUT_MS / 1000}s (exit 137)`
-        : (capOutput(r.stderr) || capOutput(r.text) || `exit ${r.exitCode}`)
+    const lines = commandLineCount(content)
+    const meta = { lines, ...(lines > OVERSIZE_LINES ? { oversize: true } : {}) }
+    if (isLocal) {
+      results.push(...await runLocalCommandFile(ctx, project, file, content, meta, signal))
+    } else {
+      results.push(await runRemoteCommand(ctx, machine, file, content, meta, signal))
     }
-    rec.duration_ms = Date.now() - t0
-    results.push(rec)
   }
   const status = signal?.aborted === true
     ? 'aborted'
@@ -459,11 +603,60 @@ export async function runAutomation(ctx, { project, key, signal }) {
     ok: status === 'done',
     key: k,
     name: entry.name,
-    machine: settings.machine_id,
+    mode: isLocal ? 'local' : 'remote',
+    machine,
     status,
     started_at: startedAt,
     finished_at: new Date().toISOString(),
     results,
     ...(store.warnings.length ? { warnings: [...store.warnings] } : {}),
   }
+}
+
+// ---- the list view's per-file metadata ---------------------------------------------
+
+// Line metadata of one command file for the list view (the oversize hint's
+// data); null = unreadable.
+export async function commandFileMeta(workspacePath, name) {
+  try {
+    const content = await fsp.readFile(path.join(commandDirPath(workspacePath), name), 'utf8')
+    const lines = commandLineCount(content)
+    return { lines, oversize: lines > OVERSIZE_LINES }
+  } catch {
+    return null
+  }
+}
+
+// ---- the default demo task ---------------------------------------------------------
+
+// The task every project starts with (the automation list is never empty out
+// of the box): one local-mode line calling safe_trash with action=empty —
+// purging every entry of the project's trash. Seeded exactly when
+// automation.json does not exist yet (the project-init moment); deleting the
+// task (the store file then exists) does not resurrect it.
+const DEFAULT_COMMAND_FILE = 'empty-trash.txt'
+const DEFAULT_COMMAND_CONTENT = 'safe_trash {"action":"empty"}'
+
+export async function ensureDefaultAutomation(workspacePath) {
+  try {
+    await fsp.access(automationPath(workspacePath))
+    return { ok: true, created: false }
+  } catch { /* absent — seed below */ }
+  const w = await writeCommandFile(workspacePath, DEFAULT_COMMAND_FILE, DEFAULT_COMMAND_CONTENT)
+  if (w.error) return { ok: false, error: w.error }
+  const now = new Date().toISOString()
+  const entry = {
+    key: makeAutomationKey('seed', new Set()),
+    name: 'Empty project trash',
+    description: 'Demo task: runs the safe_trash tool with action=empty — purges every entry in '
+      + 'this project\'s trash directory. Local mode: each command line is a tool call executed '
+      + 'on this host, no ssh wrapper.',
+    created_at: now,
+    updated_at: now,
+    created_by_session: 'seed',
+    files: [DEFAULT_COMMAND_FILE],
+    mode: 'local',
+  }
+  await writeStore(workspacePath, [entry])
+  return { ok: true, created: true, key: entry.key }
 }

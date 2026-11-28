@@ -31,7 +31,9 @@ export function automationTools(ctx) {
         + 'KEPT (shared library). '
         + 'Commands are ordered references into the SHARED library of plain .txt files stored '
         + 'flat under <workspace>/.harnessams/automation/ — one file may back several tasks, '
-        + 'content is stored verbatim. '
+        + 'content is stored verbatim. mode picks the channel: remote (default) runs the files '
+        + 'as shell scripts on the project\'s machine_id, local runs each line as a tool call '
+        + '"toolName {json-args}" on this host. '
         + 'This tool never RUNS anything — runs are manual (the sidebar run button) or through '
         + 'run_automation. Purpose, workflow and the execution contract: the bundled automation '
         + 'skill.',
@@ -47,6 +49,8 @@ export function automationTools(ctx) {
             content: { type: 'string', description: 'The command text (verbatim storage); omit to reference an existing shared file' },
           } },
           description: 'Ordered command list ({ file, content? } items — the run order; content present creates/overwrites the file, absent = reuse an existing one)' },
+        mode: { type: 'string', enum: ['remote', 'local'],
+          description: 'Execution channel: remote (default) = the files are shell scripts run sequentially via ssh on the project\'s machine_id; local = each non-comment line is a tool call "toolName {json-args}" executed on this host without ssh' },
         project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
       },
       async execute(args, exec) {
@@ -59,6 +63,7 @@ export function automationTools(ctx) {
             name: args.name,
             description: args.description,
             commands: args.commands,
+            mode: args.mode,
           })
         }
         if (args.action === 'update') {
@@ -67,6 +72,7 @@ export function automationTools(ctx) {
             name: args.name,
             description: args.description,
             commands: args.commands,
+            mode: args.mode,
           })
         }
         if (args.action === 'delete') return deleteAutomation(p.project.path, { key: args.key })
@@ -76,8 +82,9 @@ export function automationTools(ctx) {
     {
       name: 'run_automation',
       description: 'Run ONE automation task of the CURRENT DSH workspace by its index key and return the '
-        + 'full result (per-command ok/exit code/stdout/stderr, overall done/failed/aborted; an '
-        + 'abort leaves the remote state uncertain, reported as such). '
+        + 'full result (per-command ok/exit code/stdout/stderr — tool calls for local tasks, '
+        + 'overall done/failed/aborted; an abort leaves the affected call\'s outcome uncertain, '
+        + 'reported as such). '
         + 'The DEFAULT trigger of an automation is manual — the sidebar list\'s run button, which '
         + 'never involves an agent; this tool is the debug/verification face for the agent. '
         + 'Automations are created/edited with config_automation; the key comes from its add '
