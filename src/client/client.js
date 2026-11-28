@@ -60,16 +60,19 @@ window.__ModuleLoader__.load({
         'common.close': '关闭',
         'console.title': 'HarnessAMS 控制台',
         'console.infoFailed': 'info 读取失败：{msg}',
-        'console.config': '项目配置＝各工作区自己的 .harnessams/workspace_config.json（原家族 harnessams.json 已退役）',
+        'console.config': '项目配置＝各工作区自己的 .harnessams/workspace_config.json',
+        'console.coreTitle': '核心配置',
+        'console.envScope': '作用于项目：{project}',
+        'console.noActiveSession': '暂无活动会话——打开任意会话后可在此切换工作环境。',
         'guide.btn': '使用引导',
         'guide.caption': '第一次使用 HarnessAMS？从工作方式、提交作业到报告查看，一条引导走完。',
         'guide.title': '开始使用 HarnessAMS',
         'guide.back': '返回',
         'guide.done': '开始使用',
         'guide.s1t': '工作方式：本地还是远程',
-        'guide.s1': '本地 — spectre 本地闭环（SmartAnaSim 网表预检＋手搓 run 目录＋batch_submit 本机后台扫批＋脚本解析＋报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置；本页「机器」卡展示各别名，远端根路径是各项目自己的设置（项目总览设置表「远端根路径」行）。',
+        'guide.s1': '本地 — spectre 本地闭环（SmartAnaSim 网表预检＋手搓 run 目录＋batch_submit 本机后台扫批＋脚本解析＋报告；需本机自备 Spectre）。远程 — 机器（主机别名与凭据）在 dsh-ssh 插件里配置管理；远端根路径是各项目自己的设置（项目总览设置表「远端根路径」行）。',
         'guide.s2t': '提交作业方式',
-        'guide.s2': '统一走 batch_submit，调度语义随工作环境（总览页拨杆）：集群内 — local 本机后台运行、ssh 到其他节点运行、lsf 本机直接 bsub（共享文件系统，文件不经 ssh）；集群外 — local 不可用、ssh 在 ssh 节点运行（第二跳走 dsh-ssh 代理配置）、lsf 先经 dsh-ssh 到集群再 bsub。进度与取回用 batch_poll（完成时自动拉回 sweep_progress.json 与 errlog.txt）。',
+        'guide.s2': '统一走 batch_submit，调度语义随工作环境（控制台页「核心配置」开关）：集群内 — local 本机后台运行、ssh 到其他节点运行、lsf 本机直接 bsub（共享文件系统，文件不经 ssh）；集群外 — local 不可用、ssh 在 ssh 节点运行（第二跳走 dsh-ssh 代理配置）、lsf 先经 dsh-ssh 到集群再 bsub。进度与取回用 batch_poll（完成时自动拉回 sweep_progress.json 与 errlog.txt）。',
         'guide.s2slurm': 'slurm —— 暂不支持。',
         'guide.s3t': '工作区位置',
         'guide.s3': '配置＝各工作区自己的 .harnessams/workspace_config.json 单文件（运行设置含远端根路径、脚本目录、plotly、回收站）。远程 — 路径即远端真实路径（dsh-ssh 按别名直达，无本地镜像）。',
@@ -77,14 +80,6 @@ window.__ModuleLoader__.load({
         'guide.s4': '套件合计 15 个工具：SmartAnaSim 7（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件＋post_check 按需数据完整性诊断，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析/诊断脚本）＋HarnessAMS 8（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、register_report 挂载已有报告、safe_trash 回收站（含清空）、harnessams_selfcheck 自检、config_automation/run_automation 自动化任务的增改删与触发）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
         'guide.s5': 'HarnessAMS 侧栏「项目总览」— 两个子页：「项目配置与总览」＝项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「自动化」＝自动化任务列表（config_automation 工具增/改/删、run_automation 为 agent 调试触发面；行内「运行」＝手工触发：远程任务在项目 machine_id 上顺序执行命令 .txt、本地任务逐行调工具不套 ssh 壳，结果弹窗回显；行尾「删除」移除任务条目、命令 .txt 保留在共享库；新项目默认带一条「清空垃圾桶」示例）；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
-        'hosts.title': '机器',
-        'hosts.ok': 'dsh-ssh：{n} 台主机',
-        'hosts.missing': 'dsh-ssh 不可用',
-        'hosts.colAlias': '别名',
-        'hosts.colHost': '主机',
-        'hosts.colAuth': '认证',
-        'hosts.empty': 'dsh-ssh 中还没有主机 — 请先在 dsh-ssh 面板里添加。',
-        'hosts.hint': '主机与凭据在 dsh-ssh 插件里管理；此处只读展示注册表。各项目的远端根路径在项目总览的设置表里配置（随项目走）。',
         'chk.running': '检查中…',
         'chk.colItem': '检查项',
         'chk.colResult': '结果',
@@ -103,12 +98,10 @@ window.__ModuleLoader__.load({
         'assets.title': '数字资产',
         'assets.plotlyOk': 'plotly.min.js 已就绪 — {size}',
         'assets.plotlyMissing': '缺少 plotly 资产',
-        'assets.openAsset': '打开资产',
         'assets.notices': '第三方声明',
         'assets.colPkg': '包',
         'assets.colLicense': '协议',
         'assets.colPkgCopy': '随包副本',
-        'assets.colRoute': '服务路由',
         'tasks.noSession': '无活动会话',
         'tasks.loadingProject': '正在加载项目…',
         'tasks.noProject': '此会话没有对应项目。',
@@ -277,7 +270,7 @@ window.__ModuleLoader__.load({
         'set.title': '显示设置',
         'set.toolview': '会话内仿真进度卡片',
         'set.toolviewHint': '关闭后这些工具调用回退为原始 JSON 显示。浏览器本地偏好，对本机所有会话生效。',
-        'set.freshTitle': '自检新鲜窗口（分钟）：',
+        'set.freshTitle': '自检新鲜窗口（分钟）',
         'set.freshHint': '刷新后窗口内的上次自检结果仍显示对勾，超出窗口显示超时提示。插件全局设置（本页可改）。',
         'set.freshErr': '需为 1..1440 的分钟数',
         'card.title.batch_poll': '批量进度',
@@ -319,16 +312,19 @@ window.__ModuleLoader__.load({
         'common.close': 'Close',
         'console.title': 'HarnessAMS Console',
         'console.infoFailed': 'info failed: {msg}',
-        'console.config': 'Project config = each workspace\'s own .harnessams/workspace_config.json (the family harnessams.json is retired)',
+        'console.config': 'Project config = each workspace\'s own .harnessams/workspace_config.json',
+        'console.coreTitle': 'Core configuration',
+        'console.envScope': 'Applies to project: {project}',
+        'console.noActiveSession': 'No active session — open any session to switch the working environment here.',
         'guide.btn': 'Guide',
         'guide.caption': 'First time here? One guided pass over working modes, job submission and reports.',
         'guide.title': 'Get started with HarnessAMS',
         'guide.back': 'Back',
         'guide.done': 'Get started',
         'guide.s1t': 'Working mode: local or remote',
-        'guide.s1': 'Local — the spectre loop runs on this machine (SmartAnaSim netlist pre-check + a hand-written run directory + batch_submit local background sweeps + script parsing + report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured in the dsh-ssh plugin; this page\'s “Machines” card lists the aliases, and each remote root is a per-project setting (the “Remote root” row of the project overview settings table).',
+        'guide.s1': 'Local — the spectre loop runs on this machine (SmartAnaSim netlist pre-check + a hand-written run directory + batch_submit local background sweeps + script parsing + report; Spectre must be installed locally). Remote — hosts (aliases and credentials) are configured and managed in the dsh-ssh plugin; each remote root is a per-project setting (the “Remote root” row of the project overview settings table).',
         'guide.s2t': 'Job submission',
-        'guide.s2': 'Everything goes through batch_submit, with scheduler semantics set by the working environment (the overview toggle): in-cluster — local runs in the background on this host, ssh runs on another node, lsf submits bsub locally (shared filesystem; files never cross ssh); out-of-cluster — local is unavailable, ssh runs on the ssh node (a second hop goes through the dsh-ssh proxy config), lsf submits through dsh-ssh. Monitor and retrieve with batch_poll (a finished batch pulls sweep_progress.json and errlog.txt back automatically).',
+        'guide.s2': 'Everything goes through batch_submit, with scheduler semantics set by the working environment (the console page\'s Core-configuration switch): in-cluster — local runs in the background on this host, ssh runs on another node, lsf submits bsub locally (shared filesystem; files never cross ssh); out-of-cluster — local is unavailable, ssh runs on the ssh node (a second hop goes through the dsh-ssh proxy config), lsf submits through dsh-ssh. Monitor and retrieve with batch_poll (a finished batch pulls sweep_progress.json and errlog.txt back automatically).',
         'guide.s2slurm': 'slurm — not supported yet.',
         'guide.s3t': 'Workspace location',
         'guide.s3': 'Config = each workspace\'s own single file .harnessams/workspace_config.json (run settings incl. the remote root, script dir, plotly, trash). Remote — paths are the real remote paths (dsh-ssh goes by alias, no local mirror).',
@@ -336,14 +332,6 @@ window.__ModuleLoader__.load({
         'guide.s4': 'The suite registers 15 tools in total: SmartAnaSim 7 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, the gen_vsch_import/export pair and the on-demand post_check data-integrity diagnostic — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser/diagnostic scripts) and HarnessAMS 8 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, register_report for mounting an existing report, safe_trash incl. the empty purge-all, the harnessams_selfcheck self-check, and the automation pair config_automation/run_automation over the shared command library and task store). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
         'guide.s5': 'HarnessAMS sidebar “Project overview” — two sub-tabs: “Config & overview” — the project-settings table plus project self-check as the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; and “Automation” — the automation task list (the config_automation tool is the CRUD face, run_automation the agent/debug trigger; the row\'s Run button is the manual trigger — remote tasks execute the referenced .txt sequentially on the project\'s machine_id, local tasks make one tool call per line with no ssh wrapper, result echoed in a dialog; the row\'s trailing Delete removes the entry and keeps the shared .txt files; a fresh project ships one “empty project trash” demo); “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
-        'hosts.title': 'Machines',
-        'hosts.ok': 'dsh-ssh: {n} host(s)',
-        'hosts.missing': 'dsh-ssh not available',
-        'hosts.colAlias': 'alias',
-        'hosts.colHost': 'host',
-        'hosts.colAuth': 'auth',
-        'hosts.empty': 'no hosts configured in dsh-ssh yet — add one in its panel.',
-        'hosts.hint': 'Hosts and credentials are managed by the dsh-ssh plugin; this card is a read-only view of the registry. Each project\'s remote root is configured in the project overview settings table (it belongs to the project).',
         'chk.running': 'Running…',
         'chk.colItem': 'Item',
         'chk.colResult': 'Result',
@@ -362,12 +350,10 @@ window.__ModuleLoader__.load({
         'assets.title': 'Digital assets',
         'assets.plotlyOk': 'plotly.min.js served — {size}',
         'assets.plotlyMissing': 'plotly asset missing',
-        'assets.openAsset': 'open asset',
         'assets.notices': 'third-party notices',
         'assets.colPkg': 'Package',
         'assets.colLicense': 'License',
         'assets.colPkgCopy': 'Package copy',
-        'assets.colRoute': 'Served at',
         'tasks.noSession': 'no active session',
         'tasks.loadingProject': 'Loading project…',
         'tasks.noProject': 'No project for this session.',
@@ -541,7 +527,7 @@ window.__ModuleLoader__.load({
         'set.toolview': 'Simulation progress cards in conversations',
         'set.toolviewHint': 'When off, these tool calls fall back to the raw JSON view. Browser-local preference, '
           + 'applies to every session on this machine.',
-        'set.freshTitle': 'Self-check freshness window (minutes): ',
+        'set.freshTitle': 'Self-check freshness window (minutes)',
         'set.freshHint': 'after a reload, a last verdict within the window keeps its check mark; past the window the '
           + 'table flags the timeout. Plugin-global (edited here).',
         'set.freshErr': 'must be 1..1440 minutes',
@@ -827,6 +813,38 @@ window.__ModuleLoader__.load({
 .hams-tc-fill.bad { background: light-dark(#cf222e, #e05252); }
 .hams-tc-agg { margin-top: 4px; font-size: calc(12.5px + var(--dsh-content-font-delta, 0px)); opacity: .85; }
 .hams-tc-details { margin-top: 6px; }
+/* Console-page settings sections (2026-11-28): the DSH official settings-page
+   look — rows of [title + description | control] with .5px hairlines, section
+   titles, and the official 36x20 switch. Colors alias the host tokens first
+   and fall back to light-dark()/color-mix() pairs (spec §C); the fallback
+   literals mirror dsh-client-ui-theme's design-platform.css values. */
+.hams-setsec { display: flex; flex-direction: column; margin: 14px 0 0; }
+.hams-setsec + .hams-setsec { margin-top: 32px; }
+.hams-setsec-title { font-size: calc(14px + var(--dsh-content-font-delta, 0px)); font-weight: 500; margin: 0; }
+.hams-setrow { display: flex; align-items: center; justify-content: space-between; gap: 24px; padding: 16px 0;
+  border-bottom: .5px solid var(--dsw-alias-border-l2, color-mix(in srgb, currentColor 15%, transparent)); }
+.hams-setrow:last-child { border-bottom: none; }
+.hams-setrow-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.hams-setrow-title { font-size: calc(14px + var(--dsh-content-font-delta, 0px)); font-weight: 400; line-height: 1.45; }
+.hams-setrow-ctl { flex: none; display: inline-flex; align-items: center; gap: 8px; }
+/* switch: fixed 36x20 control metric (the spec's fixed-size exemption covers
+   controls like the SVG icons — only font sizes are formula-bound) */
+.hams-switch { box-sizing: border-box; position: relative; flex: 0 0 auto; width: 36px; height: 20px; padding: 2px;
+  border: 0; border-radius: 999px; cursor: pointer; background: var(--dsw-alias-border-l3, color-mix(in srgb, currentColor 22%, transparent)); }
+.hams-switch[aria-checked="true"] { background: var(--dsw-alias-brand-primary, light-dark(rgb(15, 17, 21), rgb(249, 250, 251))); }
+.hams-switch:disabled { cursor: default; opacity: .5; }
+.hams-switch:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, light-dark(rgb(65, 118, 230), rgb(122, 170, 255))); outline-offset: 2px; }
+.hams-switch-thumb { display: block; width: 16px; height: 16px; border-radius: 50%; pointer-events: none;
+  background: var(--dsw-alias-switch-thumb, light-dark(rgb(255, 255, 255), rgb(173, 178, 184)));
+  transition: transform .12s ease; }
+.hams-switch[aria-checked="true"] .hams-switch-thumb { transform: translateX(16px);
+  background: var(--dsw-alias-label-primary-foreground, light-dark(rgb(255, 255, 255), rgb(15, 17, 21))); }
+/* scoped input restyle (the DSH field look) — only rows inside the settings
+   sections take it; the generic .hams-input elsewhere is untouched */
+.hams-setrow .hams-input { width: 6em; height: 34px; padding: 0 12px; border-radius: 12px; border-width: .5px;
+  border-color: var(--dsw-alias-border-l4, color-mix(in srgb, currentColor 25%, transparent));
+  background: var(--dsw-alias-bg-layer-3, color-mix(in srgb, currentColor 4%, transparent)); }
+.hams-setrow .hams-input:focus { border-color: var(--dsw-alias-state-business-primary, light-dark(rgb(65, 118, 230), rgb(122, 170, 255))); outline: none; }
 `
       document.head.append(el)
     }
@@ -881,9 +899,13 @@ window.__ModuleLoader__.load({
           infoErr ? h('span', { className: 'hams-bad' }, tr('console.infoFailed', { msg: infoErr }))
             : (info ? tr('console.config') + (info.tiers?.project === 'workspaceRegistry mapped' ? '' : ' — ' + info.tiers?.project)
               : tr('common.loading'))),
-        h(Boundary, null, h(MachinesSection, null)),
-        h(Boundary, null, h(AssetsSection, null)),
+        h(Boundary, null, h(CoreConfigSection, null)),
         h(Boundary, null, h(DisplaySettingsSection, null)),
+        // Digital assets hidden for now (user ruling 2026-11-28): the section
+        // stays implemented for a comeback, but the open-asset column is gone
+        // from its table. The machines section is fully removed — dsh-ssh's
+        // own host panel is the machine list.
+        // h(Boundary, null, h(AssetsSection, null)),
       )
     }
 
@@ -1281,11 +1303,109 @@ window.__ModuleLoader__.load({
           h(ClampText, { text: rawTextOf(props, result) })) : null)
     }
 
-    // Console-page display settings: the toggle backing the tool cards (guide s6
-    // points here; the preference is browser-local by design — see TOOLVIEW_KEY),
-    // plus the plugin-global self-check freshness window (D-003: server-truth in
-    // ~/.dsh/harnessams.json through PUT /api/global-config — it decides when a
-    // restored verdict still shows its check mark vs "not checked for > N min").
+    // ---------- tier 1: settings-style sections (DSH official settings look) ----------
+
+    // The official-style switch: a 36x20 role=switch button with a 16px thumb
+    // (see ensureCss). Controlled only — the checked state always mirrors the
+    // saved value; a flip that needs confirmation opens its dialog and only
+    // lands after that dialog commits.
+    function SetSwitch({ checked, disabled, onChange, ariaLabel }) {
+      return h('button', {
+        type: 'button', role: 'switch', 'aria-checked': checked ? 'true' : 'false',
+        'aria-label': ariaLabel, className: 'hams-switch', disabled: !!disabled,
+        onClick: () => { if (!disabled) onChange(!checked) },
+      }, h('span', { className: 'hams-switch-thumb' }))
+    }
+
+    // Core configuration (console part 1): the working-environment switch
+    // (cluster_env, D-001) migrated from the project overview's settings panel
+    // (2026-11-28). A flip opens a confirm dialog first; the write sends ONLY
+    // the environment key (D-002: a full base would clobber server-side
+    // adoptions with this browser's stale copy), and save_agentsmd re-renders
+    // the AGENTS.md workflow for the new environment in the same call. The
+    // console page is project-less, so the switch rides the ACTIVE session's
+    // project via activeSessionProbe (declared near lastActiveSessionId).
+    function CoreConfigSection() {
+      const [env, setEnv] = useState(null) // saved cluster_env; null = not loaded yet
+      const [projectTitle, setProjectTitle] = useState(null)
+      const [envDialog, setEnvDialog] = useState(null) // pending cluster_env switch awaiting its confirm dialog
+      const [saveState, setSaveState] = useState(null) // {status:'running'|'failed', error?}
+      const [sid, setSid] = useState(() => activeSessionProbe.id)
+      const saving = saveState?.status === 'running'
+
+      // follow the active-session probe: the console page owns no session, so
+      // the switch's project follows whatever session is active elsewhere in
+      // the app (a 1 s cadence module read — cheap, no requests)
+      useEffect(() => {
+        const timer = setInterval(() => { if (activeSessionProbe.id !== sid) setSid(activeSessionProbe.id) }, 1_000)
+        return () => clearInterval(timer)
+      }, [sid])
+
+      // reconcile cluster_env + the scope line with the probe's project: full
+      // refetch on a session change, 1 s JSON-compare revalidate otherwise
+      // (paused while hidden or saving — the same discipline as the project
+      // overview's settings poll)
+      useEffect(() => {
+        let alive = true
+        if (!sid) { setEnv(null); setProjectTitle(null); return }
+        const load = () => {
+          fetchJson(API + '/project-settings?sessionId=' + encodeURIComponent(sid))
+            .then((r) => { if (alive) { const v = r?.settings?.cluster_env ?? null; setEnv((prev) => (prev === v ? prev : v)) } })
+            .catch(() => { /* keep the last value */ })
+          fetchJson(API + '/project?sessionId=' + encodeURIComponent(sid))
+            .then((r) => { if (alive) { const t = r?.project?.title || r?.project?.path || null; setProjectTitle((prev) => (prev === t ? prev : t)) } })
+            .catch(() => { /* keep the last value */ })
+        }
+        load()
+        const timer = setInterval(() => { if (!document.hidden && !saving) load() }, 1_000)
+        return () => { alive = false; clearInterval(timer) }
+      }, [sid, saving])
+
+      const commitEnv = async (next) => {
+        setEnvDialog(null)
+        setSaveState({ status: 'running' })
+        try {
+          await callToolRoute({ sessionId: sid, action: 'save_agentsmd', lang: effectiveLang(), settings: { cluster_env: next } })
+          setEnv(next)
+          setSaveState(null)
+        } catch (e) {
+          setSaveState({ status: 'failed', error: String(e.message ?? e) })
+        }
+      }
+
+      const inCluster = env === 'in-cluster'
+      return h('section', { className: 'hams-setsec' },
+        h('h2', { className: 'hams-setsec-title' }, tr('console.coreTitle')),
+        !sid && h('div', { className: 'hams-dim' }, tr('console.noActiveSession')),
+        sid && h('div', null,
+          h('div', { className: 'hams-setrow' },
+            h('div', { className: 'hams-setrow-main' },
+              h('div', { className: 'hams-setrow-title' }, tr('pset.envTitle')),
+              h('div', { className: 'hams-dim' }, tr('pset.envHint'))),
+            h('div', { className: 'hams-setrow-ctl' },
+              env != null && h('span', { className: 'hams-dim' }, tr(inCluster ? 'pset.envIn' : 'pset.envOut')),
+              h(SetSwitch, { checked: inCluster, disabled: env == null || saving, ariaLabel: tr('pset.envTitle'),
+                onChange: (next) => { setSaveState(null); setEnvDialog(next ? 'in-cluster' : 'out-of-cluster') } }))),
+          projectTitle && h('div', { className: 'hams-dim' }, tr('console.envScope', { project: projectTitle })),
+          saveState?.status === 'failed' && h('div', { className: 'hams-err' }, txt(saveState.error ?? '')),
+          envDialog && h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) setEnvDialog(null) } },
+            h('div', { className: 'hams-dialog' },
+              h('h3', null, tr('envc.title')),
+              h('div', { className: 'hams-dim', style: { margin: '0 0 12px' } },
+                txt(tr(envDialog === 'in-cluster' ? 'envc.bodyIn' : 'envc.bodyOut'))),
+              h('div', { className: 'hams-row' },
+                h('button', { className: 'hams-btn', disabled: saving, onClick: () => void commitEnv(envDialog) },
+                  tr('envc.ok')),
+                h('button', { className: 'hams-btn', onClick: () => setEnvDialog(null) }, tr('common.cancel')))))),
+      )
+    }
+
+    // Console-page display settings (console part 2): the toggle backing the
+    // tool cards (guide s6 points here; the preference is browser-local by
+    // design — see TOOLVIEW_KEY), plus the plugin-global self-check freshness
+    // window (D-003: server-truth in ~/.dsh/harnessams.json through PUT
+    // /api/global-config — it decides when a restored verdict still shows its
+    // check mark vs "not checked for > N min").
     function DisplaySettingsSection() {
       const [on, setOn] = useState(toolviewEnabledRead)
       const [freshMin, setFreshMin] = useState(null)
@@ -1312,52 +1432,29 @@ window.__ModuleLoader__.load({
           .then(() => setFreshMin(Math.round(m)))
           .catch((e) => setFreshErr(String(e.message ?? e)))
       }
-      return h('section', { className: 'hams-section' },
-        h('h2', null, tr('set.title')),
-        h('label', { className: 'hams-row', style: { cursor: 'pointer' } },
-          h('input', { type: 'checkbox', checked: on,
-            onChange: (e) => { toolviewEnabledWrite(e.target.checked); setOn(e.target.checked) } }),
-          h('span', null, tr('set.toolview'))),
-        h('div', { className: 'hams-dim' }, tr('set.toolviewHint')),
-        freshMin != null && h('div', { className: 'hams-row', style: { marginTop: '8px' } },
-          h('label', null, tr('set.freshTitle'), ' ',
-            h('input', { type: 'number', min: 1, max: 1440, value: freshMin, style: { width: '72px' },
-              onChange: (e) => setFreshMin(e.target.value === '' ? null : Number(e.target.value)),
-              onBlur: (e) => { if (e.target.value !== '') commitFresh(e.target.value) } })),
-          h('span', { className: 'hams-dim' }, tr('set.freshHint'))),
+      return h('section', { className: 'hams-setsec' },
+        h('h2', { className: 'hams-setsec-title' }, tr('set.title')),
+        h('div', { className: 'hams-setrow' },
+          h('div', { className: 'hams-setrow-main' },
+            h('div', { className: 'hams-setrow-title' }, tr('set.toolview')),
+            h('div', { className: 'hams-dim' }, tr('set.toolviewHint'))),
+          h(SetSwitch, { checked: on, ariaLabel: tr('set.toolview'),
+            onChange: (next) => { toolviewEnabledWrite(next); setOn(next) } })),
+        freshMin != null && h('div', { className: 'hams-setrow' },
+          h('div', { className: 'hams-setrow-main' },
+            h('div', { className: 'hams-setrow-title' }, tr('set.freshTitle')),
+            h('div', { className: 'hams-dim' }, tr('set.freshHint'))),
+          h('input', { className: 'hams-input', type: 'number', min: 1, max: 1440, value: freshMin,
+            onChange: (e) => setFreshMin(e.target.value === '' ? null : Number(e.target.value)),
+            onBlur: (e) => { if (e.target.value !== '') commitFresh(e.target.value) } })),
         freshErr && h('div', { className: 'hams-err' }, txt(freshErr)))
-    }
-
-    // Machines (tier 1): the dsh-ssh host registry read through /api/machines —
-    // pure registry facts (the remote root is a per-project setting since the
-    // 2026-11-19 config consolidation, not a machine column). Host credentials
-    // and connections live in dsh-ssh itself.
-    function MachinesSection() {
-      const [machines, setMachines] = useState(null)
-      useEffect(() => {
-        fetchJson(API + '/machines').then(setMachines).catch((e) => setMachines({ installed: false, reason: String(e.message ?? e) }))
-      }, [])
-      return h('section', { className: 'hams-section' },
-        h('h2', null, tr('hosts.title')),
-        h('div', { className: 'hams-row' },
-          machines && (machines.installed
-            ? h('span', { className: 'hams-badge hams-badge-good', title: machines.source }, tr('hosts.ok', { n: machines.machines?.length ?? 0 }))
-            : h('span', { className: 'hams-badge hams-badge-bad', title: machines.reason ?? '' }, tr('hosts.missing'))),
-        ),
-        machines?.installed && (machines.machines?.length ?? 0) > 0 && h('table', { className: 'hams-table' },
-          h('thead', null, h('tr', null, [tr('hosts.colAlias'), tr('hosts.colHost'), tr('hosts.colAuth')].map((c) => h('th', { key: c }, c)))),
-          h('tbody', null, machines.machines.map((m) => h('tr', { key: m.id },
-            h('td', null, txt(m.name || m.host)),
-            h('td', null, txt((m.username ? m.username + '@' : '') + (m.host ?? '') + ':' + (m.port ?? 22))),
-            h('td', null, txt(m.auth ?? '') + (m.auth === 'key' && !m.keyReady ? ' ⚠' : '')))))),
-        machines?.installed && (machines.machines?.length ?? 0) === 0 && h('div', { className: 'hams-dim' }, tr('hosts.empty')),
-        h('div', { className: 'hams-dim' }, tr('hosts.hint')),
-      )
     }
 
     // Digital assets (tier 1): which .js packages the plugin vendors (with their
     // licenses) and the served package copy. Reports are NOT listed here — they
-    // live in the task dashboard.
+    // live in the task dashboard. Hidden from the console page for now (user
+    // ruling 2026-11-28 — dsh-ssh covers host management, the assets card is
+    // commented out of ConsolePage); the open-asset column is permanently gone.
     function AssetsSection() {
       const [assets, setAssets] = useState(null)
       const [err, setErr] = useState(null)
@@ -1375,15 +1472,14 @@ window.__ModuleLoader__.load({
         ),
         assets?.packages?.length > 0 && h('table', { className: 'hams-table' },
           h('thead', null, h('tr', null,
-            [tr('assets.colPkg'), tr('assets.colLicense'), tr('assets.colPkgCopy'), tr('assets.colRoute')].map((c) => h('th', { key: c }, c)))),
+            [tr('assets.colPkg'), tr('assets.colLicense'), tr('assets.colPkgCopy')].map((c) => h('th', { key: c }, c)))),
           h('tbody', null, assets.packages.map((p) => h('tr', { key: p.file },
             h('td', null, txt(p.file), h('div', { className: 'hams-dim' }, p.label)),
             h('td', null, p.license),
             h('td', null,
               p.pkg
                 ? [txt(p.pkg.path), h('div', { className: 'hams-dim' }, fmtBytes(p.pkg.bytes))]
-                : h('span', { className: 'hams-warn' }, tr('assets.plotlyMissing'))),
-            h('td', null, h('a', { className: 'hams-link', href: p.url, target: '_blank' }, tr('assets.openAsset')))))),
+                : h('span', { className: 'hams-warn' }, tr('assets.plotlyMissing')))))),
         ),
       )
     }
@@ -1462,6 +1558,14 @@ window.__ModuleLoader__.load({
     // tombstone that stops fork re-detection.
     const sessionConfigState = new Map() // sessionId -> { display, reports[], dashboard_selected, check_params?, report_figs? }
     const lastActiveSessionId = { id: null }
+    // The console page's core-config switch rides the ACTIVE session's project
+    // (it is project-less by surface). Kept SEPARATE from lastActiveSessionId:
+    // that one is the fork-inheritance source and is stamped only after the
+    // sidebar body adopts a session's config (adoption-order semantics, D-003)
+    // — this probe may be stamped early and from anywhere without touching
+    // fork behavior. Stamped by SessionHeaderButton (always mounted for the
+    // active conversation) and the task-sidebar body alike.
+    const activeSessionProbe = { id: null }
     const hydratedProjects = new Set() // projectPath values whose sessions.json is already in the map
     const emptySessionConfig = () => ({ display: 'overview', reports: [], dashboard_selected: null })
     function cloneSessionConfig(src) {
@@ -1909,7 +2013,6 @@ window.__ModuleLoader__.load({
       const [envRun, setEnvRun] = useState(() => (projectPath && selfcheckMemory.path === projectPath ? selfcheckMemory.envRun : null))
       const [saveState, setSaveState] = useState(null) // {status:'running'|'done'|'failed', path?, error?}
       const [browseOpen, setBrowseOpen] = useState(false)
-      const [envDialog, setEnvDialog] = useState(null) // pending cluster_env switch awaiting its confirm dialog
       const [checkAllPending, setCheckAllPending] = useState(false) // auto-save once the check-all run lands
       const [stopping, setStopping] = useState(false) // a stop request is in flight / awaiting the status flip
       const machines = info?.machines ?? []
@@ -2117,25 +2220,6 @@ window.__ModuleLoader__.load({
         void saveAgents()
       }, [checkAllPending, run?.status])
 
-      // Working-environment switch (cluster_env, D-001): the toggle opens a
-      // confirm dialog first; the write sends ONLY the environment key (D-002:
-      // a full base would clobber server-side adoptions — the AGENTS.md
-      // reconcile, the global-memory heal — with this browser's stale copy),
-      // and save_agentsmd re-renders the AGENTS.md workflow for the new
-      // environment in the same call.
-      const commitEnv = async (next) => {
-        setEnvDialog(null)
-        setSaveState({ status: 'running' })
-        try {
-          const r = await callToolRoute({ sessionId, action: 'save_agentsmd', lang: effectiveLang(), settings: { cluster_env: next } })
-          setDraft((prev) => (prev ? { ...prev, cluster_env: next } : prev))
-          refetchSettings()
-          setSaveState({ status: 'done', path: r.path })
-        } catch (e) {
-          setSaveState({ status: 'failed', error: String(e.message ?? e) })
-        }
-      }
-
       const remote = draft?.run_mode === 'remote'
       const machine = machines.find((m) => m.id === draft?.machine_id) ?? null
       const root = String(draft?.remote_root ?? '').replace(/\/+$/, '')
@@ -2152,16 +2236,10 @@ window.__ModuleLoader__.load({
         settingsError && h('div', { className: 'hams-err' }, txt(settingsError)),
         !draft && !settingsError && h('div', { className: 'hams-dim' }, tr('common.loading')),
         draft && h('div', null,
-          // working environment (cluster_env, D-001): the confirm-gated 0/1
-          // switch — the value only lands after the dialog's "switch" button
-          h('div', { className: 'hams-row', style: { flexWrap: 'nowrap', margin: '0 0 4px' } },
-            h('b', { style: { flexShrink: 0 } }, tr('pset.envTitle')),
-            h('select', { className: 'hams-select', style: { flexShrink: 0 },
-              value: draft.cluster_env === 'in-cluster' ? '1' : '0',
-              onChange: (e) => setEnvDialog(e.target.value === '1' ? 'in-cluster' : 'out-of-cluster') },
-              h('option', { value: '1' }, tr('pset.envIn')),
-              h('option', { value: '0' }, tr('pset.envOut'))),
-            h('span', { className: 'hams-dim' }, tr('pset.envHint'))),
+          // working environment (cluster_env, D-001): the confirm-gated switch
+          // moved to the console page's Core-configuration section (2026-11-28
+          // wave 9) — it rides the active session's project there; this panel
+          // keeps only the project-scoped settings below.
           // remote root (the working-directory row merged in, 2026-11-21):
           // browse-only — the free-typed root input and the separate
           // working-directory concept are both retired; the dim preview shows
@@ -2213,15 +2291,6 @@ window.__ModuleLoader__.load({
             onCancel: () => setBrowseOpen(false),
             onPick: (dir) => { setBrowseOpen(false); if (dir && dir !== draft.remote_root) updateSetting('remote_root', dir) },
           }),
-          envDialog && h('div', { className: 'hams-dialog-backdrop', onClick: (e) => { if (e.target === e.currentTarget) setEnvDialog(null) } },
-            h('div', { className: 'hams-dialog' },
-              h('h3', null, tr('envc.title')),
-              h('div', { className: 'hams-dim', style: { margin: '0 0 12px' } },
-                txt(tr(envDialog === 'in-cluster' ? 'envc.bodyIn' : 'envc.bodyOut'))),
-              h('div', { className: 'hams-row' },
-                h('button', { className: 'hams-btn', disabled: saving || !sessionId, onClick: () => void commitEnv(envDialog) },
-                  tr('envc.ok')),
-                h('button', { className: 'hams-btn', onClick: () => setEnvDialog(null) }, tr('common.cancel'))))),
           h(SelfcheckSteps, { run, facts, nowMs }),
           run?.summary && h('div', { className: 'hams-row' },
             run.status === 'cancelled'
@@ -2623,6 +2692,7 @@ window.__ModuleLoader__.load({
           if (!alive) return
           setConfig(adopted)
           lastActiveSessionId.id = sessionId
+          activeSessionProbe.id = sessionId
         }
         if (sessionConfigState.has(sessionId)) { adoptWith(false); return () => { alive = false } }
         fetchJson(API + '/session-config?sessionId=' + encodeURIComponent(sessionId))
@@ -3375,7 +3445,12 @@ window.__ModuleLoader__.load({
     function SessionHeaderButton(props) {
       const sessionId = typeof props?.sessionId === 'string' ? props.sessionId : null
       useEffect(() => {
-        if (!sessionId || !openSidebarTab) return
+        if (!sessionId) return
+        // the console page's core-config switch rides the ACTIVE session's
+        // project — the always-mounted conversation-header button is the most
+        // reliable active-session signal on this surface
+        activeSessionProbe.id = sessionId
+        if (!openSidebarTab) return
         let cancelled = false
         let retryTimer = null
         // Default-open lives HERE, not in the tab body: a session whose sidebar
