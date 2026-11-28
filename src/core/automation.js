@@ -65,10 +65,10 @@ const MAX_OUTPUT = 20_000
 // A command file over this many lines warns: its content rides every run, so
 // heavy material belongs on the server and the file just references it.
 const OVERSIZE_LINES = 50
-// The skill that documents the upload-heavy-content-to-the-server workflow;
-// empty = the warning ships without a pointer. A name landing here appends
+// The bundled skill that documents the upload-heavy-content-to-the-server
+// workflow (src/skills/automation). A name landing here appends
 // "see the <name> skill" to the oversize warning.
-const HEAVY_COMMAND_SKILL = ''
+const HEAVY_COMMAND_SKILL = 'automation'
 
 // One command .txt name: a single printable-ASCII segment ending in .txt.
 // The library is FLAT under .harnessams/automation/ — no subdirectories, no

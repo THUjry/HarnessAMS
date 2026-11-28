@@ -437,6 +437,8 @@ test('store: oversize command files (>50 lines) warn through add, run and the li
     assert.equal(r.warnings.length, 1)
     assert.match(r.warnings[0], /big\.txt is 51 lines/)
     assert.match(r.warnings[0], /uploading heavy content/)
+    // the warning points at the bundled skill that documents the workflow
+    assert.match(r.warnings[0], /see the automation skill/)
     const { automations } = await readAutomations(dir)
     const { ctx } = makeSshCtx(okExec)
     const run = await runAutomation(ctx, { project: { path: dir }, key: automations[0].key })
