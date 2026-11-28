@@ -25,21 +25,16 @@ export function automationTools(ctx) {
       name: 'config_automation',
       description: 'Manage the CURRENT DSH workspace\'s automation tasks (the list the sidebar\'s '
         + '"Project overview -> Automation" sub-tab shows). '
-        + 'Actions: "add" registers a new automation and returns its generated key (the creating '
-        + 'session id + a yymmddhhmmss stamp — the task\'s permanent address); "update" changes a '
-        + 'task by key (only the fields you pass: name, description, commands); "delete" removes '
-        + 'the task entry by key (its command files are KEPT — they are shared). '
-        + 'Commands are references into a SHARED library of plain .txt files stored flat under '
-        + '<workspace>/.harnessams/automation/: each item is { file, content? } — content present '
-        + 'creates/overwrites that file (identical content is a no-op), content absent is a pure '
-        + 'reference and the file must already exist. One file may back several tasks (cross-task '
-        + 'reuse); a task\'s file list is ordered and the run executes it in that order, reading '
-        + 'each file from disk at run time. The file name must be one printable-ASCII .txt segment '
-        + '(no path separators). Command content is stored verbatim — any language, executed '
-        + 'remotely as-is through the ssh_exec funnel on the project\'s machine_id (the settings '
-        + 'table\'s dsh-ssh host alias), one command at a time, 120 s per command. '
+        + 'Actions: "add" registers a new automation and returns its generated key (the task\'s '
+        + 'permanent address); "update" changes a task by key (only the fields you pass: name, '
+        + 'description, commands); "delete" removes the task entry by key — its command files are '
+        + 'KEPT (shared library). '
+        + 'Commands are ordered references into the SHARED library of plain .txt files stored '
+        + 'flat under <workspace>/.harnessams/automation/ — one file may back several tasks, '
+        + 'content is stored verbatim. '
         + 'This tool never RUNS anything — runs are manual (the sidebar run button) or through '
-        + 'run_automation.',
+        + 'run_automation. Purpose, workflow and the execution contract: the bundled automation '
+        + 'skill.',
       parameters: {
         action: { type: 'string', required: true, enum: ['add', 'update', 'delete'],
           description: 'add=register a new automation | update=change one by key | delete=remove the task entry by key' },
@@ -81,14 +76,13 @@ export function automationTools(ctx) {
     {
       name: 'run_automation',
       description: 'Run ONE automation task of the CURRENT DSH workspace by its index key and return the '
-        + 'full result (per-command ok/exit code/stdout/stderr, overall done/failed/aborted). '
-        + 'Commands execute sequentially on the project\'s machine_id (the settings table\'s dsh-ssh '
-        + 'host alias) through the ssh_exec funnel, 120 s per command; an abort leaves the remote '
-        + 'state uncertain (reported as such). '
+        + 'full result (per-command ok/exit code/stdout/stderr, overall done/failed/aborted; an '
+        + 'abort leaves the remote state uncertain, reported as such). '
         + 'The DEFAULT trigger of an automation is manual — the sidebar list\'s run button, which '
         + 'never involves an agent; this tool is the debug/verification face for the agent. '
         + 'Automations are created/edited with config_automation; the key comes from its add '
-        + 'result or the sidebar list.',
+        + 'result or the sidebar list. '
+        + 'The execution contract: the bundled automation skill.',
       parameters: {
         key: { type: 'string', required: true, description: 'The automation\'s index key (creating session id + yymmddhhmmss stamp, returned by config_automation add)' },
       },
