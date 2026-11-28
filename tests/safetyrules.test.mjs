@@ -1,9 +1,9 @@
 // Safety-rules gate contract: the three always-on deny red lines (a
-// standalone ssh token in a bash/pwsh command; a PDK string in a read
-// file_path or an ssh_download remote/local path) versus the passthrough
-// for everything else, plus the waterfall registration shape — a deny
-// short-circuits before next(), a non-match delegates, and a ctx without
-// .on registers nothing.
+// standalone ssh token in a bash/pwsh/local_exec command; a PDK string in a
+// read file_path, an ssh_download remote/local path, or a local_exec
+// command) versus the passthrough for everything else, plus the waterfall
+// registration shape — a deny short-circuits before next(), a non-match
+// delegates, and a ctx without .on registers nothing.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -69,6 +69,17 @@ test('safetyrules: a PDK string in a read file_path is denied case-insensitively
     assert.equal(d.reason, PDK_DENY_REASON)
   }
   assert.equal(decideSafety(call('read', { file_path: 'D:/proj/att/tb_att.scs' })), null)
+})
+
+test('safetyrules: a local_exec command is denied on a standalone ssh token or a PDK string', () => {
+  const ssh = decideSafety(call('local_exec', { command: 'ssh op@node6 hostname' }))
+  assert.equal(ssh?.kind, 'deny')
+  assert.equal(ssh.reason, SSH_DENY_REASON)
+  const pdk = decideSafety(call('local_exec', { command: 'type D:/pdk/sky130A/lib.lib' }))
+  assert.equal(pdk?.kind, 'deny')
+  assert.equal(pdk.reason, PDK_DENY_REASON)
+  assert.equal(decideSafety(call('local_exec', { command: 'node -e "console.log(1)"' })), null)
+  assert.equal(decideSafety(call('local_exec', { command: 'grep -c ssh_exec log.txt' })), null, 'ssh-shaped tokens stay clean')
 })
 
 test('safetyrules: an ssh_download is denied on a PDK remote or local path, not on a PDK-shaped alias', () => {

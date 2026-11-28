@@ -79,7 +79,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': '仿真插件套件',
         'guide.s4': '套件合计 15 个工具：SmartAnaSim 7（spectre_pre_check 网表预检＋snp_guide/读取/提取三件＋gen_vsch_import/export 两件＋post_check 按需数据完整性诊断，sNp 读取/提取经 snp_guide 按需激活；另随包 smart-spectre 配置技能与可直跑的 worker/解析/诊断脚本）＋HarnessAMS 8（batch_submit 三模式提交（内置网表预检）、batch_poll 轮询/取回、gen_sweep_report 报告、register_report 挂载已有报告、safe_trash 回收站（含清空）、harnessams_selfcheck 自检、config_automation/run_automation 自动化任务的增改删与触发）。除 sNp 读取/提取外默认全注册；使用引导仅由 HarnessAMS 提供。',
         'guide.s5t': '日常入口速查',
-        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 两个子页：「项目配置与总览」＝项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「自动化」＝自动化任务列表（config_automation 工具增/改/删、run_automation 为 agent 调试触发面；行内「运行」＝手工触发：远程任务在项目 machine_id 上顺序执行命令 .txt、本地任务逐行调工具不套 ssh 壳，结果弹窗回显；行尾「删除」移除任务条目、命令 .txt 保留在共享库；新项目默认带一条「清空垃圾桶」示例）；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
+        'guide.s5': 'HarnessAMS 侧栏「项目总览」— 两个子页：「项目配置与总览」＝项目设置表＋项目自检为主入口：保存到AGENTS.md（项目配置表一键落盘）/ 一键自检 / 列出本机环境（node/python 版本＋绝对路径）/ 全部检查并保存，工作目录经 dsh-ssh 远程目录浏览选取；「自动化」＝自动化任务列表（config_automation 工具增/改/删、run_automation 为 agent 调试触发面；行内「运行」＝手工触发：远程任务在项目 machine_id 上顺序执行命令 .txt、本地任务逐行调工具不套 ssh 壳（本机命令用 local_exec 工具），运行结果显示在「状态」列、点击状态文字弹出详情；行尾「删除」移除任务条目、命令 .txt 保留在共享库；新项目默认带一条「清空垃圾桶」示例）；「会话」— 当前会话自己的工作区：「仪表盘」报告面板（gen_sweep_report 生成报告即自动登记进本会话，也可浏览添加已有报告；「打开」经系统默认浏览器以本地文件打开——plotly 与数据走本地相对路径可离线渲染；分支会话首见自动复制上一活跃会话的整份配置）、「参数检查」本会话的检查参数编辑（未确认按项目缺省∪内置缺省生效）；交互 shell 用 dsh-ssh 自带的 SSH 终端面板。',
         'chk.running': '检查中…',
         'chk.colItem': '检查项',
         'chk.colResult': '结果',
@@ -142,6 +142,20 @@ window.__ModuleLoader__.load({
         'auto.modeRemote': '远程执行：命令文件按序在 machine_id 上跑 shell',
         'auto.oversize': '{n} 行（超 50）——建议把重内容先上传到服务器、再以路径引用',
         'auto.localRun': '本地执行',
+        'auto.colStatus': '状态',
+        'auto.stEmpty': '空',
+        'auto.stRunning': '运行中',
+        'auto.stDone': '成功',
+        'auto.stFailed': '失败',
+        'auto.stAborted': '中止',
+        'auto.stHint': '点击查看运行详情',
+        'auto.stRunningExt': '其他触发方运行中（如模型 run_automation），结束后可再次运行',
+        'auto.relNow': '刚刚',
+        'auto.relMin': '{n} 分钟前',
+        'auto.relHour': '{n} 小时前',
+        'auto.relDay': '{n} 天 {m} 小时前',
+        'auto.relDayOnly': '{n} 天前',
+        'auto.detailFailed': '加载运行详情失败：{msg}',
         'tasks.storeSkipped': 'sessions.json 有 {n} 处不合规内容被跳过',
         'dash.noReports': '（暂无报告）',
         'dash.addTitle': '添加 HTML 报告',
@@ -331,7 +345,7 @@ window.__ModuleLoader__.load({
         'guide.s4t': 'Simulation plugin suites',
         'guide.s4': 'The suite registers 15 tools in total: SmartAnaSim 7 (spectre_pre_check netlist pre-check, the snp_guide/read/extract trio, the gen_vsch_import/export pair and the on-demand post_check data-integrity diagnostic — the two sNp read/extract tools activate on demand via snp_guide; the package also ships the smart-spectre configuration skill and directly runnable worker/parser/diagnostic scripts) and HarnessAMS 8 (batch_submit with its three schedulers and the built-in netlist pre-check, batch_poll monitoring/retrieval, gen_sweep_report, register_report for mounting an existing report, safe_trash incl. the empty purge-all, the harnessams_selfcheck self-check, and the automation pair config_automation/run_automation over the shared command library and task store). All except the sNp read/extract pair are registered by default — guidance is provided by HarnessAMS only.',
         'guide.s5t': 'Where things live',
-        'guide.s5': 'HarnessAMS sidebar “Project overview” — two sub-tabs: “Config & overview” — the project-settings table plus project self-check as the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; and “Automation” — the automation task list (the config_automation tool is the CRUD face, run_automation the agent/debug trigger; the row\'s Run button is the manual trigger — remote tasks execute the referenced .txt sequentially on the project\'s machine_id, local tasks make one tool call per line with no ssh wrapper, result echoed in a dialog; the row\'s trailing Delete removes the entry and keeps the shared .txt files; a fresh project ships one “empty project trash” demo); “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
+        'guide.s5': 'HarnessAMS sidebar “Project overview” — two sub-tabs: “Config & overview” — the project-settings table plus project self-check as the single entry: save to AGENTS.md (one-click project-config table), one-click self-check, list local environment (node/python versions + absolute paths), check all & save; the working directory is picked through the dsh-ssh remote directory browser; and “Automation” — the automation task list (the config_automation tool is the CRUD face, run_automation the agent/debug trigger; the row\'s Run button is the manual trigger — remote tasks execute the referenced .txt sequentially on the project\'s machine_id, local tasks make one tool call per line with no ssh wrapper (host-side commands via the local_exec tool), the run outcome lands in the status column — click the status text for the details dialog; the row\'s trailing Delete removes the entry and keeps the shared .txt files; a fresh project ships one “empty project trash” demo); “Session” — the current session\'s own workspace: “Dashboard”, the report panel (gen_sweep_report registers generated reports into the calling session automatically; existing reports can be browsed in; “Open” launches the report file with the system default browser — plotly and data resolve from relative local paths, offline-capable; a forked session starts from a copy of the previously active session\'s whole config) and “Checks”, the session\'s own check parameters (unconfirmed keys fall back to project defaults ∪ built-in defaults); for an interactive shell use dsh-ssh\'s own SSH terminal panel.',
         'chk.running': 'Running…',
         'chk.colItem': 'Item',
         'chk.colResult': 'Result',
@@ -394,6 +408,20 @@ window.__ModuleLoader__.load({
         'auto.modeRemote': 'Remote: the command files run as shell on machine_id',
         'auto.oversize': '{n} lines (> 50) — prefer uploading heavy content to the server and referencing it by path',
         'auto.localRun': 'local run',
+        'auto.colStatus': 'Status',
+        'auto.stEmpty': 'empty',
+        'auto.stRunning': 'running',
+        'auto.stDone': 'succeeded',
+        'auto.stFailed': 'failed',
+        'auto.stAborted': 'aborted',
+        'auto.stHint': 'Click for run details',
+        'auto.stRunningExt': 'Running from another trigger (e.g. the model\'s run_automation); run again after it settles',
+        'auto.relNow': 'just now',
+        'auto.relMin': '{n} min ago',
+        'auto.relHour': '{n} h ago',
+        'auto.relDay': '{n}d {m}h ago',
+        'auto.relDayOnly': '{n}d ago',
+        'auto.detailFailed': 'failed to load run details: {msg}',
         'tasks.storeSkipped': '{n} invalid entries skipped in sessions.json',
         'dash.noReports': '(no reports)',
         'dash.addTitle': 'Add an HTML report',
@@ -698,6 +726,13 @@ window.__ModuleLoader__.load({
 .hams-good { color: light-dark(#1a7f37, #3fb950); }
 .hams-bad { color: light-dark(#cf222e, #e05252); font-weight: 600; }
 .hams-warn { color: light-dark(#9a6700, #d29922); }
+/* the automation status column's in-flight tone: an activity blue distinct
+   from warn (amber) and bad (red); light-dark pair like the three above */
+.hams-run { color: light-dark(#0969da, #4493f8); }
+/* a finished status cell's clickable text: pointer + underline on hover, so
+   the click affordance reads without button chrome */
+.hams-statuslink { cursor: pointer; }
+.hams-statuslink:hover { text-decoration: underline; }
 .hams-faint { opacity: .6; }
 .hams-btn { padding: 3px 12px; font-size: calc(13px + var(--dsh-content-font-delta, 0px)); border-radius: 6px; cursor: pointer;
   border: 1px solid color-mix(in srgb, currentColor 25%, transparent);
@@ -1852,7 +1887,27 @@ window.__ModuleLoader__.load({
       const d = new Date(iso)
       if (!Number.isFinite(d.getTime())) return String(iso)
       const p = (n) => String(n).padStart(2, '0')
-      return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+      return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+    }
+
+    // Relative age of a server ISO stamp for the automation list columns:
+    // just now / N min / N h / Nd Mh ladder, the absolute stamp riding the
+    // cell's title. `nowMs` comes from the list's 60 s tick so the labels
+    // stay honest between data refreshes; a future stamp (clock skew) clamps
+    // to "just now", an unparseable one falls back to the raw string.
+    function fmtRelative(iso, nowMs) {
+      if (!iso) return ''
+      const t = Date.parse(iso)
+      if (!Number.isFinite(t)) return String(iso)
+      const diff = nowMs - t
+      if (diff < 60_000) return tr('auto.relNow')
+      const min = Math.floor(diff / 60_000)
+      if (min < 60) return tr('auto.relMin', { n: String(min) })
+      const hours = Math.floor(min / 60)
+      if (hours < 24) return tr('auto.relHour', { n: String(hours) })
+      const days = Math.floor(hours / 24)
+      const remH = hours % 24
+      return remH ? tr('auto.relDay', { n: String(days), m: String(remH) }) : tr('auto.relDayOnly', { n: String(days) })
     }
 
     // Status restore from the AGENTS.md facts (D-003): when the in-memory run
@@ -2316,16 +2371,25 @@ window.__ModuleLoader__.load({
     // command files stay). The run is the MANUAL, agent-free trigger: POST
     // /api/automation/run executes the registered commands per the task's
     // mode — remote shell on the project's machine_id, or local tool calls
-    // without the ssh wrapper — and returns the whole result; this dialog
-    // only ECHOES it (post-run behavior is the reserved seam — nothing acts
-    // on the result yet). A plain flowing table: no scroll container of its
-    // own (the parent .hams-body scrolls however tall the list grows), width
-    // stays inside the pane.
+    // without the ssh wrapper. The outcome lands in the STATUS column: the
+    // server keeps each task's last run in PROCESS memory (last_run rides
+    // the list poll — running/succeeded/failed/aborted, "empty" before the
+    // first run of this process) and NO dialog auto-opens after a run —
+    // clicking a FINISHED status fetches the full payload from
+    // /api/automation/result into the dialog. The two time columns are
+    // RELATIVE (just now / N min / N h / Nd Mh; absolute stamp on the cell
+    // title, a 60 s tick keeps the labels honest). A plain flowing table: no
+    // scroll container of its own (the parent .hams-body scrolls however
+    // tall the list grows), width stays inside the pane.
     const AUTOMATION_COLS = [
       { id: 'name', labelKey: 'auto.colName' },
       { id: 'created_at', labelKey: 'auto.colCreated' },
       { id: 'updated_at', labelKey: 'auto.colUpdated' },
     ]
+
+    // The status column's icon per last_run.status (null = never ran in this
+    // process -> the dim empty mark).
+    const AUTO_STATUS_ICONS = { running: '⟳', done: '✓', failed: '✗', aborted: '■' }
 
     function AutomationList({ sessionId, projectPath }) {
       const [list, setList] = useState(null) // null = loading; { automations, warnings, machine_id }
@@ -2333,8 +2397,9 @@ window.__ModuleLoader__.load({
       const [error, setError] = useState(null) // run/delete failure line
       const [sort, setSort] = useState({ field: 'created_at', dir: 'desc' })
       const [expanded, setExpanded] = useState(null) // key of the expanded row
-      const [running, setRunning] = useState({}) // key -> true while its run POST is in flight
-      const [result, setResult] = useState(null) // finished run -> the echo dialog
+      const [running, setRunning] = useState({}) // key -> true while its OWN run POST is in flight
+      const [result, setResult] = useState(null) // the detail dialog's payload (fetched on a status click)
+      const [now, setNow] = useState(Date.now()) // relative-time tick so "N min ago" labels stay honest
       const [confirmDel, setConfirmDel] = useState(null) // entry pending its delete confirm
       const [deleting, setDeleting] = useState(false) // a delete POST is in flight
       const runRefs = useRef({}) // key -> AbortController of the in-flight run
@@ -2361,9 +2426,21 @@ window.__ModuleLoader__.load({
         return () => { clearInterval(timer); document.removeEventListener('visibilitychange', onVisible) }
       }, [sessionId, projectPath, refetch])
 
+      // relative-time tick: the list only re-renders when the polled JSON
+      // changes, so the "N min/h/d ago" labels would freeze between data
+      // changes — this 60 s tick refreshes them (skipped while hidden, like
+      // the poll)
+      useEffect(() => {
+        const timer = setInterval(() => { if (!document.hidden) setNow(Date.now()) }, 60_000)
+        return () => { clearInterval(timer) }
+      }, [])
+
       // The run button's two lives: idle -> POST the run (optimistic running
       // row); in flight -> Abort (the fetch's AbortController — the server
       // aborts the channel best-effort and the remote command may orphan).
+      // The run's outcome NEVER auto-opens the dialog: it lands in the
+      // server's process-memory record and shows up as last_run on the next
+      // refetch (immediately — the .then refetches).
       const startRun = (a) => {
         const ac = new AbortController()
         runRefs.current[a.key] = ac
@@ -2375,7 +2452,7 @@ window.__ModuleLoader__.load({
           body: JSON.stringify({ sessionId, key: a.key }),
           signal: ac.signal,
         })
-          .then((r) => { setResult(r); void refetch() })
+          .then(() => { void refetch() })
           .catch((e) => {
             // a user abort is silent (the row just returns to idle); real
             // failures show inline
@@ -2385,6 +2462,37 @@ window.__ModuleLoader__.load({
             delete runRefs.current[a.key]
             setRunning((prev) => { const n = { ...prev }; delete n[a.key]; return n })
           })
+      }
+
+      // A finished status's click: fetch the run's full payload from the
+      // process-memory record and open it in the detail dialog — the on-
+      // demand replacement for the old post-run auto-popup.
+      const openResult = (a) => {
+        setError(null)
+        fetchJson(API + '/automation/result?sessionId=' + encodeURIComponent(sessionId)
+          + '&key=' + encodeURIComponent(a.key))
+          .then((r) => setResult(r.result ?? r))
+          .catch((e) => setError(txt(tr('auto.detailFailed', { msg: String(e.message ?? e) }))))
+      }
+
+      // One status cell: icon + label per the task's memory status; the
+      // FINISHED states (done/failed/aborted) are the click targets for the
+      // detail dialog, running/empty are plain text.
+      const statusCell = (a) => {
+        const st = running[a.key] || a.last_run?.status === 'running'
+          ? 'running'
+          : (a.last_run?.status ?? null)
+        if (st === 'running') return h('span', { className: 'hams-run' }, AUTO_STATUS_ICONS.running + ' ' + tr('auto.stRunning'))
+        if (st === 'done' || st === 'failed' || st === 'aborted') {
+          const cls = st === 'done' ? 'hams-good' : st === 'aborted' ? 'hams-warn' : 'hams-bad'
+          return h('span', {
+            className: cls + ' hams-statuslink',
+            title: tr('auto.stHint'),
+            onClick: (e) => { e.stopPropagation(); openResult(a) },
+          }, AUTO_STATUS_ICONS[st] + ' ' + tr(st === 'done' ? 'auto.stDone' : st === 'aborted' ? 'auto.stAborted' : 'auto.stFailed'))
+        }
+        if (st != null) return h('span', { className: 'hams-dim' }, String(st))
+        return h('span', { className: 'hams-dim' }, '○ ' + tr('auto.stEmpty'))
       }
 
       // The delete flow: the row's delete button only OPENS the confirm
@@ -2434,11 +2542,17 @@ window.__ModuleLoader__.load({
                 : { field: c.id, dir: 'asc' })),
               title: tr('auto.sortHint'),
             }, tr(c.labelKey) + (sort.field === c.id ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''))),
+            h('th', null, tr('auto.colStatus')),
             h('th', { style: { width: '58px' } }, ''))),
           h('tbody', null,
-            rows.length === 0 && h('tr', null, h('td', { colSpan: 5, className: 'hams-dim' }, tr('auto.empty'))),
+            rows.length === 0 && h('tr', null, h('td', { colSpan: 6, className: 'hams-dim' }, tr('auto.empty'))),
             rows.flatMap((a) => {
               const isRunning = !!running[a.key]
+              // a run reported by the server but not started from THIS tab
+              // (the model's run_automation, or a page reload mid-run): the
+              // row shows running, the button stays disabled — there is no
+              // local AbortController to stop it with
+              const serverRunning = a.last_run?.status === 'running'
               return [
                 h('tr', {
                   key: a.key,
@@ -2447,15 +2561,18 @@ window.__ModuleLoader__.load({
                   h('td', null,
                     h('button', {
                       className: 'hams-btn hams-btn-sm',
+                      disabled: serverRunning && !isRunning,
+                      title: serverRunning && !isRunning ? tr('auto.stRunningExt') : undefined,
                       onClick: (e) => {
                         e.stopPropagation() // the row click toggles the detail; the button acts
                         if (isRunning) runRefs.current[a.key]?.abort()
-                        else startRun(a)
+                        else if (!serverRunning) startRun(a)
                       },
                     }, tr(isRunning ? 'auto.stop' : 'auto.run'))),
                   h('td', null, txt(a.name)),
-                  h('td', { className: 'hams-dim' }, fmtLocalTime(a.created_at)),
-                  h('td', { className: 'hams-dim' }, fmtLocalTime(a.updated_at)),
+                  h('td', { className: 'hams-dim', title: fmtLocalTime(a.created_at) }, fmtRelative(a.created_at, now)),
+                  h('td', { className: 'hams-dim', title: fmtLocalTime(a.updated_at) }, fmtRelative(a.updated_at, now)),
+                  h('td', null, statusCell(a)),
                   h('td', null,
                     h('button', {
                       className: 'hams-btn hams-btn-sm',
@@ -2467,7 +2584,7 @@ window.__ModuleLoader__.load({
                       },
                     }, tr('auto.delete')))),
                 expanded === a.key && h('tr', { key: a.key + ':detail' },
-                  h('td', { colSpan: 5 },
+                  h('td', { colSpan: 6 },
                     h('div', { className: 'hams-dim' }, txt(a.description || tr('auto.noDesc'))),
                     h('div', { className: 'hams-dim', style: { margin: '4px 0 0' } },
                       tr(a.mode === 'local' ? 'auto.modeLocal' : 'auto.modeRemote')),

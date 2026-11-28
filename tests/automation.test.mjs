@@ -1,12 +1,12 @@
 // Automation store + runner contracts: the shared .txt command library under
 // .harnessams/automation/, the automation.json task list (lenient read /
 // strict write), the key format, the entry's execution mode, the oversize
-// warning, the seeded default demo, and the stateless sequential runner
-// (remote: the dsh-ssh exec funnel; local: one tool call per line through the
-// registered tool surface) — plus the config_automation / run_automation tool
-// faces and their routes (list / run / delete). The tool shells are mocks
-// speaking the dsh-tools batch contract; the route driver is the shared
-// helpers one.
+// warning, the seeded default demo, and the sequential runner (remote: the
+// dsh-ssh exec funnel; local: one tool call per line through the registered
+// tool surface; the last run's status/result stays in process memory) — plus
+// the config_automation / run_automation / local_exec tool faces and their
+// routes (list / run / delete / result). The tool shells are mocks speaking
+// the dsh-tools batch contract; the route driver is the shared helpers one.
 // Run: bare `node --test` from the repo root.
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -19,10 +19,30 @@ import { automationTools } from '../src/tools/automation.js'
 import {
   addAutomation, updateAutomation, deleteAutomation, readAutomations,
   writeCommandFile, runAutomation, makeAutomationKey, ensureDefaultAutomation,
-  automationPath, commandDirPath,
+  automationPath, commandDirPath, readRunMemory, readRunStatus,
 } from '../src/core/automation.js'
 
 const rmrf = (dir) => fsp.rm(dir, { recursive: true, force: true })
+
+// ctx.shell stub for the local_exec tool face: resolve() passes the spec
+// through, execute() answers with a scripted result in the shape execLocal
+// reads (stdout/stderr as { text }, exitCode, timedOut, aborted).
+function makeShellCtx(result) {
+  const specs = []
+  const ctx = {
+    shell: {
+      resolve: (spec) => spec,
+      execute: async (spec) => {
+        specs.push(spec)
+        return { result: async () => (typeof result === 'function' ? result(spec) : result) }
+      },
+    },
+  }
+  return { ctx, specs }
+}
+
+// The compiled local_exec tool over a shell stub.
+const localExecTool = (ctx) => automationTools(ctx).map((d) => makeTool(d)).find((x) => x.name === 'local_exec')
 
 // A project with .harnessams/ and a configured machine_id (the automation
 // runner's target); machineId null leaves the runner refused.
@@ -591,5 +611,203 @@ test('routes: GET /api/automation lists tasks; POST /api/automation/run runs, fe
     assert.equal(cross.code, 403)
     const badSession = await callGet(handler, 'http://127.0.0.1/harnessams/api/automation?sessionId=ghost')
     assert.equal(badSession.code, 404)
+  } finally { await rmrf(dir) }
+})
+
+test('local_exec: one command through the host shell seam with the project as cwd', async () => {
+  const dir = await makeProject()
+  try {
+    const { ctx, specs } = makeShellCtx({ stdout: { text: 'hi' }, stderr: { text: '' }, exitCode: 0 })
+    const t = localExecTool(ctx)
+    const r = await t.execute({ command: 'echo hi', project: dir }, { callId: 'hams-sim-test-1' })
+    assert.equal(r.ok, true)
+    assert.equal(r.exitCode, 0)
+    assert.equal(r.stdout, 'hi')
+    assert.match(r.text, /exit 0/, 'the value text carries the line payload for run results')
+    assert.match(r.text, /hi/)
+    assert.equal(specs.length, 1)
+    assert.equal(specs[0].workdir, dir, 'the project path is the working directory')
+    assert.equal(specs[0].timeoutMs, 60_000, 'the default deadline')
+    assert.equal(specs[0].onExpiry, 'kill')
+    // a custom budget rides the spec
+    await t.execute({ command: 'echo x', project: dir, timeout_sec: 5 }, { callId: 'hams-sim-test-2' })
+    assert.equal(specs[1].timeoutMs, 5_000)
+    // an out-of-range budget is refused before the shell
+    const bad = await t.execute({ command: 'echo x', project: dir, timeout_sec: 0 }, { callId: 'hams-sim-test-3' })
+    assert.match(bad.error, /timeout_sec must be an integer 1\.\.110/)
+    assert.equal(specs.length, 2)
+  } finally { await rmrf(dir) }
+})
+
+test('local_exec: exit codes, deadlines and a pre-aborted signal map onto the value', async () => {
+  const dir = await makeProject()
+  try {
+    const { ctx } = makeShellCtx({ stdout: { text: '' }, stderr: { text: 'boom' }, exitCode: 3 })
+    const t = localExecTool(ctx)
+    const fail = await t.execute({ command: 'exit3cmd', project: dir }, { callId: 'hams-sim-t' })
+    assert.equal(fail.ok, false)
+    assert.equal(fail.exitCode, 3)
+    assert.equal(fail.stderr, 'boom')
+    assert.equal(fail.error, undefined, 'a nonzero exit is a value, not an infra error')
+    const { ctx: ctx2, specs: specs2 } = makeShellCtx({ stdout: { text: '' }, stderr: { text: '' }, exitCode: null, timedOut: true })
+    const t2 = localExecTool(ctx2)
+    const timed = await t2.execute({ command: 'hang', project: dir }, { callId: 'hams-sim-t' })
+    assert.equal(timed.ok, false)
+    assert.equal(timed.timedOut, true)
+    // a pre-aborted signal never reaches the shell
+    const aborted = await t2.execute({ command: 'echo x', project: dir }, { callId: 'hams-sim-t', signal: AbortSignal.abort() })
+    assert.equal(aborted.ok, false)
+    assert.equal(aborted.aborted, true)
+    assert.equal(specs2.length, 1, 'only the real command reached the shell')
+  } finally { await rmrf(dir) }
+})
+
+test('local_exec: a direct model call, a raw ssh command and a PDK command are refused before the shell', async () => {
+  const dir = await makeProject()
+  try {
+    const { ctx, specs } = makeShellCtx({ stdout: { text: 'x' }, stderr: { text: '' }, exitCode: 0 })
+    const t = localExecTool(ctx)
+    // a model's direct call carries the pipeline's own callId and an agent
+    const direct = await t.execute({ command: 'echo x', project: dir }, { callId: 'toolu-01', agent: { id: 'session-1' } })
+    assert.equal(direct.ok, false)
+    assert.match(direct.error, /automation-internal/)
+    // the red lines (the body re-check mirrors the pre-execute gate)
+    const ssh = await t.execute({ command: 'ssh op@node6 hostname', project: dir }, { callId: 'hams-sim-t' })
+    assert.equal(ssh.ok, false)
+    assert.match(ssh.error, /raw shell ssh is denied/)
+    const pdk = await t.execute({ command: 'type D:/pdk/sky130A/lib.lib', project: dir }, { callId: 'hams-sim-t' })
+    assert.equal(pdk.ok, false)
+    assert.match(pdk.error, /PDK paths are denied/)
+    // the automation channel injects the project; a missing one is refused
+    const noProject = await t.execute({ command: 'echo x' }, { callId: 'hams-sim-t' })
+    assert.match(noProject.error, /project is required/)
+    // a degraded embed (no callId, no agent) passes the caller gate
+    const embed = await t.execute({ command: 'echo x', project: dir }, {})
+    assert.equal(embed.ok, true)
+    assert.equal(specs.length, 1, 'only the degraded-embed call reaches the shell')
+  } finally { await rmrf(dir) }
+})
+
+test('local_exec: stdout and stderr are capped at the output limit', async () => {
+  const dir = await makeProject()
+  try {
+    const { ctx } = makeShellCtx({ stdout: { text: 'x'.repeat(30_000) }, stderr: { text: '' }, exitCode: 0 })
+    const t = localExecTool(ctx)
+    const r = await t.execute({ command: 'bigout', project: dir }, { callId: 'hams-sim-t' })
+    assert.ok(r.stdout.length > 20_000 && r.stdout.length < 30_000, 'capped near the limit')
+    assert.match(r.stdout, /truncated /, 'the truncation marker')
+  } finally { await rmrf(dir) }
+})
+
+test('runner: the run status lives in process memory — running marker, finished payload, delete clears', async () => {
+  const dir = await makeProject({ machineId: null })
+  try {
+    await addAutomation(dir, { sessionId: 's-mem', name: 'mem', mode: 'local', commands: [{ file: 'm.txt', content: 'safe_trash {"action":"empty"}' }] })
+    const { automations } = await readAutomations(dir)
+    const key = automations[0].key
+    assert.equal(readRunMemory(dir, key), null, 'no run yet')
+    // mid-run: the handler executes while the run is in flight, so the memory
+    // entry is the running marker at that moment
+    let seenMidRun = null
+    const { ctx } = makeToolCtx({
+      safe_trash: () => { seenMidRun = readRunMemory(dir, key); return { value: { ok: true, output: 'ok' } } },
+    })
+    const r = await runAutomation(ctx, { project: { path: dir }, key })
+    assert.equal(seenMidRun?.status, 'running')
+    assert.equal(seenMidRun.mode, 'local')
+    assert.equal(seenMidRun.started_at, r.started_at)
+    // the finished entry carries the whole payload; the light reader is the
+    // list route's projection
+    const after = readRunMemory(dir, key)
+    assert.equal(after.status, 'done')
+    assert.equal(after.finished_at, r.finished_at)
+    assert.equal(after.result, r)
+    assert.deepEqual(readRunStatus(dir, key), { status: 'done', started_at: r.started_at, finished_at: r.finished_at })
+    assert.equal(readRunStatus(dir, 'nope'), null)
+    // deleting the task clears its memory entry with it
+    await deleteAutomation(dir, { key })
+    assert.equal(readRunMemory(dir, key), null)
+  } finally { await rmrf(dir) }
+  // a refused run (remote task without machine_id) writes no memory entry
+  const noMachine = await makeProject({ machineId: null })
+  try {
+    await addAutomation(noMachine, { sessionId: 's', name: 'x', commands: [{ file: 'a.txt', content: 'echo a' }] })
+    const { automations } = await readAutomations(noMachine)
+    const { ctx } = makeSshCtx(okExec)
+    const r = await runAutomation(ctx, { project: { path: noMachine }, key: automations[0].key })
+    assert.equal(r.code, 400)
+    assert.equal(readRunMemory(noMachine, automations[0].key), null)
+  } finally { await rmrf(noMachine) }
+})
+
+test('routes: the list carries last_run and /api/automation/result serves the full record', async () => {
+  const dir = await makeProject()
+  try {
+    await addAutomation(dir, { sessionId: 'session-st', name: 'st1', commands: [{ file: 'hi.txt', content: 'echo hi' }] })
+    const { automations } = await readAutomations(dir)
+    const key = automations[0].key
+    const registry = { list: () => [{ id: 'w1', path: dir, title: 'w', sessionIds: ['session-st'] }] }
+    const { ctx } = makeSshCtx(okExec)
+    ctx.workspaceRegistry = registry
+    const handler = await registerRoutes(ctx)
+    const before = await callGet(handler, 'http://127.0.0.1/harnessams/api/automation?sessionId=session-st')
+    assert.equal(before.body.automations[0].last_run, undefined, 'no run yet -> no last_run field')
+    await callPost(handler, 'http://127.0.0.1/harnessams/api/automation/run', { sessionId: 'session-st', key })
+    const after = await callGet(handler, 'http://127.0.0.1/harnessams/api/automation?sessionId=session-st')
+    const lr = after.body.automations[0].last_run
+    assert.equal(lr.status, 'done')
+    assert.ok(lr.finished_at)
+    assert.equal(lr.results, undefined, 'the light projection carries no result payload')
+    const detail = await callGet(handler, 'http://127.0.0.1/harnessams/api/automation/result?sessionId=session-st&key=' + key)
+    assert.equal(detail.code, 200)
+    assert.equal(detail.body.status, 'done')
+    assert.equal(detail.body.result.status, 'done')
+    assert.deepEqual(detail.body.result.results.map((x) => x.file), ['hi.txt'])
+    const unknown = await callGet(handler, 'http://127.0.0.1/harnessams/api/automation/result?sessionId=session-st&key=nope')
+    assert.equal(unknown.code, 404)
+    const noKey = await callGet(handler, 'http://127.0.0.1/harnessams/api/automation/result?sessionId=session-st')
+    assert.equal(noKey.code, 400)
+  } finally { await rmrf(dir) }
+})
+
+test('runner: a tool value that says failed (ok:false or success:false) fails its line', async () => {
+  const dir = await makeProject()
+  try {
+    await addAutomation(dir, {
+      sessionId: 's-val', name: 'valfail', mode: 'local',
+      commands: [{ file: 'v.txt', content: 'safe_trash {"action":"empty"}\nssh_exec {"alias":"node1","command":"x"}' }],
+    })
+    const { automations } = await readAutomations(dir)
+    const { ctx } = makeToolCtx({
+      safe_trash: () => ({ value: { ok: false, error: 'boom' } }),
+      ssh_exec: () => ({ value: { success: false, exitCode: 1, stderr: 'bad' } }),
+    })
+    const r = await runAutomation(ctx, { project: { path: dir }, key: automations[0].key })
+    assert.equal(r.status, 'failed')
+    assert.equal(r.results[0].ok, false, 'an ok:false value fails its line')
+    assert.equal(r.results[1].ok, false, 'a success:false value fails its line')
+  } finally { await rmrf(dir) }
+})
+
+test('runner: local_exec lines ride the local channel with the project injected', async () => {
+  const dir = await makeProject({ machineId: null })
+  try {
+    await addAutomation(dir, {
+      sessionId: 's-lex', name: 'host cmd', mode: 'local',
+      commands: [{ file: 'lex.txt', content: 'local_exec {"command":"node -e \\"console.log(1)\\""}' }],
+    })
+    const { automations } = await readAutomations(dir)
+    const { ctx, calls } = makeToolCtx({
+      local_exec: () => ({ value: { ok: true, exitCode: 0, stdout: '1', text: 'exit 0 · 2 ms\n1' } }),
+    })
+    const r = await runAutomation(ctx, { project: { path: dir }, key: automations[0].key })
+    assert.equal(r.status, 'done')
+    assert.equal(calls.length, 1)
+    assert.equal(calls[0].name, 'local_exec')
+    assert.equal(calls[0].args.command, 'node -e "console.log(1)"')
+    assert.equal(calls[0].args.project, dir, 'the runner injects the project into local_exec')
+    assert.equal(r.results[0].tool, 'local_exec')
+    assert.equal(r.results[0].ok, true)
+    assert.match(r.results[0].text, /exit 0/, 'the value text becomes the line payload')
   } finally { await rmrf(dir) }
 })

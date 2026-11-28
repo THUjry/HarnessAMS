@@ -31,7 +31,7 @@ test('apply registers the /harnessams prefix route and the model tools', async (
   assert.deepEqual(registered.sort(), [
     'batch_poll', 'batch_submit',
     'config_automation', 'gen_sweep_report',
-    'harnessams_selfcheck', 'register_report',
+    'harnessams_selfcheck', 'local_exec', 'register_report',
     'run_automation', 'safe_trash',
   ])
 })
@@ -83,7 +83,7 @@ test('apply injects both system prompt sections (fail-open)', async () => {
 
 test('every tool compiles to an object-rooted JSON Schema with typed properties', () => {
   const defs = toolDefinitions()
-  assert.equal(defs.length, 8)
+  assert.equal(defs.length, 9)
   for (const def of defs) {
     const tool = makeTool(def)
     assert.equal(tool.parameters.type, 'object', `${def.name} parameters root`)
@@ -193,13 +193,20 @@ test('client half: single tab — two-entry strip (project overview + this sessi
   assert.ok(src.includes('useState(readOverviewView)'), 'ProjectOverviewView must restore the persisted view on mount')
   assert.ok(src.includes('rememberOverviewView'), 'overview view switch must write the persisted choice')
   // The automation sub-view carries the interactive list: the component, its
-  // three endpoints (list / run / delete), the confirm dialog copy, and the
-  // column copy domain (zh/en symmetry is the dict key-set test's business)
+  // four endpoints (list / run / delete / result), the confirm dialog copy,
+  // and the column copy domain (zh/en symmetry is the dict key-set test's
+  // business)
   assert.ok(src.includes('function AutomationList'), 'automation list component')
   assert.ok(src.includes("API + '/automation?sessionId='"), 'the list reads GET /api/automation')
   assert.ok(src.includes("API + '/automation/run'"), 'runs go through POST /api/automation/run')
   assert.ok(src.includes("API + '/automation/delete'"), 'row deletion goes through POST /api/automation/delete')
+  assert.ok(src.includes("API + '/automation/result?sessionId='"), 'a finished status fetches the run details')
   assert.ok(src.includes("'auto.colName'"), 'automation column copy key')
+  assert.ok(src.includes("'auto.colStatus'"), 'status column copy key')
+  assert.ok(src.includes("'auto.stEmpty'"), 'the never-run status copy key')
+  assert.ok(src.includes('function fmtRelative'), 'relative-time formatter for the time columns')
+  assert.ok(src.includes('last_run'), 'the list consumes the process-memory run status')
+  assert.ok(src.includes('hams-statuslink'), 'a finished status cell is the click affordance')
   assert.ok(src.includes("'auto.delTitle'"), 'delete confirm dialog copy key')
   assert.ok(src.includes("'auto.modeLocal'"), 'the detail view names the execution channel')
   // The check sub-view keeps its contract (per-session)

@@ -39,10 +39,12 @@
 // project's cluster_env — D-001 — + batch_poll with the
 // terminal auto-fetch; worker scripts come from the project's
 // workspace.sim_scripts_dir), the simulator-agnostic report/ops tools
-// (gen_sweep_report / safe_trash) and the automation pair (config_automation
+// (gen_sweep_report / safe_trash) and the automation trio (config_automation
 // — task CRUD over the shared .txt command library at .harnessams/automation/
 // + the automation.json task list; run_automation — the agent debug run face;
-// the manual run route POST /api/automation/run is the same runner, agent-free).
+// local_exec — the local channel's host-command face, automation-internal
+// with a caller gate; the manual run route POST /api/automation/run is the
+// same runner, agent-free).
 // The session tool cards read two extra read-only endpoints (/api/progress and
 // /api/progress-summary, server/progress.js) to draw the simulation progress
 // cards inside the conversation — no execution surface, pure file reads.
@@ -71,7 +73,7 @@ import { genReportTools } from './tools/gen_report.js'
 import { selfcheckTools, runSelfcheckAction } from './tools/selfcheck.js'
 import { safeTrashTool } from './tools/trash.js'
 import { automationTools } from './tools/automation.js'
-import { readAutomations, runAutomation, deleteAutomation, ensureDefaultAutomation, commandFileMeta } from './core/automation.js'
+import { readAutomations, runAutomation, deleteAutomation, ensureDefaultAutomation, commandFileMeta, readRunStatus, readRunMemory } from './core/automation.js'
 import { registerSkills } from './skills.js'
 
 export const name = 'dsh-harnessams'
@@ -113,7 +115,7 @@ export function toolDefinitions(ctx = {}) {
 // Current tool surface: harnessams_selfcheck (self-check + project config),
 // batch_submit (local/ssh/lsf, per cluster_env) / batch_poll (monitor + terminal
 // auto-fetch), gen_sweep_report (pure JS report renderer), safe_trash,
-// config_automation + run_automation (the automation pair).
+// config_automation + run_automation + local_exec (the automation trio).
 
 export function apply(ctx) {
   ctx.effect(() => {
@@ -272,12 +274,14 @@ async function handle(req, res, ctx) {
     if (req.method === 'POST' && route === '/api/automation/run') {
       // The sidebar Automation list's run button (body { sessionId, key }) —
       // the MANUAL, agent-free trigger of the phase-2 automation feature: the
-      // same stateless runner the run_automation tool calls (core/automation.js
+      // same runner the run_automation tool calls (core/automation.js
       // runAutomation — per the task's mode: sequential ssh_exec on the
       // project's machine_id, or local tool calls without the ssh wrapper;
-      // the whole result returns with this call). Same-origin guard like the
-      // other untokened POSTs with remote side effects (remote-browse/mkdir);
-      // a client disconnect mid-run aborts the in-flight channel (KILL + close
+      // the whole result returns with this call; the run's status lands in
+      // the process-memory record the status column reads). Same-origin guard
+      // like the other untokened POSTs with remote side effects
+      // (remote-browse/mkdir); a client disconnect mid-run aborts the
+      // in-flight channel (KILL + close
       // best-effort, the remote command may orphan — the aborted response is
       // discarded, the client-side cancel is what the user sees).
       const guard = sameOriginError(req)
@@ -560,12 +564,39 @@ async function handle(req, res, ctx) {
     } catch { machine_id = null }
     // response-side enrichment (the store itself stays string-referenced):
     // each entry's files map to { file, lines, oversize } so the detail view
-    // can show the oversize hint without fetching file contents
-    const automations = await Promise.all(store.automations.map(async (a) => ({
-      ...a,
-      files: await Promise.all(a.files.map(async (f) => ({ file: f, ...(await commandFileMeta(project.path, f)) }))),
-    })))
+    // can show the oversize hint without fetching file contents, and the
+    // process-memory run status lands as last_run — light on purpose (the
+    // result payload is NOT here; the status column's click fetches it from
+    // /api/automation/result)
+    const automations = await Promise.all(store.automations.map(async (a) => {
+      const lastRun = readRunStatus(project.path, a.key)
+      return {
+        ...a,
+        ...(lastRun ? { last_run: lastRun } : {}),
+        files: await Promise.all(a.files.map(async (f) => ({ file: f, ...(await commandFileMeta(project.path, f)) }))),
+      }
+    }))
     json(200, { ok: true, automations, warnings: store.warnings, machine_id })
+    return
+  }
+  if (route === '/api/automation/result') {
+    // The status column's detail fetch (phase-2): the PROCESS-MEMORY record
+    // of one task's last run — the running marker, or the finished run with
+    // its full result payload under `result`. Never a disk record: a host
+    // restart answers 404 (the task list on disk is untouched). Read-only,
+    // session-fenced like the list.
+    const sessionId = url.searchParams.get('sessionId')
+    const key = url.searchParams.get('key')
+    const { project, reason } = sessionProject(ctx.workspaceRegistry, sessionId)
+    if (!project) { json(404, { error: reason ?? 'no project for session' }); return }
+    const k = typeof key === 'string' ? key.trim() : ''
+    if (!k) { json(400, { error: 'missing key (the automation index key)' }); return }
+    const entry = readRunMemory(project.path, k)
+    if (!entry) {
+      json(404, { error: 'no run recorded for this automation (run status lives in process memory only — a host restart clears it)' })
+      return
+    }
+    json(200, { ok: true, ...entry })
     return
   }
   if (route === '/api/check-params') {

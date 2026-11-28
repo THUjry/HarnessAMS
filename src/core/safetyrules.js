@@ -1,16 +1,19 @@
 // Basic execution-safety gate: a tools/pre-execute waterfall listener with
-// three always-on deny rules. Fixed red lines, deliberately NOT config-gated
-// and with no escape hatch — the tiered remoteExecGate (D-007) is a separate,
-// still-unimplemented design for the remote command surface. Every rule
-// follows the pre-execute method: the deny reason reaches the model as the
-// tool result (why it is denied + what to do instead), and anything the
-// rules do not match falls through to next() untouched.
-//   1. bash/pwsh: a standalone `ssh` token anywhere on the command line —
-//      raw shell ssh bypasses the dsh-ssh channel (credential handling,
-//      logging, connection reuse); the dsh-ssh tools are the only
-//      sanctioned remote route.
-//   2. read: a file_path containing "PDK" (case-insensitive).
-//   3. ssh_download: a remotePath or localPath containing "PDK".
+// always-on deny rules over three red lines. Fixed red lines, deliberately
+// NOT config-gated and with no escape hatch — the tiered remoteExecGate
+// (D-007) is a separate, still-unimplemented design for the remote command
+// surface. Every rule follows the pre-execute method: the deny reason
+// reaches the model as the tool result (why it is denied + what to do
+// instead), and anything the rules do not match falls through to next()
+// untouched.
+//   1. raw shell ssh: a standalone `ssh` token anywhere on the command line
+//      of bash, pwsh or local_exec — raw shell ssh bypasses the dsh-ssh
+//      channel (credential handling, logging, connection reuse); the dsh-ssh
+//      tools are the only sanctioned remote route.
+//   2. PDK reads: a `read` file_path containing "PDK" (case-insensitive).
+//   3. PDK moves: an `ssh_download` remotePath/localPath, or a `local_exec`
+//      command (the local host shell — the one local surface that could
+//      reach PDK content), containing "PDK".
 // The PDK rules enforce the hard isolation line: the assembly layer is the
 // only channel that ever touches PDK content.
 // The ssh token match is deliberately broad (any standalone occurrence,
@@ -22,6 +25,9 @@
 // Self-flow: this plugin's own remote funnel calls ssh_exec/ssh_upload/
 // ssh_download through ctx.tools and passes this gate too; its downloads
 // are sweep results under remote_root, never PDK paths, so no self-trip.
+// The automation local channel's local_exec calls pass here as well — its
+// command is watched exactly like bash/pwsh, so a task line cannot carry
+// raw ssh or PDK strings either.
 // (covered by tests/safetyrules.test.mjs)
 
 const SSH_TOKEN = /(^|[^A-Za-z0-9_.-])ssh(\s|["']|$)/
@@ -42,14 +48,17 @@ export const PDK_DENY_REASON =
 
 // One row per watched field: a rule names the tool, the argument field it
 // watches, the pattern a red-line value must carry, and the deny reason.
-// ssh_download watches two fields, so it gets two rows. Adding a red line
-// is adding a row — decideSafety is the single generic loop that reads it.
+// ssh_download watches two fields and local_exec carries two patterns on its
+// one field, so each gets two rows. Adding a red line is adding a row —
+// decideSafety is the single generic loop that reads it.
 const RULES = [
   { tool: 'bash',         field: 'command',    pattern: SSH_TOKEN, reason: SSH_DENY_REASON },
   { tool: 'pwsh',         field: 'command',    pattern: SSH_TOKEN, reason: SSH_DENY_REASON },
+  { tool: 'local_exec',   field: 'command',    pattern: SSH_TOKEN, reason: SSH_DENY_REASON },
   { tool: 'read',         field: 'file_path',  pattern: PDK_TOKEN, reason: PDK_DENY_REASON },
   { tool: 'ssh_download', field: 'remotePath', pattern: PDK_TOKEN, reason: PDK_DENY_REASON },
   { tool: 'ssh_download', field: 'localPath',  pattern: PDK_TOKEN, reason: PDK_DENY_REASON },
+  { tool: 'local_exec',   field: 'command',    pattern: PDK_TOKEN, reason: PDK_DENY_REASON },
 ]
 
 // Pure decision for one pending tool call: { kind: 'deny', reason } when a

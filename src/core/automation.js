@@ -16,8 +16,10 @@
 // delegated subagent resolves to its topmost user-visible ancestor,
 // src/subagent.js — D-003) plus a yymmddhhmmss local stamp; a same-second
 // collision gets a numeric suffix.
-// Running is deliberately stateless: NO in-memory registry, NO run records —
-// a run reads the entry, reads each command file FROM DISK at run time (an
+// Running is stateless ON DISK: no run records ever land in automation.json —
+// the last run's status/result lives in PROCESS MEMORY only (RUN_MEMORY
+// below; a host restart clears it, a page reload does not). A run reads the
+// entry, reads each command file FROM DISK at run time (an
 // edited library file needs no re-registration) and executes them
 // SEQUENTIALLY in registration order. The channel follows the entry's mode:
 //   remote — each file is a shell script through the dsh-ssh exec funnel
@@ -30,10 +32,10 @@
 // Both the sidebar's POST /api/automation/run and the run_automation tool
 // land here. Abort follows the channel contract: the caller's signal races
 // each call and rides the batch input (remote: KILL + channel close
-// best-effort, an aborted command may orphan — D-029; local: an aborted race
-// means the tool call may or may not have taken effect). Post-run behavior is
-// a reserved seam: the result payload below is the extension point — nothing
-// acts on it beyond the caller's echo yet.
+// best-effort, an aborted command may orphan — D-004; local: an aborted race
+// means the tool call may or may not have taken effect). Post-run: the result
+// payload feeds RUN_MEMORY (the sidebar status column and its detail dialog
+// read it); beyond that it stays the reserved extension point.
 // A command file longer than OVERSIZE_LINES warns wherever its content is
 // surfaced (config results, run results, the list view): heavy material
 // belongs on the server, referenced by path, not carried through every run.
@@ -441,15 +443,42 @@ export async function deleteAutomation(workspacePath, { key }) {
   const cur = store.automations.find((a) => a.key === k)
   if (!cur) return { error: `no such automation in this project: ${k}`, code: 404 }
   await writeStore(workspacePath, store.automations.filter((a) => a.key !== k), store.rest)
+  RUN_MEMORY.delete(runMemoryKey(workspacePath, k))
   return {
     ok: true, key: k, files_kept: cur.files,
     ...(store.warnings.length ? { warnings: [...store.warnings] } : {}),
   }
 }
 
-// ---- the run (stateless, sequential) ----------------------------------------------
+// ---- the run (stateless on disk, sequential) --------------------------------------
 
-function capOutput(s) {
+// The last run per task, PROCESS MEMORY ONLY (never a run record on disk —
+// the store file stays the task list alone). The sidebar's status column and
+// its detail dialog read it through the two readers below; a host restart
+// clears it. Keyed by workspace path + automation key so distinct projects
+// (and distinct test fixtures) never collide.
+const RUN_MEMORY = new Map()
+
+function runMemoryKey(workspacePath, key) {
+  return `${workspacePath}\u0000${key}`
+}
+
+// The light list-view projection (no result payload): { status, started_at,
+// finished_at? } or null when the task never ran in this process.
+export function readRunStatus(workspacePath, key) {
+  const e = RUN_MEMORY.get(runMemoryKey(workspacePath, key))
+  if (!e) return null
+  return { status: e.status, started_at: e.started_at, ...(e.finished_at != null ? { finished_at: e.finished_at } : {}) }
+}
+
+// The full memory entry for the detail route: the running marker, or the
+// finished run with its complete result payload under `result`. Same null
+// contract as readRunStatus.
+export function readRunMemory(workspacePath, key) {
+  return RUN_MEMORY.get(runMemoryKey(workspacePath, key)) ?? null
+}
+
+export function capOutput(s) {
   const t = String(s ?? '')
   if (t.length <= MAX_OUTPUT) return t
   return t.slice(0, MAX_OUTPUT) + `\n…[truncated ${t.length - MAX_OUTPUT} chars]`
@@ -503,7 +532,12 @@ async function runLocalCommandFile(ctx, project, file, content, meta, signal) {
         args = { ...args, project: project.path }
       }
       const r = await callTool(ctx, rec.tool, args, { timeoutMs: COMMAND_TIMEOUT_MS, signal })
-      rec.ok = !r.isError
+      // line-level ok: a thrown/aborted call is an error, and so is a VALUE
+      // that says it failed — HA tools report { ok: false }, dsh-ssh's exec
+      // reports { success: false } (the pipeline only flags thrown bodies as
+      // isError; a failed value would otherwise ride as a ✓ with its JSON)
+      const v = r.value && typeof r.value === 'object' ? r.value : null
+      rec.ok = !r.isError && !(v && (v.ok === false || v.success === false))
       if (r.isError) {
         if (signal?.aborted === true) {
           // the race cut the call off mid-flight: unlike the remote KILL, a
@@ -548,7 +582,9 @@ async function runRemoteCommand(ctx, machine, file, command, meta, signal) {
   return rec
 }
 
-// Run ONE automation by key. No registry, no run records: reads the entry,
+// Run ONE automation by key. No run records on disk — the last run's status
+// and payload land in RUN_MEMORY (process memory, cleared by a host restart):
+// reads the entry,
 // then executes its files' contents sequentially, each read from disk at run
 // time, on the channel the entry's `mode` picks (remote: the dsh-ssh exec
 // funnel on settings.machine_id — unconfigured refuses up front; local: tool
@@ -556,8 +592,8 @@ async function runRemoteCommand(ctx, machine, file, command, meta, signal) {
 // independently — a failure does not stop the rest (the overall status just
 // fails). The caller's `signal` (a tool turn's exec.signal or the UI route's
 // request-abort controller) races each call and rides the batch input.
-// Post-run behavior is the reserved seam: this payload is the extension
-// point; nothing acts on it beyond the caller's echo yet.
+// Post-run behavior is the reserved seam beyond RUN_MEMORY: this payload is
+// the extension point; nothing else acts on it beyond the caller's echo yet.
 export async function runAutomation(ctx, { project, key, signal }) {
   if (typeof key !== 'string' || !key.trim()) return { error: 'automation key is required', code: 400 }
   const k = key.trim()
@@ -577,40 +613,76 @@ export async function runAutomation(ctx, { project, key, signal }) {
     machine = settings.machine_id
   }
   const startedAt = new Date().toISOString()
+  // the in-memory status goes live only after the validations — a refused run
+  // (bad key, unconfigured machine) leaves the task's previous status as-is
+  RUN_MEMORY.set(runMemoryKey(project.path, k), {
+    status: 'running', started_at: startedAt,
+    mode: isLocal ? 'local' : 'remote', machine, key: k, name: entry.name,
+  })
   const results = []
-  for (const file of entry.files) {
-    let content
-    try {
-      // executed from disk at run time: CRLF folds to LF so a stray Windows
-      // editor cannot break the remote sh -c (storage itself stays verbatim)
-      content = (await fsp.readFile(path.join(commandDirPath(project.path), file), 'utf8')).replace(/\r\n/g, '\n')
-    } catch (e) {
-      results.push({ file, ok: false, error: `command file unreadable: ${String(e?.code ?? e?.message ?? e)}` })
-      continue
+  let payload
+  try {
+    for (const file of entry.files) {
+      let content
+      try {
+        // executed from disk at run time: CRLF folds to LF so a stray Windows
+        // editor cannot break the remote sh -c (storage itself stays verbatim)
+        content = (await fsp.readFile(path.join(commandDirPath(project.path), file), 'utf8')).replace(/\r\n/g, '\n')
+      } catch (e) {
+        results.push({ file, ok: false, error: `command file unreadable: ${String(e?.code ?? e?.message ?? e)}` })
+        continue
+      }
+      const lines = commandLineCount(content)
+      const meta = { lines, ...(lines > OVERSIZE_LINES ? { oversize: true } : {}) }
+      if (isLocal) {
+        results.push(...await runLocalCommandFile(ctx, project, file, content, meta, signal))
+      } else {
+        results.push(await runRemoteCommand(ctx, machine, file, content, meta, signal))
+      }
     }
-    const lines = commandLineCount(content)
-    const meta = { lines, ...(lines > OVERSIZE_LINES ? { oversize: true } : {}) }
-    if (isLocal) {
-      results.push(...await runLocalCommandFile(ctx, project, file, content, meta, signal))
-    } else {
-      results.push(await runRemoteCommand(ctx, machine, file, content, meta, signal))
+    const status = signal?.aborted === true
+      ? 'aborted'
+      : (results.length > 0 && results.every((x) => x.ok) ? 'done' : 'failed')
+    payload = {
+      ok: status === 'done',
+      key: k,
+      name: entry.name,
+      mode: isLocal ? 'local' : 'remote',
+      machine,
+      status,
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      results,
+      ...(store.warnings.length ? { warnings: [...store.warnings] } : {}),
     }
+  } catch (e) {
+    // an unexpected internal failure still settles the memory entry (never a
+    // stuck 'running'): the payload turns failed with the reason on it
+    payload = {
+      ok: false,
+      key: k,
+      name: entry.name,
+      mode: isLocal ? 'local' : 'remote',
+      machine,
+      status: 'failed',
+      started_at: startedAt,
+      finished_at: new Date().toISOString(),
+      results,
+      error: String(e?.message ?? e),
+    }
+  } finally {
+    RUN_MEMORY.set(runMemoryKey(project.path, k), {
+      status: payload.status,
+      started_at: startedAt,
+      finished_at: payload.finished_at,
+      mode: payload.mode,
+      machine: payload.machine,
+      key: k,
+      name: payload.name,
+      result: payload,
+    })
   }
-  const status = signal?.aborted === true
-    ? 'aborted'
-    : (results.length > 0 && results.every((x) => x.ok) ? 'done' : 'failed')
-  return {
-    ok: status === 'done',
-    key: k,
-    name: entry.name,
-    mode: isLocal ? 'local' : 'remote',
-    machine,
-    status,
-    started_at: startedAt,
-    finished_at: new Date().toISOString(),
-    results,
-    ...(store.warnings.length ? { warnings: [...store.warnings] } : {}),
-  }
+  return payload
 }
 
 // ---- the list view's per-file metadata ---------------------------------------------
