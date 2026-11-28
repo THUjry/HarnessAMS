@@ -62,12 +62,13 @@ test('apply injects both system prompt sections (fail-open)', async () => {
   assert.equal(policy.order, 5500)
   // the prompt keeps the ask-first/no-fallback/no-raw-ssh safety core only;
   // the operational cadence lives in the project AGENTS.md workflow table
-  // and the batch-sweep skill
+  // and the batch-sweep skill; the raw-shell-ssh leg is stated as enforced
+  // by the pre-execute safety gate
   assert.match(policy.text, /stop and ask the user first/)
   assert.match(policy.text, /never improvise a workaround on your own/)
   assert.match(policy.text, /explicit user approval/)
   assert.match(policy.text, /dsh-ssh tools \(ssh_exec\/ssh_upload\/ssh_download\)/)
-  assert.match(policy.text, /never raw ssh commands from the shell/)
+  assert.match(policy.text, /pre-execute safety rule DENIES any bash\/pwsh command carrying a standalone ssh token/)
   assert.match(policy.text, /prefer the SAS\/HA plugin tools/)
   assert.match(policy.text, /two working environments/, 'the env-dichotomy pointer rides the policy')
   assert.match(policy.text, /cluster_env row of the project.s AGENTS\.md config block/, 'points at the yaml row of the config block')

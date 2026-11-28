@@ -56,6 +56,7 @@ import { reconcileSettings } from './core/reconcile.js'
 import { parseFacts } from './core/agentsmd.js'
 import { getFreshMin, setFreshMin } from './core/globalstore.js'
 import { readCheckParams } from './core/checkparams.js'
+import { registerSafetyGate } from './core/safetyrules.js'
 import { remoteBrowse, remoteMkdir } from './server/remotebrowse.js'
 import { serveAsset, assetsStatus } from './server/assets.js'
 import { mimeFor, resolveReportFile } from './server/dashboard.js'
@@ -91,11 +92,14 @@ export const inject = ['webServer', 'workspaceRegistry', 'tools', 'systemPrompt'
 // operational cadence that used to live here (bounded sleeps, backoff steps,
 // progress-card refresh rates) moved to the project AGENTS.md workflow table
 // and the batch-sweep skill; what stays is the safety core — ask-first on a
-// broken chain, no improvised fallbacks, dsh-ssh tools only, never raw shell
-// ssh — plus the pointer to the project config block. Static text, registered
-// once at plugin load, so the KV prefix stays stable. Prose, not bullets: the
-// assembled host prompt is plain paragraphs.
-export const REMOTE_WAIT_POLICY = 'HarnessAMS execution safety rules: if the standard chain cannot proceed (repeated tool failures, stuck run, missing capability), stop and ask the user first — never improvise a workaround on your own; any improvised fallback requires explicit user approval and must still go through the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download), never raw ssh commands from the shell; prefer the SAS/HA plugin tools for every simulation step. Projects run in one of two working environments (cluster_env): read the cluster_env row of the project\'s AGENTS.md config block before choosing scheduler="local"/"ssh"/"lsf". Operational cadence (poll intervals, backoff) lives in that block\'s workflow table, not here.'
+// broken chain, no improvised fallbacks, dsh-ssh tools only — plus the pointer
+// to the project config block. The raw-shell-ssh leg is now ENFORCED, not
+// just instructed: the pre-execute safety gate (src/core/safetyrules.js)
+// denies any bash/pwsh command carrying a standalone ssh token, so the text
+// states it as a hard fact. Static text, registered once at plugin load, so
+// the KV prefix stays stable. Prose, not bullets: the assembled host prompt
+// is plain paragraphs.
+export const REMOTE_WAIT_POLICY = 'HarnessAMS execution safety rules: if the standard chain cannot proceed (repeated tool failures, stuck run, missing capability), stop and ask the user first — never improvise a workaround on your own; any improvised fallback requires explicit user approval and must still go through the dsh-ssh tools (ssh_exec/ssh_upload/ssh_download). Raw ssh from the shell is not merely discouraged — a pre-execute safety rule DENIES any bash/pwsh command carrying a standalone ssh token (in any position or nesting), so attempting it or a rephrased variant just returns a tool error; prefer the SAS/HA plugin tools for every simulation step. Projects run in one of two working environments (cluster_env): read the cluster_env row of the project\'s AGENTS.md config block before choosing scheduler="local"/"ssh"/"lsf". Operational cadence (poll intervals, backoff) lives in that block\'s workflow table, not here.'
 
 // Model-source discipline (2026-11-23, the schematic round-trip wave): the agent
 // never reads PDK/model-library files; model sections and simulator setup come
@@ -126,6 +130,13 @@ export function apply(ctx) {
     if (ctx.logger?.info) ctx.logger.info('[harnessams] registered %d tools', names.size)
     else console.log('[harnessams] registered', names.size, 'tools')
   }, 'harnessams tools')
+  ctx.effect(() => {
+    // always-on red lines on the tool waterfall (src/core/safetyrules.js):
+    // raw shell ssh from bash/pwsh, PDK strings in read/ssh_download
+    if (ctx.logger?.info) ctx.logger.info('[harnessams] safety gate active (bash/pwsh ssh, PDK reads/downloads)')
+    else console.log('[harnessams] safety gate active')
+    return registerSafetyGate(ctx)
+  }, 'harnessams safety gate')
   ctx.effect(() => {
     // belt-and-braces: inject declares the service, but a hand-rolled embed
     // without it still loads the rest of the plugin
