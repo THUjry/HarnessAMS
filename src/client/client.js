@@ -828,13 +828,18 @@ window.__ModuleLoader__.load({
 .hams-setrow-title { font-size: calc(14px + var(--dsh-content-font-delta, 0px)); font-weight: 400; line-height: 1.45; }
 .hams-setrow-ctl { flex: none; display: inline-flex; align-items: center; gap: 8px; }
 /* switch: fixed 36x20 control metric (the spec's fixed-size exemption covers
-   controls like the SVG icons — only font sizes are formula-bound) */
+   controls like the SVG icons — only font sizes are formula-bound).
+   corner-shape: the host styles everything as a superellipse(1.5) squircle;
+   the official switch overrides it back to superellipse(1) (the classic
+   circular arc — fully round ends). Without the override our pill inherits
+   the 1.5 squircle and reads as a rounded rectangle next to the official one. */
 .hams-switch { box-sizing: border-box; position: relative; flex: 0 0 auto; width: 36px; height: 20px; padding: 2px;
-  border: 0; border-radius: 999px; cursor: pointer; background: var(--dsw-alias-border-l3, color-mix(in srgb, currentColor 22%, transparent)); }
+  border: 0; border-radius: 999px; corner-shape: superellipse(1); cursor: pointer;
+  background: var(--dsw-alias-border-l3, color-mix(in srgb, currentColor 22%, transparent)); }
 .hams-switch[aria-checked="true"] { background: var(--dsw-alias-brand-primary, light-dark(rgb(15, 17, 21), rgb(249, 250, 251))); }
 .hams-switch:disabled { cursor: default; opacity: .5; }
 .hams-switch:focus-visible { outline: 2px solid var(--dsw-alias-state-business-primary, light-dark(rgb(65, 118, 230), rgb(122, 170, 255))); outline-offset: 2px; }
-.hams-switch-thumb { display: block; width: 16px; height: 16px; border-radius: 50%; pointer-events: none;
+.hams-switch-thumb { display: block; width: 16px; height: 16px; border-radius: 50%; corner-shape: superellipse(1); pointer-events: none;
   background: var(--dsw-alias-switch-thumb, light-dark(rgb(255, 255, 255), rgb(173, 178, 184)));
   transition: transform .12s ease; }
 .hams-switch[aria-checked="true"] .hams-switch-thumb { transform: translateX(16px);
