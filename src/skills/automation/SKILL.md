@@ -1,12 +1,13 @@
 ---
 name: automation
 description: >
-  The workspace automation task list: purpose (one-click repeatable remote
-  chores without an agent), the two .harnessams artifacts (automation.json
-  task store + automation/ shared .txt command library), the workflow
-  (config_automation add/update/delete, the manual sidebar Run button,
-  run_automation as the agent run/verify face) and the execution contract
-  (sequential ssh_exec on the project's machine_id, 120 s per command).
+  The workspace automation task list: one-click repeatable chores without
+  an agent, the two .harnessams artifacts (task store + shared .txt
+  command library), the workflow (config_automation add/update/delete,
+  the sidebar Run button, run_automation the agent run face) and the
+  execution contract (mode picks the channel: remote = ssh_exec on the
+  project's machine_id, 120 s per command; local = one registered-tool
+  call per line).
   Trigger on creating, editing, running or debugging an automation task.
 ---
 
@@ -31,8 +32,19 @@ The automation key is minted at creation: the creating session's id (a delegated
 
 ## The execution contract (supported features)
 
-Stateless: no in-memory registry, no run records. Each run reads the entry, then reads each command file from disk at run time (CRLF folds to LF so a stray Windows editor cannot break the remote sh -c; storage itself stays verbatim). Commands execute SEQUENTIALLY through the ssh_exec funnel on the project's `machine_id` (the settings table's dsh-ssh host alias; configure it in the project settings before running), one command at a time, 120 s per command (exit 137 is the deadline, not a failure). A failure does not stop the rest: every command reports independently and the overall status just fails. stdout/stderr are capped at 20000 characters each in the result. An abort races the ssh call (KILL + channel close, best-effort): an aborted remote command may orphan, and the result reports the remote state as UNCERTAIN, never as a clean failure.
+Stateless: no in-memory registry, no run records. Each run reads the entry, then reads each command file from disk at run time (CRLF folds to LF so a stray Windows editor cannot break the remote sh -c; storage itself stays verbatim). Commands execute SEQUENTIALLY, one at a time; a failure does not stop the rest: every command reports independently and the overall status just fails.
 
-The result payload: per-command `ok` / `exitCode` / `stdout` / `stderr` (plus `timed_out` / `aborted` / `error` where they apply), the overall `status` (done / failed / aborted), `machine`, `started_at` / `finished_at`, and the store's warnings if any. Post-run behavior is a reserved seam: the payload is the extension point, nothing acts on it beyond the caller's echo yet.
+The task's `mode` picks the channel:
+
+- **remote** (the default): each command file runs as a shell script through the ssh_exec funnel on the project's `machine_id` (the settings table's dsh-ssh host alias; configure it in the project settings before running), 120 s per command (exit 137 is the deadline, not a failure). stdout/stderr are capped at 20000 characters each in the result.
+- **local**: each non-comment line of the file is ONE tool call, `toolName {json-args}`, dispatched through the registered tool face on this host with no ssh wrapper; any registered tool works, dsh-ssh's `ssh_exec` included. A tool declaring a `project` parameter gets the running task's project path injected (a value the line's json provides wins). A bad line (unknown tool, invalid json, a failed call) fails that line independently; its result row carries `tool` / `line` / `text` instead of the remote `exitCode` / `stdout` / `stderr`.
+
+An abort races every call (the remote channel kills best-effort): an aborted remote command may orphan and an aborted local call's effect is uncertain; the result reports the state as UNCERTAIN, never as a clean failure.
+
+The result payload: per-command `ok` / `exitCode` / `stdout` / `stderr` for remote tasks or the per-line `tool` / `line` / `text` rows for local ones (plus `timed_out` / `aborted` / `error` where they apply), the overall `status` (done / failed / aborted), `machine`, `started_at` / `finished_at`, and the store's warnings if any. Post-run behavior is a reserved seam: the payload is the extension point, nothing acts on it beyond the caller's echo yet.
+
+**Command files over 50 lines warn.** The config result, the run result and the sidebar list all flag an oversized command file, and the warning points at this skill. The reason is ssh bandwidth: heavy content (long rule lists, waived-DRC inventories, big path manifests) should be uploaded to the server first and referenced by path from the script, so the command file stays small and the channel carries paths, not payloads.
+
+**A fresh project ships one demo task.** `POST /api/project-init` seeds one local task (Empty project trash: it empties the project's trash through safe_trash's `empty` action) when the project has no automation.json; delete it freely, a deleted task never resurrects. The sidebar list's per-row Delete (behind a confirm dialog) removes an entry the same way `config_automation` delete does: the entry goes, the shared `.txt` files stay.
 
 Limits: name at most 80 chars; description at most 2000 chars; at most 64 commands per task; each command file's content at most 100000 chars; the file name at most 84 chars and matching the printable-ASCII `.txt` shape.
