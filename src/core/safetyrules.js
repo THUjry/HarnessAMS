@@ -25,6 +25,7 @@
 // (covered by tests/safetyrules.test.mjs)
 
 const SSH_TOKEN = /(^|[^A-Za-z0-9_.-])ssh(\s|["']|$)/
+const PDK_TOKEN = /pdk/i
 
 export const SSH_DENY_REASON =
   'HarnessAMS safety gate: raw shell ssh is denied. The dsh-ssh tools ' +
@@ -39,25 +40,29 @@ export const PDK_DENY_REASON =
   'or download PDK files; reuse the include lines already present in existing ' +
   'simulation logs, or ask the user for the model info you need.'
 
-function containsPdk(value) {
-  return typeof value === 'string' && value.toLowerCase().includes('pdk')
-}
+// One row per watched field: a rule names the tool, the argument field it
+// watches, the pattern a red-line value must carry, and the deny reason.
+// ssh_download watches two fields, so it gets two rows. Adding a red line
+// is adding a row — decideSafety is the single generic loop that reads it.
+const RULES = [
+  { tool: 'bash',         field: 'command',    pattern: SSH_TOKEN, reason: SSH_DENY_REASON },
+  { tool: 'pwsh',         field: 'command',    pattern: SSH_TOKEN, reason: SSH_DENY_REASON },
+  { tool: 'read',         field: 'file_path',  pattern: PDK_TOKEN, reason: PDK_DENY_REASON },
+  { tool: 'ssh_download', field: 'remotePath', pattern: PDK_TOKEN, reason: PDK_DENY_REASON },
+  { tool: 'ssh_download', field: 'localPath',  pattern: PDK_TOKEN, reason: PDK_DENY_REASON },
+]
 
 // Pure decision for one pending tool call: { kind: 'deny', reason } when a
 // red line matches, null otherwise. exec.arguments can be undefined (a
 // missing or failed argument snapshot) — that is a no-match, never a throw.
 export function decideSafety(exec) {
-  if (!exec || typeof exec !== 'object') return null
-  const args = exec.arguments
+  const args = exec?.arguments
   if (args === undefined || args === null || typeof args !== 'object') return null
-  if (exec.name === 'bash' || exec.name === 'pwsh') {
-    const command = typeof args.command === 'string' ? args.command : ''
-    if (SSH_TOKEN.test(command)) return { kind: 'deny', reason: SSH_DENY_REASON }
-  } else if (exec.name === 'read') {
-    if (containsPdk(args.file_path)) return { kind: 'deny', reason: PDK_DENY_REASON }
-  } else if (exec.name === 'ssh_download') {
-    if (containsPdk(args.remotePath) || containsPdk(args.localPath)) {
-      return { kind: 'deny', reason: PDK_DENY_REASON }
+  for (const { tool, field, pattern, reason } of RULES) {
+    if (exec.name !== tool) continue
+    const value = args[field]
+    if (typeof value === 'string' && pattern.test(value)) {
+      return { kind: 'deny', reason }
     }
   }
   return null
