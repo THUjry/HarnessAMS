@@ -6,7 +6,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { tmpdir } from 'node:os'
-import { listTrash, purgeEntry, restoreEntry, trashPaths } from '../src/tools/trash.js'
+import { listTrash, purgeEntry, restoreEntry, trashPaths, emptyTrash } from '../src/tools/trash.js'
 
 const sandbox = () => fs.mkdtempSync(path.join(tmpdir(), 'hams-trash-'))
 
@@ -91,6 +91,38 @@ test('trash: purge removes one entry; trash refuses missing paths and the trash 
     fs.writeFileSync(path.join(trash, 'inner.txt'), 'x')
     assert.throws(() => trashPaths([path.join(trash, 'inner.txt')], { trashDir: trash }),
       { message: /refusing to trash the trash/ })
+  } finally {
+    fs.rmSync(box, { recursive: true, force: true })
+  }
+})
+
+test('trash: empty purges every entry independently; a missing root is the empty normal', () => {
+  const box = sandbox()
+  try {
+    const trash = path.join(box, '.trash')
+    assert.deepEqual(emptyTrash({ trashDir: trash }), { lines: [], failures: [] },
+      'a missing trash root is already empty')
+    fs.mkdirSync(trash, { recursive: true })
+    for (const name of ['20260109_000000_a', '20260109_000001_b']) {
+      fs.mkdirSync(path.join(trash, name))
+      fs.writeFileSync(path.join(trash, name, 'x.txt'), 'payload')
+    }
+    const r = emptyTrash({ trashDir: trash })
+    assert.equal(r.lines.length, 2)
+    assert.deepEqual(r.failures, [])
+    assert.equal(listTrash({ trashDir: trash }).length, 0)
+    // a stuck entry fails alone, the rest still purge
+    fs.mkdirSync(path.join(trash, '20260109_000002_c'))
+    const real = fs.realpathSync
+    const boom = new Error('fenced resolve exploded')
+    fs.realpathSync = () => { throw boom }
+    try {
+      const partial = emptyTrash({ trashDir: trash })
+      assert.deepEqual(partial.lines, [])
+      assert.equal(partial.failures.length, 1)
+    } finally {
+      fs.realpathSync = real
+    }
   } finally {
     fs.rmSync(box, { recursive: true, force: true })
   }

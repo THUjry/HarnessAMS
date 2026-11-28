@@ -1,5 +1,5 @@
 // Workspace trash (safety by default): deletion never destroys. Two sharp edges
-// are fenced: restore/purge resolve the entry name strictly inside the trash
+// are fenced: restore/purge/empty resolve entry names strictly inside the trash
 // root (a ../ name would escape — and purge is a recursive delete), and every
 // entry is a DIRECTORY holding the item plus .trash_meta.json, so trashing a
 // plain file cannot break meta writing. Flat one-file entries without meta
@@ -160,14 +160,34 @@ export function restoreEntry(name, destDir = '.', opts = {}) {
   return `restored -> ${target}`
 }
 
-// Really destroy one entry (explicit; there is no purge-all). resolveEntry
-// fences the recursive delete inside the trash root.
+// Really destroy one entry (explicit — the single-entry face of empty).
+// resolveEntry fences the recursive delete inside the trash root.
 export function purgeEntry(name, opts = {}) {
   const trash = rootOf(opts)
   if (!fs.existsSync(trash)) throw new Error(`no such trash entry: ${name}`)
   const entry = resolveEntry(trash, name)
   fs.rmSync(entry, { recursive: true, force: true })
   return `purged ${name}`
+}
+
+// Empty the whole trash root: purge every entry, one fenced resolveEntry per
+// name, each reported independently (an unfenceable entry fails alone, the
+// rest still go). A missing root is the trivially-empty normal.
+export function emptyTrash(opts = {}) {
+  const trash = rootOf(opts)
+  if (!fs.existsSync(trash)) return { lines: [], failures: [] }
+  const lines = []
+  const failures = []
+  for (const name of fs.readdirSync(trash).sort()) {
+    try {
+      const entry = resolveEntry(trash, name)
+      fs.rmSync(entry, { recursive: true, force: true })
+      lines.push(`purged ${name}`)
+    } catch (e) {
+      failures.push(`${name}: ${String(e?.message ?? e)}`)
+    }
+  }
+  return { lines, failures }
 }
 
 // Model-facing safe_trash tool (the definition lives beside the mechanics it
@@ -178,12 +198,12 @@ export function safeTrashTool(ctx) {
   return {
     name: 'safe_trash',
     description: 'Project trash (safety by default): move paths into the owning project\'s '
-      + '.harnessams/trash instead of deleting, then list, restore, or explicitly purge an entry '
-      + '(restore/purge take an entry name exactly as list reports it; names are fenced inside the '
-      + 'trash directory).',
+      + '.harnessams/trash instead of deleting, then list, restore, explicitly purge an entry, '
+      + 'or empty the whole trash (restore/purge take an entry name exactly as list reports it; '
+      + 'names are fenced inside the trash directory).',
     parameters: {
-      action: { type: 'string', required: true, enum: ['trash', 'list', 'restore', 'purge'],
-        description: 'trash | list | restore | purge' },
+      action: { type: 'string', required: true, enum: ['trash', 'list', 'restore', 'purge', 'empty'],
+        description: 'trash | list | restore | purge | empty' },
       path: { type: 'string', description: 'trash: path to move; restore/purge: trash entry name (from list)' },
       dest: { type: 'string', description: 'restore destination directory' },
       project: { type: 'string', description: 'Optional explicit workspace path (default: the calling session\'s workspace)' },
@@ -198,6 +218,16 @@ export function safeTrashTool(ctx) {
       if (args.action === 'list') {
         const entries = listTrash(opts)
         return { ok: true, entries, output: JSON.stringify(entries, null, 2) }
+      }
+      if (args.action === 'empty') {
+        const { lines, failures } = emptyTrash(opts)
+        if (failures.length) {
+          return { ok: false, error: `emptied ${lines.length} entries; failures:\n${failures.join('\n')}` }
+        }
+        const output = lines.length
+          ? `emptied ${lines.length} entries from ${opts.trashDir}:\n${lines.join('\n')}`
+          : 'trash is already empty'
+        return { ok: true, purged: lines.length, output }
       }
       if (args.action === 'restore') {
         if (!args.path) return { ok: false, error: 'restore requires path=<trash entry name from list>' }
