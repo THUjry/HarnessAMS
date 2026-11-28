@@ -13,8 +13,8 @@ import { bundledSkills, readSkillManifest, registerSkills } from '../src/skills.
 test('skills: the packaged skills register with catalog metadata and a directory resourceBase', () => {
   const reg = []
   const names = registerSkills({ skills: { register: (s) => reg.push(s) } })
-  assert.deepEqual(names, ['batch-sweep', 'cluster-setup', 'dca-cascade-analysis', 'dca-cell-design'])
-  assert.equal(reg.length, 4)
+  assert.deepEqual(names, ['automation', 'batch-sweep', 'cluster-setup', 'dca-cascade-analysis', 'dca-cell-design'])
+  assert.equal(reg.length, 5)
   for (const s of reg) {
     assert.match(s.name, /^[a-z0-9]+(?:-[a-z0-9]+)*$/) // the kebab-case grammar
     assert.ok(s.description.length > 20 && s.description.length <= 500,
@@ -25,6 +25,24 @@ test('skills: the packaged skills register with catalog metadata and a directory
     assert.ok(!s.content.startsWith('---'), 'frontmatter is stripped from the body')
     assert.ok(s.content.length > 1000, 'body is substantial')
   }
+})
+
+test('skills: automation documents the task store, the shared command library and the run contract', () => {
+  const s = bundledSkills().find((x) => x.name === 'automation')
+  assert.ok(s && !s.error, s?.error ?? 'automation missing')
+  const { description, content } = s.manifest
+  assert.match(description, /automation/i)
+  // the two artifacts, the CRUD/run tool faces and the execution semantics
+  for (const needle of [
+    '.harnessams/automation.json', '.harnessams/automation/',
+    'config_automation', 'run_automation', 'safe_trash',
+    'ssh_exec', 'machine_id', '120 s per command',
+    'Run button', 'POST /api/automation/run',
+    'yymmddhhmmss', 'KEEPS its command files',
+  ]) {
+    assert.ok(content.includes(needle), `automation lost "${needle}"`)
+  }
+  assert.ok(/^[\x00-\x7F]*$/.test(content), 'ASCII-only skill body')
 })
 
 test('skills: cluster-setup is harvest, verify, pin: read-only, through ssh_exec, no path to guess', () => {
